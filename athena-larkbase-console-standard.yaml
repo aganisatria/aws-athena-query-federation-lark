@@ -1,0 +1,373 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for Lark Base Athena Connector and Glue Crawler (for Application Composer)
+Parameters:
+  SpillBucket:
+    Type: String
+    Description: S3 bucket name for Athena query spilling. Connector Lambda needs read/write access.
+  SpillPrefix:
+    Type: String
+    Default: athena-spill
+    Description: S3 prefix for Athena query spilling.
+  ConnectorCodeS3Bucket:
+    Type: String
+    Description: S3 bucket containing the Athena connector JAR file.
+  ConnectorCodeS3Key:
+    Type: String
+    Description: S3 key (path) to the Athena connector JAR file.
+  CrawlerCodeS3Bucket:
+    Type: String
+    Description: S3 bucket containing the Glue crawler JAR file.
+  CrawlerCodeS3Key:
+    Type: String
+    Description: S3 key (path) to the Glue crawler JAR file.
+  LarkPageSize:
+    Type: Number
+    Default: 500
+    Description: Page size for Lark API calls from connector.
+  ActivateLarkBaseSource:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Activate direct Lark Base table discovery via environment mapping in connector.
+  ActivateParallelSplit:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Activate parallel split for Lark Base source in connector.
+  LarkBaseSources:
+    Type: String
+    Default: ''
+    Description: 'Lark Base sources to be activated in the connector. Format: "larkBaseId1:larkBaseTableId1,larkBaseId2:larkBaseTableId2"'
+  ActivateLarkDriveSource:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Activate Lark Drive source in connector (if implemented).
+  LarkDriveSources:
+    Type: String
+    Default: ''
+    Description: 'Lark Drive sources to be activated in the connector. Format: "larkDrivePageToken1,larkDrivePageToken2"'
+  ActivateExperimentalFeature:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Activate experimental features in connector.
+  LambdaTimeout:
+    Description: Maximum Lambda invocation runtime in seconds. (min 1 - 900 max)
+    Default: 900
+    Type: Number
+  LambdaMemory:
+    Description: Lambda memory in MB (min 128 - 3008 max).
+    Default: 3008
+    Type: Number
+  LambdaAthenaConnectorRole:
+    Description: (Optional) A custom role to be used by the Athena Connector lambda
+    Type: String
+    Default: ''
+  LambdaLarkBaseCrawlerRole:
+    Description: (Optional) A custom role to be used by the Lark Base Crawler lambda
+    Type: String
+    Default: ''
+  DisableSpillEncryption:
+    Description: 'WARNING: If set to ''true'' encryption for spilled data is disabled.'
+    Default: 'false'
+    Type: String
+  KMSKeyId:
+    Description: (Optional) By default any data that is spilled to S3 is encrypted using AES-GCM and a randomly generated key. Setting a KMS Key ID allows your Lambda function to use KMS for key generation for a stronger source of encryption keys.
+    Type: String
+    Default: ''
+  PermissionsBoundaryARNLambdaAthenaConnector:
+    Description: (Optional) An IAM policy ARN to use as the PermissionsBoundary for the created Lambda Athena Connector role.
+    Default: ''
+    Type: String
+  PermissionsBoundaryARNLambdaLarkBaseCrawler:
+    Description: (Optional) An IAM policy ARN to use as the PermissionsBoundary for the created Lambda Lark Base Crawler role.
+    Default: ''
+    Type: String
+  LarkAppSecretManager:
+    Description: (Optional) The Name of the Lark Application ID secret in Secrets Manager. If not provided, a new secret will be created.
+    Type: String
+    Default: ''
+Conditions:
+  HasKMSKeyId: !Not
+    - !Equals
+      - !Ref KMSKeyId
+      - ''
+  NotHasLambdaAthenaConnectorRole: !Equals
+    - !Ref LambdaAthenaConnectorRole
+    - ''
+  NotHasLambdaLarkBaseCrawlerRole: !Equals
+    - !Ref LambdaLarkBaseCrawlerRole
+    - ''
+  HasPermissionsBoundaryAthenaConnector: !Not
+    - !Equals
+      - !Ref PermissionsBoundaryARNLambdaAthenaConnector
+      - ''
+  HasPermissionsBoundaryLarkBaseCrawler: !Not
+    - !Equals
+      - !Ref PermissionsBoundaryARNLambdaLarkBaseCrawler
+      - ''
+  CreateKMSPolicy: !And
+    - !Condition HasKMSKeyId
+    - !Condition NotHasLambdaAthenaConnectorRole
+  NotHasLarkAppSecretManager: !Equals
+    - !Ref LarkAppSecretManager
+    - ''
+  IsRegionBAH: !Equals
+    - !Ref AWS::Region
+    - me-south-1
+  IsRegionHKG: !Equals
+    - !Ref AWS::Region
+    - ap-east-1
+Resources:
+  LarkApp:
+    Condition: NotHasLarkAppSecretManager
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Secret containing the Lark Application ID and Secret.
+      Name: !Sub ${AWS::StackName}-LarkAppSecretManager
+  AthenaConnectorRole:
+    Condition: NotHasLambdaAthenaConnectorRole
+    Type: AWS::IAM::Role
+    Properties:
+      PermissionsBoundary: !If
+        - HasPermissionsBoundaryAthenaConnector
+        - !Ref PermissionsBoundaryARNLambdaAthenaConnector
+        - !Ref AWS::NoValue
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AthenaConnectorPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !If
+                    - NotHasLarkAppSecretManager
+                    - !Ref LarkApp
+                    - !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${LarkAppSecretManager}-*
+              - Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetTable
+                  - glue:GetTables
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::${SpillBucket}
+                  - !Sub arn:${AWS::Partition}:s3:::${SpillBucket}/*
+              - Effect: Allow
+                Action:
+                  - athena:GetQueryExecution
+                Resource: '*'
+  CrawlerLambdaRole:
+    Condition: NotHasLambdaLarkBaseCrawlerRole
+    Type: AWS::IAM::Role
+    Properties:
+      PermissionsBoundary: !If
+        - HasPermissionsBoundaryLarkBaseCrawler
+        - !Ref PermissionsBoundaryARNLambdaLarkBaseCrawler
+        - !Ref AWS::NoValue
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CrawlerLambdaPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !If
+                    - NotHasLarkAppSecretManager
+                    - !Ref LarkApp
+                    - !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${LarkAppSecretManager}-*
+              - Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:CreateTable
+                  - glue:UpdateTable
+                  - glue:CreateDatabase
+                  - glue:UpdateDatabase
+                  - glue:BatchCreatePartition
+                  - glue:BatchUpdatePartition
+                  - glue:DeleteTable
+                  - glue:DeletePartition
+                  - glue:BatchDeleteTable
+                  - glue:BatchDeletePartition
+                Resource: '*'
+  LarkBaseAthenaFederationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-AthenaConnector
+      Handler: com.amazonaws.athena.connectors.lark.base.BaseCompositeHandler
+      Description: Athena Connector for Lark Base
+      Runtime: java17
+      MemorySize: !Ref LambdaMemory
+      Timeout: !Ref LambdaTimeout
+      Role: !If
+        - NotHasLambdaAthenaConnectorRole
+        - !GetAtt AthenaConnectorRole.Arn
+        - !Ref LambdaAthenaConnectorRole
+      Code:
+        S3Bucket: !Ref ConnectorCodeS3Bucket
+        S3Key: !Ref ConnectorCodeS3Key
+      Environment:
+        Variables:
+          spill_bucket: !Ref SpillBucket
+          spill_prefix: !Ref SpillPrefix
+          default_secret_manager_lark_app_key: !If
+            - NotHasLarkAppSecretManager
+            - !Sub ${AWS::StackName}-LarkAppSecretManager
+            - !Ref LarkAppSecretManager
+          default_page_size: !Ref LarkPageSize
+          default_does_activate_lark_base_source: !Ref ActivateLarkBaseSource
+          default_does_activate_lark_drive_source: !Ref ActivateLarkDriveSource
+          default_does_activate_experimental_feature: !Ref ActivateExperimentalFeature
+          default_does_activate_parallel_split: !Ref ActivateParallelSplit
+          default_lark_base_sources: !Ref LarkBaseSources
+          default_lark_drive_sources: !Ref LarkDriveSources
+          kms_key_id: !If
+            - HasKMSKeyId
+            - !Ref KMSKeyId
+            - !Ref AWS::NoValue
+          JAVA_TOOL_OPTIONS: '--add-opens=java.base/java.nio=ALL-UNNAMED' #https://arrow.apache.org/docs/java/install.html
+          disable_spill_encryption: !Ref DisableSpillEncryption
+  LarkBaseCrawlerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-CrawlerFunction
+      Handler: com.amazonaws.glue.lark.base.crawler.MainLarkBaseCrawlerHandler
+      Description: Glue Crawler for Lark Base
+      Runtime: java17
+      MemorySize: !Ref LambdaMemory
+      Timeout: !Ref LambdaTimeout
+      Role: !If
+        - NotHasLambdaAthenaConnectorRole
+        - !GetAtt AthenaConnectorRole.Arn
+        - !Ref CrawlerLambdaRole
+      Code:
+        S3Bucket: !Ref CrawlerCodeS3Bucket
+        S3Key: !Ref CrawlerCodeS3Key
+      Environment:
+        Variables:
+          default_secret_manager_lark_app_key: !If
+            - NotHasLarkAppSecretManager
+            - !Sub ${AWS::StackName}-LarkAppSecretManager
+            - !Ref LarkAppSecretManager
+  DataCatalog:
+    Type: AWS::Athena::DataCatalog
+    Properties:
+      Name: !Ref LarkBaseAthenaFederationFunction
+      Type: LAMBDA
+      Description: Athena Data Catalog for Lark Base Connector
+      Parameters:
+        function: !GetAtt LarkBaseAthenaFederationFunction.Arn
+  FunctionKMSPolicy:
+    Condition: CreateKMSPolicy
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: FunctionKMSPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - kms:GenerateRandom
+            Effect: Allow
+            Resource: '*'
+          - Action:
+              - kms:GenerateDataKey
+            Effect: Allow
+            Resource: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/${KMSKeyId}
+      Roles:
+        - !Ref AthenaConnectorRole
+        - !Ref CrawlerLambdaRole
+Metadata:
+  AWS::Composer::Groups:
+    Secrets:
+      Label: Lark Credentials
+      Members:
+        - LarkApp
+    Connector:
+      Label: Athena Connector
+      Members:
+        - AthenaConnectorRole
+        - DataCatalog
+        - FunctionKMSPolicy
+    Crawler:
+      Label: Glue Crawler
+      Members:
+        - CrawlerLambdaRole
+        - FunctionKMSPolicy
+Outputs:
+  AthenaCatalogName:
+    Description: Name of the Athena Data Catalog (same as Connector Lambda Function Name)
+    Value: !Ref LarkBaseAthenaFederationFunction
+  ConnectorLambdaArn:
+    Description: ARN of the Athena Connector Lambda function
+    Value: !GetAtt LarkBaseAthenaFederationFunction.Arn
+  CrawlerLambdaArn:
+    Description: ARN of the Glue Crawler Lambda function
+    Value: !GetAtt LarkBaseCrawlerFunction.Arn
+  ConnectorRoleArn:
+    Description: ARN of the IAM Role for the Athena Connector Lambda
+    Value: !If
+      - NotHasLambdaAthenaConnectorRole
+      - !GetAtt AthenaConnectorRole.Arn
+      - !Ref LambdaAthenaConnectorRole
+  CrawlerLambdaRoleArn:
+    Description: ARN of the IAM Role for the Glue Crawler Lambda
+    Value: !If
+      - NotHasLambdaLarkBaseCrawlerRole
+      - !GetAtt CrawlerLambdaRole.Arn
+      - !Ref LambdaLarkBaseCrawlerRole
+  LarkAppSecretArn:
+    Description: ARN of the Lark Application ID secret
+    Value: !Ref LarkApp
+    Condition: NotHasLarkAppSecretManager
+  FunctionKMSPolicyArn:
+    Condition: CreateKMSPolicy
+    Description: ARN of the KMS policy for the Lambda functions
+    Value: !GetAtt FunctionKMSPolicy.Arn
