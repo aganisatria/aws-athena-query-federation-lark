@@ -103,11 +103,12 @@ public final class ConstraintTranslator {
         if (rangeSet.isSingleValue()) {
             Object value = rangeSet.getSingleValue();
             if (value == null) {
-                if (fieldUiType != UITypeEnum.CHECKBOX) {
+                if (fieldUiType == UITypeEnum.CHECKBOX) {
+                    logger.info("Translating single value null (IS NULL) for Checkbox column '{}' to FQL: {} = 0", column, columnExpr);
+                    builder.append(String.format("%s%s%s", columnExpr, LARK_OPERATOR_EQ, "0"));
+                } else {
                     logger.info("Translating single value null (IS NULL) to FQL: {} = \"\"", columnExpr);
                     builder.append(String.format("%s%s%s", columnExpr, LARK_OPERATOR_EQ, LARK_EMPTY_STRING));
-                } else {
-                    logger.warn("IS NULL constraint (single value) for CHECKBOX field '{}' is not pushed down.", column);
                 }
             } else {
                 Object convertedValue = convertValueIfNeeded(value, fieldUiType);
@@ -154,15 +155,15 @@ public final class ConstraintTranslator {
             }
 
             if (isEffectivelyIsNotNull) {
-                if (fieldUiType != UITypeEnum.CHECKBOX) {
+                if (fieldUiType == UITypeEnum.CHECKBOX) {
+                    logger.info("Translating IS NOT NULL for Checkbox column '{}' to FQL: {} = 1", column, columnExpr);
+                    builder.append(String.format("%s%s%s", columnExpr, LARK_OPERATOR_EQ, "1"));
+                } else {
                     logger.info("Translating SortedRangeSet (nullAllowed=false, effectively unbounded/IS NOT NULL) to FQL (NOT({}=\"\")) for column: {}", columnExpr, column);
                     builder.append(String.format("NOT(%s%s%s)",
                             columnExpr, LARK_OPERATOR_EQ, LARK_EMPTY_STRING));
-                    return;
-                } else {
-                    logger.warn("IS NOT NULL constraint for CHECKBOX field '{}' (via SortedRangeSet) is not pushed down with simple NOT({}=\"\").", column);
-                    return;
                 }
+                return;
             }
         }
 
