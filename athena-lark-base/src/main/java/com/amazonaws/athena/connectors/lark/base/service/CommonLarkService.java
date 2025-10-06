@@ -22,10 +22,10 @@ package com.amazonaws.athena.connectors.lark.base.service;
 import com.amazonaws.athena.connectors.lark.base.model.request.TenantAccessTokenRequest;
 import com.amazonaws.athena.connectors.lark.base.model.response.TenantAccessTokenResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.util.EntityUtils;
 
@@ -35,12 +35,18 @@ public class CommonLarkService {
     protected static final String LARK_API_BASE_URL = "https://open.larksuite.com/open-apis";
     protected static final String LARK_AUTH_URL = LARK_API_BASE_URL + "/auth";
 
+    // HTTP header constants
+    protected static final String HEADER_AUTHORIZATION = "Authorization";
+    protected static final String HEADER_CONTENT_TYPE = "Content-Type";
+    protected static final String CONTENT_TYPE_JSON = "application/json";
+    protected static final String AUTH_BEARER_PREFIX = "Bearer ";
+
     protected String tenantAccessToken;
     protected long tokenExpiry;
 
     private final String larkAppId;
     private final String larkAppSecret;
-    protected HttpClient httpClient;
+    protected CloseableHttpClient httpClient;
     protected ObjectMapper objectMapper = new ObjectMapper();
 
     public CommonLarkService(String larkAppId, String larkAppSecret) {
@@ -62,7 +68,7 @@ public class CommonLarkService {
         }
 
         HttpPost request = new HttpPost(LARK_AUTH_URL + "/v3/tenant_access_token/internal");
-        request.setHeader("Content-Type", "application/json");
+        request.setHeader(HEADER_CONTENT_TYPE, CONTENT_TYPE_JSON);
 
         TenantAccessTokenRequest tokenRequest = new TenantAccessTokenRequest(larkAppId, larkAppSecret);
         String requestBody = objectMapper.writeValueAsString(tokenRequest);
@@ -71,20 +77,22 @@ public class CommonLarkService {
         if (httpClient == null) {
             throw new IllegalStateException("HTTP client not yet initialized");
         }
-        HttpResponse response = httpClient.execute(request);
-        String responseBody = EntityUtils.toString(response.getEntity());
-        TenantAccessTokenResponse tokenResponse = objectMapper.readValue(responseBody, TenantAccessTokenResponse.class);
 
-        if (tokenResponse.code() == 0 && tokenResponse.tenantAccessToken() != null
-                && !tokenResponse.tenantAccessToken().isEmpty()) {
-            tenantAccessToken = tokenResponse.tenantAccessToken();
-            tokenExpiry = System.currentTimeMillis() + (tokenResponse.expire() * 1000L);
-            return;
+        try (CloseableHttpResponse response = httpClient.execute(request)) {
+            String responseBody = EntityUtils.toString(response.getEntity());
+            TenantAccessTokenResponse tokenResponse = objectMapper.readValue(responseBody, TenantAccessTokenResponse.class);
+
+            if (tokenResponse.code() == 0 && tokenResponse.tenantAccessToken() != null
+                    && !tokenResponse.tenantAccessToken().isEmpty()) {
+                tenantAccessToken = tokenResponse.tenantAccessToken();
+                tokenExpiry = System.currentTimeMillis() + (tokenResponse.expire() * 1000L);
+                return;
+            }
+
+            tenantAccessToken = null;
+            tokenExpiry = 0;
+
+            throw new IOException("Failed to obtain Lark access token: " + tokenResponse.msg());
         }
-
-        tenantAccessToken = null;
-        tokenExpiry = 0;
-
-        throw new IOException("Failed to obtain Lark access token: " + tokenResponse.msg());
     }
 }

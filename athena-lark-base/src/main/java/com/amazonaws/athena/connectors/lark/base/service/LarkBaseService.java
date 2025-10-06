@@ -27,7 +27,10 @@ import com.amazonaws.athena.connectors.lark.base.model.response.ListRecordsRespo
 import com.amazonaws.athena.connectors.lark.base.util.CommonUtil;
 import com.amazonaws.athena.connectors.lark.base.util.SearchApiResponseNormalizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.http.HttpResponse;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.utils.URIBuilder;
@@ -36,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.utils.Pair;
 
+import javax.annotation.Nonnull;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -43,6 +47,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE;
 
@@ -51,8 +57,28 @@ public class LarkBaseService extends CommonLarkService {
     private static final String LARK_BASE_URL = LARK_API_BASE_URL + "/bitable/v1/apps";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+    private static final int FIELD_CACHE_MAX_SIZE = 1000;
+    private static final int FIELD_CACHE_TTL_MINUTES = 5;
+
+    // Cache table fields to avoid N+1 query problem when resolving lookup types
+    private final LoadingCache<String, List<ListFieldResponse.FieldItem>> tableFieldsCache;
+
     public LarkBaseService(String larkAppId, String larkAppSecret) {
         super(larkAppId, larkAppSecret);
+        this.tableFieldsCache = CacheBuilder.newBuilder()
+                .maximumSize(FIELD_CACHE_MAX_SIZE)
+                .expireAfterWrite(FIELD_CACHE_TTL_MINUTES, TimeUnit.MINUTES)
+                .build(new CacheLoader<String, List<ListFieldResponse.FieldItem>>() {
+                    @Override
+                    @Nonnull
+                    public List<ListFieldResponse.FieldItem> load(@Nonnull String tableKey) throws Exception {
+                        String[] parts = tableKey.split("\\|");
+                        if (parts.length != 2) {
+                            throw new IllegalArgumentException("Invalid table key format: " + tableKey);
+                        }
+                        return fetchTableFieldsUncached(parts[0], parts[1]);
+                    }
+                });
     }
 
     /**
@@ -67,7 +93,15 @@ public class LarkBaseService extends CommonLarkService {
         boolean hasMore;
 
         do {
-            ListRecordsResponse recordsResponse = getTableRecords(baseId, tableId, PAGE_SIZE, pageToken, null, null);
+            com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest tableRecordsRequest =
+                    com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest.builder()
+                            .baseId(baseId)
+                            .tableId(tableId)
+                            .pageSize(PAGE_SIZE)
+                            .pageToken(pageToken)
+                            .build();
+
+            ListRecordsResponse recordsResponse = getTableRecords(tableRecordsRequest);
 
             if (recordsResponse.getCode() == 0) {
                 if (recordsResponse.getItems() != null) {
@@ -104,61 +138,60 @@ public class LarkBaseService extends CommonLarkService {
     }
 
     /**
-     * Getting records from a table with or without filter using the Search API
+     * Getting records from a table with or without filter using the Search API.
      * <a href="https://open.larksuite.com/document/uAjLw4CM/ukTMukTMukTM/reference/bitable-v1/app-table-record/search">DOCS</a>
-     * @param baseId base ID
-     * @param tableId table ID
-     * @param pageSize Total record per page
-     * @param pageToken Token pagination (empty if first page)
-     * @param filterJson JSON string filter in lark format
-     * @param sortJson JSON string sort in lark format
+     *
+     * @param request Request parameters encapsulating all query options
      * @return Response with list of records and pagination token
+     * @throws IOException if API communication fails
      */
-    public ListRecordsResponse getTableRecords(String baseId, String tableId, long pageSize, String pageToken, String filterJson, String sortJson) throws IOException {
+    public ListRecordsResponse getTableRecords(com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest request) throws IOException {
+        Objects.requireNonNull(request, "request cannot be null");
         refreshTenantAccessToken();
 
         try {
-            URI uri = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables/" + tableId + "/records/search").build();
+            URI uri = new URIBuilder(LARK_BASE_URL + "/" + request.getBaseId() + "/tables/" + request.getTableId() + "/records/search").build();
 
             logger.info("Fetching records from Lark Base Search API, url: {}", uri);
 
             // Build request body
             com.amazonaws.athena.connectors.lark.base.model.request.SearchRecordsRequest.Builder requestBuilder =
                     com.amazonaws.athena.connectors.lark.base.model.request.SearchRecordsRequest.builder()
-                            .pageSize((int) pageSize);
+                            .pageSize((int) request.getPageSize());
 
-            if (pageToken != null && !pageToken.isEmpty()) {
-                requestBuilder.pageToken(pageToken);
+            if (request.getPageToken() != null && !request.getPageToken().isEmpty()) {
+                requestBuilder.pageToken(request.getPageToken());
             }
 
-            if (filterJson != null && !filterJson.isEmpty()) {
-                requestBuilder.filter(filterJson);
+            if (request.getFilterJson() != null && !request.getFilterJson().isEmpty()) {
+                requestBuilder.filter(request.getFilterJson());
             }
 
-            if (sortJson != null && !sortJson.isEmpty()) {
-                requestBuilder.sort(sortJson);
+            if (request.getSortJson() != null && !request.getSortJson().isEmpty()) {
+                requestBuilder.sort(request.getSortJson());
             }
 
             String requestBody = OBJECT_MAPPER.writeValueAsString(requestBuilder.build());
 
             logger.info("Search API request body: {}", requestBody);
 
-            HttpPost request = new HttpPost(uri);
-            request.setHeader("Authorization", "Bearer " + tenantAccessToken);
-            request.setHeader("Content-Type", "application/json");
-            request.setEntity(new org.apache.http.entity.StringEntity(requestBody, java.nio.charset.StandardCharsets.UTF_8));
+            HttpPost httpRequest = new HttpPost(uri);
+            httpRequest.setHeader(HEADER_AUTHORIZATION, AUTH_BEARER_PREFIX + tenantAccessToken);
+            httpRequest.setHeader(HEADER_CONTENT_TYPE, CONTENT_TYPE_JSON);
+            httpRequest.setEntity(new org.apache.http.entity.StringEntity(requestBody, java.nio.charset.StandardCharsets.UTF_8));
 
-            HttpResponse response = httpClient.execute(request);
-            String responseBody = EntityUtils.toString(response.getEntity());
+            try (CloseableHttpResponse response = httpClient.execute(httpRequest)) {
+                String responseBody = EntityUtils.toString(response.getEntity());
 
-            ListRecordsResponse recordsResponse =
-                    OBJECT_MAPPER.readValue(responseBody, ListRecordsResponse.class);
+                ListRecordsResponse recordsResponse =
+                        OBJECT_MAPPER.readValue(responseBody, ListRecordsResponse.class);
 
-            if (recordsResponse.getCode() == 0) {
-                sanitizeRecordFieldNames(recordsResponse);
-                return recordsResponse;
-            } else {
-                throw new IOException("Failed to retrieve records for table: " + tableId + ", Error: " + recordsResponse.getMsg());
+                if (recordsResponse.getCode() == 0) {
+                    sanitizeRecordFieldNames(recordsResponse);
+                    return recordsResponse;
+                } else {
+                    throw new IOException("Failed to retrieve records for table: " + request.getTableId() + ", Error: " + recordsResponse.getMsg());
+                }
             }
         } catch (URISyntaxException e) {
             throw new IOException("Invalid URI for Lark Base API", e);
@@ -200,7 +233,34 @@ public class LarkBaseService extends CommonLarkService {
      * @param tableId The table ID
      * @return The list of fields
      */
+    /**
+     * Get table fields from cache if available, otherwise fetch from API.
+     * This prevents N+1 query problem when resolving lookup field types.
+     *
+     * @param baseId  The base ID
+     * @param tableId The table ID
+     * @return List of field items
+     */
     public List<ListFieldResponse.FieldItem> getTableFields(String baseId, String tableId) {
+        String cacheKey = baseId + "|" + tableId;
+        try {
+            return tableFieldsCache.get(cacheKey);
+        } catch (Exception e) {
+            logger.warn("Failed to get fields from cache for {}.{}, falling back to direct fetch: {}",
+                    baseId, tableId, e.getMessage(), e);
+            return fetchTableFieldsUncached(baseId, tableId);
+        }
+    }
+
+    /**
+     * Fetch table fields directly from Lark API without caching.
+     * Internal method used by the cache loader.
+     *
+     * @param baseId  The base ID
+     * @param tableId The table ID
+     * @return List of field items
+     */
+    private List<ListFieldResponse.FieldItem> fetchTableFieldsUncached(String baseId, String tableId) {
         try {
             refreshTenantAccessToken();
         } catch (IOException e) {
@@ -228,22 +288,23 @@ public class LarkBaseService extends CommonLarkService {
                 request.setHeader("Authorization", "Bearer " + tenantAccessToken);
                 request.setHeader("Content-Type", "application/json");
 
-                HttpResponse response = httpClient.execute(request);
-                String responseBody = EntityUtils.toString(response.getEntity());
+                try (CloseableHttpResponse response = httpClient.execute(request)) {
+                    String responseBody = EntityUtils.toString(response.getEntity());
 
-                ListFieldResponse fieldResponse =
-                        OBJECT_MAPPER.readValue(responseBody, ListFieldResponse.class);
+                    ListFieldResponse fieldResponse =
+                            OBJECT_MAPPER.readValue(responseBody, ListFieldResponse.class);
 
-                if (fieldResponse.getCode() == 0) {
-                    List<ListFieldResponse.FieldItem> fields = fieldResponse.getItems();
-                    if (fields != null) {
-                        allFields.addAll(fields);
+                    if (fieldResponse.getCode() == 0) {
+                        List<ListFieldResponse.FieldItem> fields = fieldResponse.getItems();
+                        if (fields != null) {
+                            allFields.addAll(fields);
+                        }
+
+                        pageToken = fieldResponse.getPageToken();
+                        hasMore = fieldResponse.hasMore();
+                    } else {
+                        throw new IOException("Failed to retrieve fields for table: " + tableId + ", Error: " + fieldResponse.getMsg());
                     }
-
-                    pageToken = fieldResponse.getPageToken();
-                    hasMore = fieldResponse.hasMore();
-                } else {
-                    throw new IOException("Failed to retrieve fields for table: " + tableId + ", Error: " + fieldResponse.getMsg());
                 }
             } catch (Exception e) {
                 throw new RuntimeException("Failed to get fields for table: " + tableId, e);
@@ -287,20 +348,21 @@ public class LarkBaseService extends CommonLarkService {
                 request.setHeader("Authorization", "Bearer " + tenantAccessToken);
                 request.setHeader("Content-Type", "application/json");
 
-                HttpResponse response = httpClient.execute(request);
-                String responseBody = EntityUtils.toString(response.getEntity());
-                ListAllTableResponse tableResponse = OBJECT_MAPPER.readValue(responseBody, ListAllTableResponse.class);
+                try (CloseableHttpResponse response = httpClient.execute(request)) {
+                    String responseBody = EntityUtils.toString(response.getEntity());
+                    ListAllTableResponse tableResponse = OBJECT_MAPPER.readValue(responseBody, ListAllTableResponse.class);
 
-                // 1254002: No more data
-                if (tableResponse.getCode() == 0 || tableResponse.getCode() == 1254002) {
-                    if (tableResponse.getItems() != null) {
-                        allTables.addAll(tableResponse.getItems());
+                    // 1254002: No more data
+                    if (tableResponse.getCode() == 0 || tableResponse.getCode() == 1254002) {
+                        if (tableResponse.getItems() != null) {
+                            allTables.addAll(tableResponse.getItems());
+                        }
+
+                        pageToken = tableResponse.getPageToken();
+                        hasMore = tableResponse.hasMore();
+                    } else {
+                        throw new IOException("Failed to retrieve tables for base: " + baseId + ", Error: " + tableResponse.getMsg());
                     }
-
-                    pageToken = tableResponse.getPageToken();
-                    hasMore = tableResponse.hasMore();
-                } else {
-                    throw new IOException("Failed to retrieve tables for base: " + baseId + ", Error: " + tableResponse.getMsg());
                 }
             } catch (Exception e) {
                 throw new RuntimeException("Failed to get records for base: " + baseId, e);

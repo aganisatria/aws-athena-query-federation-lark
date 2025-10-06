@@ -43,12 +43,16 @@ public final class SearchApiFilterTranslator
     private SearchApiFilterTranslator() {}
 
     /**
-     * Converts Athena constraints to Search API JSON filter format
+     * Converts Athena constraints to Search API JSON filter format.
+     *
+     * @param constraints Map of field names to value sets from Athena query
+     * @param fieldNameMappings Athena to Lark field mappings
+     * @return JSON filter string, or empty string if no valid constraints
      */
     public static String toFilterJson(Map<String, ValueSet> constraints, List<AthenaFieldLarkBaseMapping> fieldNameMappings)
     {
         if (constraints == null || constraints.isEmpty()) {
-            return null;
+            return "";
         }
 
         List<Map<String, Object>> allConditions = new ArrayList<>();
@@ -76,7 +80,7 @@ public final class SearchApiFilterTranslator
         }
 
         if (allConditions.isEmpty()) {
-            return null;
+            return "";
         }
 
         // Build filter structure
@@ -88,18 +92,22 @@ public final class SearchApiFilterTranslator
             return OBJECT_MAPPER.writeValueAsString(filter);
         }
         catch (Exception e) {
-            logger.error("Failed to serialize filter to JSON", e);
-            return null;
+            logger.error("Failed to serialize filter to JSON: {}", e.getMessage(), e);
+            return "";
         }
     }
 
     /**
-     * Converts Athena ORDER BY to Search API sort format
+     * Converts Athena ORDER BY clause to Search API sort format.
+     *
+     * @param orderByFields List of ORDER BY fields from Athena query
+     * @param fieldNameMappings Athena to Lark field mappings
+     * @return JSON sort string, or empty string if no valid sort fields
      */
     public static String toSortJson(List<OrderByField> orderByFields, List<AthenaFieldLarkBaseMapping> fieldNameMappings)
     {
         if (orderByFields == null || orderByFields.isEmpty()) {
-            return null;
+            return "";
         }
 
         List<Map<String, Object>> sortList = new ArrayList<>();
@@ -121,15 +129,15 @@ public final class SearchApiFilterTranslator
         }
 
         if (sortList.isEmpty()) {
-            return null;
+            return "";
         }
 
         try {
             return OBJECT_MAPPER.writeValueAsString(sortList);
         }
         catch (Exception e) {
-            logger.error("Failed to serialize sort to JSON", e);
-            return null;
+            logger.error("Failed to serialize sort to JSON: {}", e.getMessage(), e);
+            return "";
         }
     }
 
@@ -259,7 +267,7 @@ public final class SearchApiFilterTranslator
     private static Object convertValueForSearchApi(Object value, UITypeEnum fieldUiType)
     {
         if (value == null) {
-            return null;
+            return "";
         }
 
         // Checkbox: convert boolean to boolean (not to 1/0)
@@ -330,7 +338,7 @@ public final class SearchApiFilterTranslator
     private static String getOriginalColumnName(String lowercaseColumnName, List<AthenaFieldLarkBaseMapping> fieldNameMappings)
     {
         if (lowercaseColumnName == null || lowercaseColumnName.isEmpty()) {
-            return null;
+            return "";
         }
         if (fieldNameMappings == null) {
             return lowercaseColumnName;

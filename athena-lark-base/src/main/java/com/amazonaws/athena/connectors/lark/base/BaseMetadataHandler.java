@@ -110,7 +110,9 @@ public class BaseMetadataHandler
         this.mappingTableDirectInitialized = larkBaseTableResolver.resolveTables();
         this.experimentalMetadataProvider = new ExperimentalMetadataProvider(athenaService, larkBaseService, invoker);
         this.larkSourceMetadataProvider = new LarkSourceMetadataProvider(mappingTableDirectInitialized);
-        logger.info("Initialization complete. Discovered {} target databases from metadata tables.", mappingTableDirectInitialized.size());
+        if (envVarService.isEnableDebugLogging()) {
+            logger.info("Initialization complete. Discovered {} target databases from metadata tables.", mappingTableDirectInitialized.size());
+        }
     }
 
     public BaseMetadataHandler(Map<String, String> configOptions) {
@@ -154,7 +156,9 @@ public class BaseMetadataHandler
     @Override
     public ListSchemasResponse doListSchemaNames(BlockAllocator allocator, ListSchemasRequest request)
     {
-        logger.info("doListSchemaNames: enter - {}", request);
+        if (envVarService.isEnableDebugLogging()) {
+            logger.info("doListSchemaNames: enter - {}", request);
+        }
 
         Set<String> schemas = new HashSet<>();
 
@@ -167,12 +171,16 @@ public class BaseMetadataHandler
         }
 
         if ((envVarService.isActivateLarkBaseSource() || envVarService.isActivateLarkDriveSource()) && !mappingTableDirectInitialized.isEmpty()) {
-            logger.info("doListSchemaNames: Attempting to retrieve schemas from Lark Base.");
+            if (envVarService.isEnableDebugLogging()) {
+                logger.info("doListSchemaNames: Attempting to retrieve schemas from Lark Base.");
+            }
             for (TableDirectInitialized entry : mappingTableDirectInitialized) {
                 AthenaLarkBaseMapping dbMapping = entry.database();
 
                 if (schemas.stream().anyMatch(database -> database.equalsIgnoreCase(dbMapping.athenaName()))) {
-                    logger.info("Database name {} is exist in glue, skipping", dbMapping.athenaName());
+                    if (envVarService.isEnableDebugLogging()) {
+                        logger.info("Database name {} is exist in glue, skipping", dbMapping.athenaName());
+                    }
                     continue;
                 }
 
@@ -198,7 +206,9 @@ public class BaseMetadataHandler
     public ListTablesResponse doListTables(BlockAllocator allocator, ListTablesRequest request) throws Exception {
         String requestedSchema = request.getSchemaName();
 
-        logger.info("doListTables: enter - schema: {}}", requestedSchema);
+        if (envVarService.isEnableDebugLogging()) {
+            logger.info("doListTables: enter - schema: {}}", requestedSchema);
+        }
 
         Set<TableName> combinedTables = new LinkedHashSet<>();
 
@@ -215,33 +225,47 @@ public class BaseMetadataHandler
         // 2. Always add tables from Lark mapping if the feature is active
         //    (This will add the same tables again if they are in Glue, but Set will handle duplicates)
         if (envVarService.isActivateLarkBaseSource() || envVarService.isActivateLarkDriveSource()) {
-            logger.info("doListTables: Checking Lark Base source mapping. envVarService.isActivateLarkBaseSource()={}, mappingTableDirectInitialized empty={}",
-                    true, mappingTableDirectInitialized.isEmpty());
+            if (envVarService.isEnableDebugLogging()) {
+                logger.info("doListTables: Checking Lark Base source mapping. envVarService.isActivateLarkBaseSource()={}, mappingTableDirectInitialized empty={}",
+                        true, mappingTableDirectInitialized.isEmpty());
+            }
             if (!mappingTableDirectInitialized.isEmpty()) {
                 int larkTablesAddedCount = 0;
                 for (TableDirectInitialized entry : mappingTableDirectInitialized) {
                     AthenaLarkBaseMapping dbMapping = entry.database();
                     if (dbMapping.athenaName().equalsIgnoreCase(requestedSchema)) {
-                        logger.info("doListTables: Found matching schema in mapping: {}", dbMapping.athenaName());
+                        if (envVarService.isEnableDebugLogging()) {
+                            logger.info("doListTables: Found matching schema in mapping: {}", dbMapping.athenaName());
+                        }
                         AthenaLarkBaseMapping tableMapping = entry.table();
                         TableName tableName = new TableName(dbMapping.athenaName(), tableMapping.athenaName());
                         boolean added = combinedTables.add(tableName);
                         if (added) {
                             larkTablesAddedCount++;
-                            logger.info("doListTables: Added table from mapping: {}", tableName);
+                            if (envVarService.isEnableDebugLogging()) {
+                                logger.info("doListTables: Added table from mapping: {}", tableName);
+                            }
                         }
                     }
                 }
-                logger.info("doListTables: Finished checking Lark mapping. Added {} unique tables from mapping for schema {}.", larkTablesAddedCount, requestedSchema);
+                if (envVarService.isEnableDebugLogging()) {
+                    logger.info("doListTables: Finished checking Lark mapping. Added {} unique tables from mapping for schema {}.", larkTablesAddedCount, requestedSchema);
+                }
             } else {
-                logger.info("doListTables: Lark mapping is empty. No tables added from mapping.");
+                if (envVarService.isEnableDebugLogging()) {
+                    logger.info("doListTables: Lark mapping is empty. No tables added from mapping.");
+                }
             }
         } else {
-            logger.info("doListTables: Lark Base source feature is not active (envVarService.isActivateLarkBaseSource()=false).");
+            if (envVarService.isEnableDebugLogging()) {
+                logger.info("doListTables: Lark Base source feature is not active (envVarService.isActivateLarkBaseSource()=false).");
+            }
         }
 
-        logger.info("doListTables: exit - returning {} tables for schema {}",
-                combinedTables.size(), requestedSchema);
+        if (envVarService.isEnableDebugLogging()) {
+            logger.info("doListTables: exit - returning {} tables for schema {}",
+                    combinedTables.size(), requestedSchema);
+        }
 
         return new ListTablesResponse(request.getCatalogName(), new ArrayList<>(combinedTables), null);
     }
@@ -262,14 +286,20 @@ public class BaseMetadataHandler
      */
     @Override
     public GetTableResponse doGetTable(BlockAllocator allocator, GetTableRequest request) {
-        logger.info("doGetTable: Using Strategy Pattern for table {}", request.getTableName());
+        if (envVarService.isEnableDebugLogging()) {
+            logger.info("doGetTable: Using Strategy Pattern for table {}", request.getTableName());
+        }
 
         if (envVarService.isActivateLarkBaseSource() || envVarService.isActivateLarkDriveSource()) {
-            logger.info("doGetTable: Attempting to get schema from Lark Base source.");
+            if (envVarService.isEnableDebugLogging()) {
+                logger.info("doGetTable: Attempting to get schema from Lark Base source.");
+            }
             Optional<TableSchemaResult> schemaResult = larkSourceMetadataProvider.getTableSchema(request);
 
             if (schemaResult.isPresent()) {
-                logger.info("doGetTable: Found schema from Lark Base source.");
+                if (envVarService.isEnableDebugLogging()) {
+                    logger.info("doGetTable: Found schema from Lark Base source.");
+                }
                 TableSchemaResult result = schemaResult.get();
                 Schema finalSchema = CommonUtil.addReservedFields(result.schema());
                 return new GetTableResponse(request.getCatalogName(), request.getTableName(), finalSchema, result.partitionColumns());
@@ -277,10 +307,14 @@ public class BaseMetadataHandler
         }
 
         if (envVarService.isActivateExperimentalFeatures()) {
-            logger.info("doGetTable: Experimental feature is not active (envVarService.isActivateExperimentalFeatures()=false).");
+            if (envVarService.isEnableDebugLogging()) {
+                logger.info("doGetTable: Experimental feature is not active (envVarService.isActivateExperimentalFeatures()=false).");
+            }
             Optional<TableSchemaResult> schemaResult = experimentalMetadataProvider.getTableSchema(request);
             if (schemaResult.isPresent()) {
-                logger.info("doGetTable: Found schema from experimental path.");
+                if (envVarService.isEnableDebugLogging()) {
+                    logger.info("doGetTable: Found schema from experimental path.");
+                }
                 TableSchemaResult result = schemaResult.get();
                 Schema finalSchema = CommonUtil.addReservedFields(result.schema());
                 return new GetTableResponse(request.getCatalogName(), request.getTableName(), finalSchema, result.partitionColumns());
@@ -334,6 +368,221 @@ public class BaseMetadataHandler
     }
 
     /**
+     * Resolves partition information from various providers (Lark source, experimental, or Glue fallback).
+     */
+    private Optional<PartitionInfoResult> resolvePartitionInfo(TableName tableName, GetTableLayoutRequest request) {
+        if (envVarService.isActivateLarkBaseSource() || envVarService.isActivateLarkDriveSource()) {
+            logger.info("getPartitions: Attempting to get partition info from Lark Base source.");
+            Optional<PartitionInfoResult> larkSourcePartitionInfo = larkSourceMetadataProvider.getPartitionInfo(tableName);
+            if (larkSourcePartitionInfo.isPresent()) {
+                logger.info("getPartitions: Found partition info from Lark Base source.");
+                return larkSourcePartitionInfo;
+            }
+        }
+
+        if (envVarService.isActivateLarkBaseSource()) {
+            logger.info("getPartitions: Attempting to get partition info from experimental path.");
+            Optional<PartitionInfoResult> experimentalPartitionInfo = experimentalMetadataProvider.getPartitionInfo(tableName, request);
+            if (experimentalPartitionInfo.isPresent()) {
+                logger.info("getPartitions: Found partition info from experimental path.");
+                return experimentalPartitionInfo;
+            }
+        }
+
+        logger.info("getPartitions: No specific provider found partition info, attempting Glue fallback directly...");
+        try {
+            Pair<String, String> ids = glueCatalogService.getLarkBaseAndTableIdFromTable(tableName.getSchemaName(), tableName.getTableName());
+            if (ids != null && ids.left() != null && ids.right() != null) {
+                List<AthenaFieldLarkBaseMapping> mappings = glueCatalogService.getFieldNameMappings(tableName.getSchemaName(), tableName.getTableName());
+                return Optional.of(new PartitionInfoResult(ids.left(), ids.right(), mappings));
+            }
+        } catch (EntityNotFoundException e) {
+            logger.warn("getPartitions: Glue Fallback: Table {} not found in Glue.", tableName);
+        } catch (Exception e) {
+            logger.warn("getPartitions: Error during Glue fallback for {}: {}", tableName, e.getMessage(), e);
+        }
+
+        return Optional.empty();
+    }
+
+    private long extractQueryLimit(GetTableLayoutRequest request) {
+        if (request.getConstraints() != null && request.getConstraints().hasLimit()) {
+            long limit = request.getConstraints().getLimit();
+            logger.info("getPartitions: Query has LIMIT {}", limit);
+            return limit;
+        }
+        return -1;
+    }
+
+    private String buildFieldTypeMappingJson(List<AthenaFieldLarkBaseMapping> fieldNameMappings, TableName tableName) {
+        if (fieldNameMappings == null || fieldNameMappings.isEmpty()) {
+            return "";
+        }
+
+        Map<String, NestedUIType> larkFieldTypeMap = new HashMap<>();
+        for (AthenaFieldLarkBaseMapping mapping : fieldNameMappings) {
+            larkFieldTypeMap.put(mapping.athenaName(), mapping.nestedUIType());
+        }
+
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            return objectMapper.writeValueAsString(larkFieldTypeMap);
+        } catch (JsonProcessingException e) {
+            logger.warn("getPartitions: Failed to serialize Lark field type mapping for {}.{}: {}",
+                    tableName.getSchemaName(), tableName.getTableName(), e.getMessage());
+            return "";
+        }
+    }
+
+    private String translateFilterExpression(GetTableLayoutRequest request, List<AthenaFieldLarkBaseMapping> fieldNameMappings, TableName tableName) {
+        if (request.getConstraints() == null || request.getConstraints().getSummary() == null || request.getConstraints().getSummary().isEmpty()) {
+            logger.info("getPartitions: No constraints to translate for {}", tableName);
+            return "";
+        }
+
+        if (fieldNameMappings == null || fieldNameMappings.isEmpty()) {
+            return "";
+        }
+
+        try {
+            String filterExpression = SearchApiFilterTranslator.toFilterJson(request.getConstraints().getSummary(), fieldNameMappings);
+            logger.info("getPartitions: Translated filter constraints for {}: {}", tableName, filterExpression);
+            return filterExpression;
+        } catch (Exception e) {
+            logger.warn("getPartitions: Failed to translate filter constraints for {}: {}. Proceeding with empty filter.", tableName, e.getMessage(), e);
+            return "";
+        }
+    }
+
+    private boolean hasParallelSplitKey(List<AthenaFieldLarkBaseMapping> fieldNameMappings) {
+        if (fieldNameMappings == null) {
+            return false;
+        }
+        return fieldNameMappings.stream()
+                .anyMatch(m -> RESERVED_SPLIT_KEY.equalsIgnoreCase(m.athenaName()));
+    }
+
+    private boolean hasOrderByClause(GetTableLayoutRequest request) {
+        return request.getConstraints() != null &&
+                request.getConstraints().getOrderByClause() != null &&
+                !request.getConstraints().getOrderByClause().isEmpty();
+    }
+
+    private String translateSortExpression(GetTableLayoutRequest request, List<AthenaFieldLarkBaseMapping> fieldNameMappings,
+                                          boolean useParallelSplits, boolean hasOrderBy, TableName tableName) {
+        if (fieldNameMappings == null || useParallelSplits || !hasOrderBy || fieldNameMappings.isEmpty()) {
+            return "";
+        }
+
+        try {
+            return SearchApiFilterTranslator.toSortJson(request.getConstraints().getOrderByClause(), fieldNameMappings);
+        } catch (Exception e) {
+            logger.warn("getPartitions: Failed to translate sort expression for {}: {}. Proceeding without sort.", tableName, e.getMessage(), e);
+            return "";
+        }
+    }
+
+    private long calculateEffectiveRowCount(long totalRowCount, long queryLimit, boolean hasOrderBy) {
+        if (hasOrderBy) {
+            logger.info("getPartitions: ORDER BY detected. Ignoring LIMIT {}. Effective count: {}", queryLimit, totalRowCount);
+            return totalRowCount;
+        }
+
+        if (queryLimit >= 0 && queryLimit < totalRowCount) {
+            logger.info("getPartitions: Applying LIMIT. Effective row count: {}", queryLimit);
+            return queryLimit;
+        }
+
+        logger.info("getPartitions: No LIMIT or LIMIT exceeds total. Effective row count: {}", totalRowCount);
+        return totalRowCount;
+    }
+
+    private void writeParallelPartitions(BlockWriter blockWriter, String baseId, String tableId,
+                                        String filterExpression, String fieldTypeMappingJson,
+                                        long queryLimit, boolean hasOrderBy) {
+        int totalRowCount = getTotalRowCount(baseId, tableId, null, "");
+        long effectiveRowCount = calculateEffectiveRowCount(totalRowCount, queryLimit, hasOrderBy);
+
+        if (effectiveRowCount == 0 && totalRowCount > 0) {
+            logger.info("getPartitions: Effective row count is 0 due to LIMIT, writing no partitions.");
+            return;
+        }
+
+        int numSplits = (int) Math.ceil((double) effectiveRowCount / PAGE_SIZE);
+        logger.info("getPartitions: Writing {} parallel partition rows for {} effective rows.", numSplits, effectiveRowCount);
+
+        for (int i = 0; i < numSplits; i++) {
+            final long startIndex = (long) i * PAGE_SIZE + 1;
+            final long endIndex = Math.min((long) (i + 1) * PAGE_SIZE, effectiveRowCount);
+            final long currentSplitRowCount = endIndex - startIndex + 1;
+
+            blockWriter.writeRows((block, rowNum) -> {
+                BlockUtils.setValue(block.getFieldVector(BASE_ID_PROPERTY), rowNum, baseId);
+                BlockUtils.setValue(block.getFieldVector(TABLE_ID_PROPERTY), rowNum, tableId);
+                BlockUtils.setValue(block.getFieldVector(FILTER_EXPRESSION_PROPERTY), rowNum, filterExpression);
+                BlockUtils.setValue(block.getFieldVector(SORT_EXPRESSION_PROPERTY), rowNum, "");
+                BlockUtils.setValue(block.getFieldVector(PAGE_SIZE_PROPERTY), rowNum, PAGE_SIZE);
+                BlockUtils.setValue(block.getFieldVector(EXPECTED_ROW_COUNT_PROPERTY), rowNum, (int) currentSplitRowCount);
+                BlockUtils.setValue(block.getFieldVector(IS_PARALLEL_SPLIT_PROPERTY), rowNum, true);
+                BlockUtils.setValue(block.getFieldVector(SPLIT_START_INDEX_PROPERTY), rowNum, startIndex);
+                BlockUtils.setValue(block.getFieldVector(SPLIT_END_INDEX_PROPERTY), rowNum, endIndex);
+                BlockUtils.setValue(block.getFieldVector(LARK_FIELD_TYPE_MAPPING_PROPERTY), rowNum, fieldTypeMappingJson);
+                return 1;
+            });
+        }
+        logger.info("getPartitions: Successfully wrote {} parallel partition rows.", numSplits);
+    }
+
+    private void writeSinglePartition(BlockWriter blockWriter, String baseId, String tableId,
+                                     String filterExpression, String sortExpression, String fieldTypeMappingJson,
+                                     long queryLimit, boolean useParallelSplits, boolean hasOrderBy) {
+        int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression, "");
+        long effectiveRowCount = calculateEffectiveRowCount(totalRowCount, queryLimit, useParallelSplits && hasOrderBy);
+
+        if (effectiveRowCount == 0 && totalRowCount > 0) {
+            logger.info("getPartitions: Effective row count is 0 due to LIMIT, writing no partitions.");
+            return;
+        }
+
+        logger.info("getPartitions: Writing 1 single partition row.");
+        final int finalExpectedRowCount = (int) effectiveRowCount;
+
+        blockWriter.writeRows((block, rowNum) -> {
+            BlockUtils.setValue(block.getFieldVector(BASE_ID_PROPERTY), rowNum, baseId);
+            BlockUtils.setValue(block.getFieldVector(TABLE_ID_PROPERTY), rowNum, tableId);
+            BlockUtils.setValue(block.getFieldVector(FILTER_EXPRESSION_PROPERTY), rowNum, filterExpression);
+            BlockUtils.setValue(block.getFieldVector(SORT_EXPRESSION_PROPERTY), rowNum, sortExpression);
+            BlockUtils.setValue(block.getFieldVector(PAGE_SIZE_PROPERTY), rowNum, PAGE_SIZE);
+            BlockUtils.setValue(block.getFieldVector(EXPECTED_ROW_COUNT_PROPERTY), rowNum, finalExpectedRowCount);
+            BlockUtils.setValue(block.getFieldVector(IS_PARALLEL_SPLIT_PROPERTY), rowNum, false);
+            BlockUtils.setValue(block.getFieldVector(SPLIT_START_INDEX_PROPERTY), rowNum, 0L);
+            BlockUtils.setValue(block.getFieldVector(SPLIT_END_INDEX_PROPERTY), rowNum, 0L);
+            BlockUtils.setValue(block.getFieldVector(LARK_FIELD_TYPE_MAPPING_PROPERTY), rowNum, fieldTypeMappingJson);
+            return 1;
+        });
+        logger.info("getPartitions: Successfully wrote 1 single partition row.");
+    }
+
+    private int getTotalRowCount(String baseId, String tableId, String filterExpression, String sortExpression) {
+        try {
+            com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest request =
+                    com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest.builder()
+                            .baseId(baseId)
+                            .tableId(tableId)
+                            .pageSize(1)
+                            .filterJson(filterExpression)
+                            .sortJson(sortExpression)
+                            .build();
+
+            int total = invoker.invoke(() -> larkBaseService.getTableRecords(request)).getTotal();
+            logger.info("getPartitions: Estimated total row count matching filter: {}", total);
+            return total;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to estimate row count for partition planning.", e);
+        }
+    }
+
+    /**
      * Determines the partition details for the request. For Lark Base, this involves
      * finding the correct Base ID and Table ID, translating constraints and ordering,
      * estimating row counts, and writing a SINGLE partition row containing this state
@@ -346,44 +595,14 @@ public class BaseMetadataHandler
      */
     @Override
     public void getPartitions(BlockWriter blockWriter, GetTableLayoutRequest request, QueryStatusChecker queryStatusChecker) {
+        Objects.requireNonNull(blockWriter, "blockWriter cannot be null");
+        Objects.requireNonNull(request, "request cannot be null");
+        Objects.requireNonNull(queryStatusChecker, "queryStatusChecker cannot be null");
+
         logger.info("getPartitions: Using Strategy Pattern for table {}", request.getTableName());
         TableName tableName = request.getTableName();
 
-        Optional<PartitionInfoResult> partitionInfoOpt = Optional.empty();
-
-        if (envVarService.isActivateLarkBaseSource() || envVarService.isActivateLarkDriveSource()) {
-            logger.info("getPartitions: Attempting to get partition info from Lark Base source.");
-            Optional<PartitionInfoResult> larkSourcePartitionInfo = larkSourceMetadataProvider.getPartitionInfo(tableName);
-            if (larkSourcePartitionInfo.isPresent()) {
-                partitionInfoOpt = larkSourcePartitionInfo;
-                logger.info("getPartitions: Found partition info from Lark Base source.");
-            }
-        }
-
-        if (envVarService.isActivateLarkBaseSource()) {
-            logger.info("getPartitions: Attempting to get partition info from experimental path.");
-            Optional<PartitionInfoResult> experimentalPartitionInfo = experimentalMetadataProvider.getPartitionInfo(tableName, request);
-            if (experimentalPartitionInfo.isPresent()) {
-                partitionInfoOpt = experimentalPartitionInfo;
-                logger.info("getPartitions: Found partition info from experimental path.");
-            }
-        }
-
-        if (partitionInfoOpt.isEmpty()) {
-            logger.info("getPartitions: No specific provider found partition info, attempting Glue fallback directly...");
-            try {
-                Pair<String, String> ids = glueCatalogService.getLarkBaseAndTableIdFromTable(tableName.getSchemaName(), tableName.getTableName());
-                if (ids != null && ids.left() != null && ids.right() != null) {
-                    List<AthenaFieldLarkBaseMapping> mappings = glueCatalogService.getFieldNameMappings(tableName.getSchemaName(), tableName.getTableName());
-                    partitionInfoOpt = Optional.of(new PartitionInfoResult(ids.left(), ids.right(), mappings));
-                }
-            } catch (EntityNotFoundException e) {
-                logger.warn("getPartitions: Glue Fallback: Table {} not found in Glue.", tableName);
-            } catch (Exception e) {
-                logger.warn("getPartitions: Error during Glue fallback for {}: {}", tableName, e.getMessage(), e);
-            }
-        }
-
+        Optional<PartitionInfoResult> partitionInfoOpt = resolvePartitionInfo(tableName, request);
         if (partitionInfoOpt.isEmpty()) {
             logger.error("getPartitions: Could not determine BaseID and TableID for table {} using any provider. No partitions written.", tableName);
             return;
@@ -399,160 +618,20 @@ public class BaseMetadataHandler
             return;
         }
 
-        long queryLimit = -1;
-        if (request.getConstraints() != null && request.getConstraints().hasLimit()) {
-            queryLimit = request.getConstraints().getLimit();
-            logger.info("getPartitions: Query has LIMIT {}", queryLimit);
-        }
+        long queryLimit = extractQueryLimit(request);
+        String fieldTypeMappingJson = buildFieldTypeMappingJson(fieldNameMappings, tableName);
+        String filterExpression = translateFilterExpression(request, fieldNameMappings, tableName);
 
-        Map<String, NestedUIType> larkFieldTypeMap = new HashMap<>();
-        if (fieldNameMappings != null && !fieldNameMappings.isEmpty()) {
-            for (AthenaFieldLarkBaseMapping mapping : fieldNameMappings) {
-                larkFieldTypeMap.put(mapping.athenaName(), mapping.nestedUIType());
-            }
-        }
-        String larkFieldTypeMappingJson = "";
-        try {
-            ObjectMapper objectMapper = new ObjectMapper();
-            larkFieldTypeMappingJson = objectMapper.writeValueAsString(larkFieldTypeMap);
-        } catch (JsonProcessingException e) {
-            logger.warn("getPartitions: Failed to serialize Lark field type mapping for {}.{}: {}",
-                    tableName.getSchemaName(), tableName.getTableName(), e.getMessage());
-        }
-
-        final String finalLarkFieldTypeMappingJson = larkFieldTypeMappingJson;
-
-        String filterExpression = "";
-        try {
-            if (request.getConstraints() != null && request.getConstraints().getSummary() != null && !request.getConstraints().getSummary().isEmpty()) {
-                if (fieldNameMappings != null && !fieldNameMappings.isEmpty()) {
-                    filterExpression = SearchApiFilterTranslator.toFilterJson(request.getConstraints().getSummary(), fieldNameMappings);
-                    logger.info("getPartitions: Translated filter constraints for {}: {}", tableName, filterExpression);
-                }
-            } else {
-                logger.info("getPartitions: No constraints to translate for {}", tableName);
-            }
-        } catch (Exception e) {
-            logger.warn("getPartitions: Failed to translate filter constraints for {}: {}. Proceeding with empty filter.", tableName, e.getMessage(), e);
-        }
-
-        AthenaFieldLarkBaseMapping splitKeyMapping = fieldNameMappings != null ? fieldNameMappings.stream()
-                .filter(m -> RESERVED_SPLIT_KEY.equalsIgnoreCase(m.athenaName()))
-                .findFirst()
-                .orElse(null) : null;
-
-        boolean useParallelSplits = (splitKeyMapping != null);
-
-        boolean hasOrderBy = request.getConstraints() != null && request.getConstraints().getOrderByClause() != null && !request.getConstraints().getOrderByClause().isEmpty();
-
-        String sortExpression = "";
-        try {
-            if (fieldNameMappings != null && !useParallelSplits && hasOrderBy && !fieldNameMappings.isEmpty()) {
-                sortExpression = SearchApiFilterTranslator.toSortJson(request.getConstraints().getOrderByClause(), fieldNameMappings);
-            }
-        } catch (Exception e) {
-            logger.warn("getPartitions: Failed to translate sort expression for {}: {}. Proceeding without sort.", tableName, e.getMessage(), e);
-        }
-
-        int totalRowCount;
-        final String countFilterExpression = filterExpression;
-        final String countSortExpression = "";
-
-        final String finalFilterExpression = filterExpression;
-        final String finalSortExpression = sortExpression;
+        boolean useParallelSplits = hasParallelSplitKey(fieldNameMappings);
+        boolean hasOrderBy = hasOrderByClause(request);
+        String sortExpression = translateSortExpression(request, fieldNameMappings, useParallelSplits, hasOrderBy, tableName);
 
         if (useParallelSplits && envVarService.isActivateParallelSplit()) {
-            try {
-                totalRowCount = invoker.invoke(() -> larkBaseService.getTableRecords(baseId, tableId, 1, null, null, null)).getTotal();
-                logger.info("getPartitions: Estimated total row count matching filter: {}", totalRowCount);
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to estimate row count for partition planning.", e);
-            }
-
-            long effectiveRowCount = totalRowCount;
-            if (hasOrderBy) {
-                logger.info("getPartitions: ORDER BY with parallel split detected. Ignoring LIMIT {}. Effective count for splitting: {}", queryLimit, effectiveRowCount);
-            } else {
-                if (queryLimit >= 0 && queryLimit < totalRowCount) {
-                    effectiveRowCount = queryLimit;
-                }
-                logger.info("getPartitions: Applying LIMIT if applicable. Effective row count: {}", effectiveRowCount);
-            }
-
-            if (effectiveRowCount == 0 && totalRowCount > 0) {
-                logger.info("getPartitions: Effective row count is 0 due to LIMIT, writing no partitions.");
-                return;
-            }
-
-            int numSplits = (int) Math.ceil((double) effectiveRowCount / PAGE_SIZE);
-            logger.info("getPartitions: Writing {} parallel partition rows for {} effective rows.", numSplits, effectiveRowCount);
-
-            for (int i = 0; i < numSplits; i++) {
-                final long startIndex = (long)i * PAGE_SIZE + 1;
-                final long endIndex = Math.min((long)(i + 1) * PAGE_SIZE, effectiveRowCount);
-                final long currentSplitRowCount = endIndex - startIndex + 1;
-
-                blockWriter.writeRows((block, rowNum) -> {
-                    BlockUtils.setValue(block.getFieldVector(BASE_ID_PROPERTY), rowNum, baseId);
-                    BlockUtils.setValue(block.getFieldVector(TABLE_ID_PROPERTY), rowNum, tableId);
-                    BlockUtils.setValue(block.getFieldVector(FILTER_EXPRESSION_PROPERTY), rowNum, finalFilterExpression);
-                    BlockUtils.setValue(block.getFieldVector(SORT_EXPRESSION_PROPERTY), rowNum, "");
-                    BlockUtils.setValue(block.getFieldVector(PAGE_SIZE_PROPERTY), rowNum, PAGE_SIZE);
-                    BlockUtils.setValue(block.getFieldVector(EXPECTED_ROW_COUNT_PROPERTY), rowNum, (int)currentSplitRowCount);
-
-                    // Split Block
-                    BlockUtils.setValue(block.getFieldVector(IS_PARALLEL_SPLIT_PROPERTY), rowNum, true);
-                    BlockUtils.setValue(block.getFieldVector(SPLIT_START_INDEX_PROPERTY), rowNum, startIndex);
-                    BlockUtils.setValue(block.getFieldVector(SPLIT_END_INDEX_PROPERTY), rowNum, endIndex);
-                    BlockUtils.setValue(block.getFieldVector(LARK_FIELD_TYPE_MAPPING_PROPERTY), rowNum, finalLarkFieldTypeMappingJson);
-
-                    return 1;
-                });
-            }
-            logger.info("getPartitions: Successfully wrote {} parallel partition rows.", numSplits);
-
+            writeParallelPartitions(blockWriter, baseId, tableId, filterExpression, fieldTypeMappingJson,
+                    queryLimit, hasOrderBy);
         } else {
-            try {
-                totalRowCount = invoker.invoke(() -> larkBaseService.getTableRecords(baseId, tableId, 1, null, countFilterExpression, countSortExpression)).getTotal();
-                logger.info("getPartitions: Estimated total row count matching filter: {}", totalRowCount);
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to estimate row count for partition planning.", e);
-            }
-
-            long effectiveRowCount = totalRowCount;
-            if (useParallelSplits && hasOrderBy) {
-                logger.info("getPartitions: ORDER BY with parallel split detected. Ignoring LIMIT {}. Effective count for splitting: {}", queryLimit, effectiveRowCount);
-            } else {
-                if (queryLimit >= 0 && queryLimit < totalRowCount) {
-                    effectiveRowCount = queryLimit;
-                }
-                logger.info("getPartitions: Applying LIMIT if applicable. Effective row count: {}", effectiveRowCount);
-            }
-
-            if (effectiveRowCount == 0 && totalRowCount > 0) {
-                logger.info("getPartitions: Effective row count is 0 due to LIMIT, writing no partitions.");
-                return;
-            }
-
-            logger.info("getPartitions: Writing 1 single partition row.");
-            final int finalExpectedRowCount = (int) effectiveRowCount;
-
-            blockWriter.writeRows((block, rowNum) -> {
-                BlockUtils.setValue(block.getFieldVector(BASE_ID_PROPERTY), rowNum, baseId);
-                BlockUtils.setValue(block.getFieldVector(TABLE_ID_PROPERTY), rowNum, tableId);
-                BlockUtils.setValue(block.getFieldVector(FILTER_EXPRESSION_PROPERTY), rowNum, finalFilterExpression);
-                BlockUtils.setValue(block.getFieldVector(SORT_EXPRESSION_PROPERTY), rowNum, finalSortExpression);
-                BlockUtils.setValue(block.getFieldVector(PAGE_SIZE_PROPERTY), rowNum, PAGE_SIZE);
-                BlockUtils.setValue(block.getFieldVector(EXPECTED_ROW_COUNT_PROPERTY), rowNum, finalExpectedRowCount);
-
-                //Split Block - Default values
-                BlockUtils.setValue(block.getFieldVector(IS_PARALLEL_SPLIT_PROPERTY), rowNum, false);
-                BlockUtils.setValue(block.getFieldVector(SPLIT_START_INDEX_PROPERTY), rowNum, 0L);
-                BlockUtils.setValue(block.getFieldVector(SPLIT_END_INDEX_PROPERTY), rowNum, 0L);
-                BlockUtils.setValue(block.getFieldVector(LARK_FIELD_TYPE_MAPPING_PROPERTY), rowNum, finalLarkFieldTypeMappingJson);
-                return 1;
-            });
-            logger.info("getPartitions: Successfully wrote 1 single partition row.");
+            writeSinglePartition(blockWriter, baseId, tableId, filterExpression, sortExpression,
+                    fieldTypeMappingJson, queryLimit, useParallelSplits, hasOrderBy);
         }
     }
 

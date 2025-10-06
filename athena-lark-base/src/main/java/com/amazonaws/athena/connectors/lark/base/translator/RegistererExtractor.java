@@ -49,12 +49,16 @@ import java.util.stream.Collectors;
  */
 public class RegistererExtractor {
     private static final Logger logger = LoggerFactory.getLogger(RegistererExtractor.class);
-    // Excel epoch starts from 1900-01-01, but treats 1900 as a leap year incorrectly.
-    // Java epoch starts from 1970-01-01. We need the offset in days.
-    // Days from 1900-01-01 to 1970-01-01 is 25569.
-    // Subtract 2 days: 1 for the Excel base (day 1 is 1900-01-01) and 1 for the incorrect leap year.
+
+    // Excel epoch constants
     private static final long EXCEL_EPOCH_DAY_OFFSET = 25569 - 2;
     private static final long MILLIS_PER_DAY = TimeUnit.DAYS.toMillis(1);
+
+    // Timestamp detection thresholds
+    private static final long TIMESTAMP_MILLIS_THRESHOLD = 10_000_000_000L;  // ~March 1973
+    private static final long TIMESTAMP_SECONDS_THRESHOLD = 100_000;
+    private static final long SECONDS_TO_MILLIS = 1000L;
+
     private final Map<String, NestedUIType> larkFieldTypeMapping;
 
     public RegistererExtractor(Map<String, NestedUIType> larkFieldTypeMapping) {
@@ -298,11 +302,51 @@ public class RegistererExtractor {
     }
 
     /**
+     * Converts a Lark numeric value to Unix milliseconds.
+     * Handles three formats:
+     * 1. Unix Timestamps in milliseconds (numbers > 10^10)
+     * 2. Unix Timestamps in seconds (numbers > 100,000, converted to milliseconds)
+     * 3. Excel-like serial date numbers (days since 1900-01-01, converted to Unix milliseconds)
+     *
+     * @param numValue   The numeric value to convert
+     * @param fieldName  Field name for logging
+     * @param extractorType Type of extractor calling this method (for logging)
+     * @return Converted timestamp in milliseconds, or null if value is zero
+     */
+    private Long convertToTimestampMillis(Number numValue, String fieldName, String extractorType) {
+        long longValue = numValue.longValue();
+        double doubleValue = numValue.doubleValue();
+
+        if (longValue == 0L && doubleValue == 0.0) {
+            return null;
+        }
+
+        if (longValue > TIMESTAMP_MILLIS_THRESHOLD) {
+            logger.info("{}: Field={}, Value={}, Writing as milliseconds", extractorType, fieldName, longValue);
+            return longValue;
+        }
+        else if (longValue > TIMESTAMP_SECONDS_THRESHOLD) {
+            logger.info("{}: Field={}, Value={}, Converting from seconds to milliseconds", extractorType, fieldName, longValue);
+            return longValue * SECONDS_TO_MILLIS;
+        }
+        else {
+            // Assume Excel-like serial date number
+            long days = (long) doubleValue;
+            double fractionalDay = doubleValue - days;
+            long dateMillis = (days - EXCEL_EPOCH_DAY_OFFSET) * MILLIS_PER_DAY;
+            long timeMillis = (long) (fractionalDay * MILLIS_PER_DAY);
+
+            // Adjust for potential rounding errors near midnight
+            timeMillis = Math.max(0, Math.min(timeMillis, MILLIS_PER_DAY - 1));
+
+            logger.info("{}: Field={}, Value={}, Converting from Excel date", extractorType, fieldName, doubleValue);
+            return dateMillis + timeMillis;
+        }
+    }
+
+    /**
      * Registers an extractor for Arrow DateMilli type (used for timestamp fields).
-     * Handles conversion from Lark's numeric date/timestamp formats to Unix milliseconds:
-     * 1. Unix Timestamps in milliseconds (numbers > 10^10).
-     * 2. Unix Timestamps in seconds (numbers > 100,000, converted to milliseconds).
-     * 3. Excel-like serial date numbers (days since 1900-01-01, converted to Unix milliseconds).
+     * Handles conversion from Lark's numeric date/timestamp formats to Unix milliseconds.
      * Sets value to null (isSet=0) if input is null, zero, or conversion fails.
      *
      * @param rowWriterBuilder The builder for the GeneratedRowWriter.
@@ -320,55 +364,12 @@ public class RegistererExtractor {
             }
             try {
                 if (value instanceof Number numValue) {
-                    long longValue = numValue.longValue();
-                    double doubleValue = numValue.doubleValue();
-
-                    if (longValue == 0L && doubleValue == 0.0) {
-                        return;
-                    }
-
-                    // Improved heuristic for timestamp detection:
-                    // 10^10 ms = ~March 1973, which is a safe threshold to distinguish formats
-                    // Excel dates are small (0-100,000 range for years 1900-2173)
-                    if (longValue > 10_000_000_000L) {
-                        // Definitely milliseconds (any date after March 1973 in ms, or far future in seconds)
-                        logger.info("DateMilliExtractor: Field={}, Value={}, Writing as milliseconds", fieldName, longValue);
-                        dst.value = longValue;
-                        dst.isSet = 1;
-                    }
-                    else if (longValue > 100_000) {
-                        // Likely seconds (Unix timestamp between 1970 and March 1973 in ms)
-                        // Values 100,000-10,000,000,000 are too large to be Excel dates
-                        logger.info("DateMilliExtractor: Field={}, Value={}, Converting from seconds to milliseconds", fieldName, longValue);
-                        dst.value = longValue * 1000; // Convert seconds to milliseconds
-                        dst.isSet = 1;
-                    }
-                    // Otherwise, assume Excel-like serial date number
-                    else {
-                        // Separate whole number part (days) and fractional part (time)
-                        long days = (long) doubleValue;
-                        double fractionalDay = doubleValue - days;
-
-                        // Calculate milliseconds from Excel epoch
-                        long dateMillis = (days - EXCEL_EPOCH_DAY_OFFSET) * MILLIS_PER_DAY;
-
-                        // Calculate milliseconds from fractional part of the day
-                        long timeMillis = (long) (fractionalDay * MILLIS_PER_DAY);
-
-                        // Adjust for potential rounding errors near midnight
-                        if (timeMillis >= MILLIS_PER_DAY) {
-                            timeMillis = MILLIS_PER_DAY - 1;
-                        }
-                        if (timeMillis < 0) {
-                            timeMillis = 0;
-                        }
-
-                        logger.info("DateMilliExtractor: Field={}, Value={}, Converting from Excel date", fieldName, doubleValue);
-                        dst.value = dateMillis + timeMillis;
+                    Long timestamp = convertToTimestampMillis(numValue, fieldName, "DateMilliExtractor");
+                    if (timestamp != null) {
+                        dst.value = timestamp;
                         dst.isSet = 1;
                     }
                 }
-
             } catch (Exception e) {
                 logger.error("DateMilliExtractor: Error extracting date for field '{}': {}", fieldName, e.getMessage(), e);
                 dst.isSet = 0;
@@ -376,6 +377,14 @@ public class RegistererExtractor {
         });
     }
 
+    /**
+     * Registers an extractor for Arrow Timestamp type.
+     * Handles conversion from Lark's numeric date/timestamp formats to Unix milliseconds.
+     * Sets value to null (isSet=0) if input is null, zero, or conversion fails.
+     *
+     * @param rowWriterBuilder The builder for the GeneratedRowWriter.
+     * @param field            The Arrow field definition (Timestamp).
+     */
     private void registerTimestampMilliExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field) {
         rowWriterBuilder.withExtractor(field.getName(), (BigIntExtractor) (Object context, NullableBigIntHolder dst) -> {
             dst.isSet = 0;
@@ -388,49 +397,12 @@ public class RegistererExtractor {
             }
             try {
                 if (value instanceof Number numValue) {
-                    long longValue = numValue.longValue();
-                    double doubleValue = numValue.doubleValue();
-
-                    if (longValue == 0L && doubleValue == 0.0) {
-                        return;
-                    }
-
-                    // Improved heuristic for timestamp detection:
-                    // 10^10 ms = ~March 1973, which is a safe threshold to distinguish formats
-                    // Excel dates are small (0-100,000 range for years 1900-2173)
-                    if (longValue > 10_000_000_000L) {
-                        // Definitely milliseconds (any date after March 1973 in ms, or far future in seconds)
-                        logger.info("TimestampMilliExtractor: Field={}, Value={}, Writing as milliseconds", fieldName, longValue);
-                        dst.value = longValue;
-                        dst.isSet = 1;
-                    }
-                    else if (longValue > 100_000) {
-                        // Likely seconds (Unix timestamp between 1970 and March 1973 in ms)
-                        // Values 100,000-10,000,000,000 are too large to be Excel dates
-                        logger.info("TimestampMilliExtractor: Field={}, Value={}, Converting from seconds to milliseconds", fieldName, longValue);
-                        dst.value = longValue * 1000; // Convert seconds to milliseconds
-                        dst.isSet = 1;
-                    }
-                    // Otherwise, assume Excel-like serial date number
-                    else {
-                        long days = (long) doubleValue;
-                        double fractionalDay = doubleValue - days;
-                        long dateMillis = (days - EXCEL_EPOCH_DAY_OFFSET) * MILLIS_PER_DAY;
-                        long timeMillis = (long) (fractionalDay * MILLIS_PER_DAY);
-
-                        if (timeMillis >= MILLIS_PER_DAY) {
-                            timeMillis = MILLIS_PER_DAY - 1;
-                        }
-                        if (timeMillis < 0) {
-                            timeMillis = 0;
-                        }
-
-                        logger.info("TimestampMilliExtractor: Field={}, Value={}, Converting from Excel date", fieldName, doubleValue);
-                        dst.value = dateMillis + timeMillis;
+                    Long timestamp = convertToTimestampMillis(numValue, fieldName, "TimestampMilliExtractor");
+                    if (timestamp != null) {
+                        dst.value = timestamp;
                         dst.isSet = 1;
                     }
                 }
-
             } catch (Exception e) {
                 logger.error("TimestampMilliExtractor: Error extracting timestamp for field '{}': {}", fieldName, e.getMessage(), e);
                 dst.isSet = 0;

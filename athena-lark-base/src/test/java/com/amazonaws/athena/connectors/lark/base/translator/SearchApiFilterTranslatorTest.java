@@ -36,30 +36,30 @@ public class SearchApiFilterTranslatorTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Test
-    public void testToFilterJson_nullConstraints_returnsNull() {
+    public void testToFilterJson_nullConstraints_returnsEmptyString() {
         String filterJson = SearchApiFilterTranslator.toFilterJson(null, Collections.emptyList());
-        assertNull(filterJson);
+        assertEquals("", filterJson);
     }
 
     @Test
-    public void testToFilterJson_emptyConstraints_returnsNull() {
+    public void testToFilterJson_emptyConstraints_returnsEmptyString() {
         String filterJson = SearchApiFilterTranslator.toFilterJson(new HashMap<>(), Collections.emptyList());
-        assertNull(filterJson);
+        assertEquals("", filterJson);
     }
 
     // Note: Cannot test constraint creation in unit tests as AllOrNoneValueSet constructors are not public
     // Integration tests (regression tests) cover the actual filter translation
 
     @Test
-    public void testToSortJson_nullOrderByFields_returnsNull() {
+    public void testToSortJson_nullOrderByFields_returnsEmptyString() {
         String sortJson = SearchApiFilterTranslator.toSortJson(null, Collections.emptyList());
-        assertNull(sortJson);
+        assertEquals("", sortJson);
     }
 
     @Test
-    public void testToSortJson_emptyOrderByFields_returnsNull() {
+    public void testToSortJson_emptyOrderByFields_returnsEmptyString() {
         String sortJson = SearchApiFilterTranslator.toSortJson(Collections.emptyList(), Collections.emptyList());
-        assertNull(sortJson);
+        assertEquals("", sortJson);
     }
 
     @Test
