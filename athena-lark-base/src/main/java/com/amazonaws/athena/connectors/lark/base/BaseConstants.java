@@ -52,6 +52,12 @@ public class BaseConstants
     public static final String DOES_ACTIVATE_PARALLEL_SPLIT_ENV_VAR = "default_does_activate_parallel_split";
 
     /**
+     * The environment variable which is used to enable debug logging (verbose INFO logs).
+     * When set to "true", all INFO logs will be shown. When "false" (default), only WARN and ERROR logs are shown.
+     */
+    public static final String ENABLE_DEBUG_LOGGING_ENV_VAR = "default_enable_debug_logging";
+
+    /**
      * The environment variable which is used to set the default lark base sources for the connector.
      * If we use this, we can ignore crawler and use the lark base sources directly.
      * format: [larkBaseId:larkTableId1,larkBaseId:larkTableId2,...]
