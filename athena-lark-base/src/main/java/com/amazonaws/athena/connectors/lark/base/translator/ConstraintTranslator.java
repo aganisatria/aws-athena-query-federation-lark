@@ -102,18 +102,15 @@ public final class ConstraintTranslator {
         // 1. Handle Single Value case (Equality atau IS NULL SQL)
         if (rangeSet.isSingleValue()) {
             Object value = rangeSet.getSingleValue();
-            if (value == null) {
-                if (fieldUiType == UITypeEnum.CHECKBOX) {
-                    logger.info("Translating single value null (IS NULL) for Checkbox column '{}' to FQL: {} = 0", column, columnExpr);
-                    builder.append(String.format("%s%s%s", columnExpr, LARK_OPERATOR_EQ, "0"));
-                } else {
-                    logger.info("Translating single value null (IS NULL) to FQL: {} = \"\"", columnExpr);
-                    builder.append(String.format("%s%s%s", columnExpr, LARK_OPERATOR_EQ, LARK_EMPTY_STRING));
-                }
-            } else {
-                Object convertedValue = convertValueIfNeeded(value, fieldUiType);
-                builder.append(String.format("%s%s%s", columnExpr, LARK_OPERATOR_EQ, formatValue(convertedValue)));
+
+            if (value == null && fieldUiType == UITypeEnum.CHECKBOX) {
+                logger.info("GOAL: Translating 'IS NULL' to '= false' for Checkbox column '{}'", column);
+                builder.append(String.format("%s%s%s", buildColumnExpression(column), LARK_OPERATOR_EQ, "false"));
+                return;
             }
+
+            Object convertedValue = convertValueIfNeeded(value, fieldUiType);
+            builder.append(String.format("%s%s%s", buildColumnExpression(column), LARK_OPERATOR_EQ, formatValue(convertedValue)));
             return;
         }
 
@@ -156,13 +153,12 @@ public final class ConstraintTranslator {
 
             if (isEffectivelyIsNotNull) {
                 if (fieldUiType == UITypeEnum.CHECKBOX) {
-                    logger.info("Translating IS NOT NULL for Checkbox column '{}' to FQL: {} = 1", column, columnExpr);
-                    builder.append(String.format("%s%s%s", columnExpr, LARK_OPERATOR_EQ, "1"));
-                } else {
-                    logger.info("Translating SortedRangeSet (nullAllowed=false, effectively unbounded/IS NOT NULL) to FQL (NOT({}=\"\")) for column: {}", columnExpr, column);
-                    builder.append(String.format("NOT(%s%s%s)",
-                            columnExpr, LARK_OPERATOR_EQ, LARK_EMPTY_STRING));
+                    logger.info("GOAL: Translating 'IS NOT NULL' to '= true' for Checkbox column '{}'", column);
+                    builder.append(String.format("%s%s%s", buildColumnExpression(column), LARK_OPERATOR_EQ, "true"));
+                    return;
                 }
+
+                builder.append(String.format("NOT(%s%s%s)", buildColumnExpression(column), LARK_OPERATOR_EQ, LARK_EMPTY_STRING));
                 return;
             }
         }

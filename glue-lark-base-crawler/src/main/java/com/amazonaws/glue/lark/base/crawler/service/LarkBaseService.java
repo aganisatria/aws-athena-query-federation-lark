@@ -23,9 +23,11 @@ import com.amazonaws.glue.lark.base.crawler.model.LarkDatabaseRecord;
 import com.amazonaws.glue.lark.base.crawler.model.response.ListAllTableResponse;
 import com.amazonaws.glue.lark.base.crawler.model.response.ListFieldResponse;
 import com.amazonaws.glue.lark.base.crawler.model.response.ListRecordsResponse;
+import com.amazonaws.glue.lark.base.crawler.util.SearchApiResponseNormalizer;
 import com.amazonaws.glue.lark.base.crawler.util.Util;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.util.EntityUtils;
 import org.slf4j.Logger;
@@ -188,8 +190,8 @@ public class LarkBaseService extends CommonLarkService {
     }
 
     /**
-     * Get all records for a table.
-     * @see "https://open.larksuite.com/document/server-docs/docs/bitable-v1/app-table-record/list"
+     * Get all records for a table using the Search API.
+     * @see "https://open.larksuite.com/document/uAjLw4CM/ukTMukTMukTM/reference/bitable-v1/app-table-record/search"
      * @param baseId The base ID
      * @param tableId The table ID
      * @return The list of records
@@ -205,36 +207,46 @@ public class LarkBaseService extends CommonLarkService {
         List<LarkDatabaseRecord> parsedRecords = new ArrayList<>();
         String pageToken = "";
         boolean hasMore;
-        
+
         do {
             try {
-                URIBuilder uriBuilder = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables/" + tableId + "/records")
-                        .addParameter("page_size", String.valueOf(PAGE_SIZE));
-                
+                URI uri = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables/" + tableId + "/records/search").build();
+
+                // Build request body
+                com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.Builder requestBuilder =
+                        com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.builder()
+                                .pageSize(PAGE_SIZE);
+
                 if (!pageToken.isEmpty()) {
-                    uriBuilder.addParameter("page_token", pageToken);
+                    requestBuilder.pageToken(pageToken);
                 }
-                
-                URI uri = uriBuilder.build();
-                
-                HttpGet request = new HttpGet(uri);
+
+                String requestBody = objectMapper.writeValueAsString(requestBuilder.build());
+
+                logger.info("Search API request for table {}: {}", tableId, requestBody);
+
+                HttpPost request = new HttpPost(uri);
                 request.setHeader("Authorization", "Bearer " + tenantAccessToken);
                 request.setHeader("Content-Type", "application/json");
-                
+                request.setEntity(new org.apache.http.entity.StringEntity(requestBody, java.nio.charset.StandardCharsets.UTF_8));
+
                 HttpResponse response = httpClient.execute(request);
                 String responseBody = EntityUtils.toString(response.getEntity());
-                
-                ListRecordsResponse recordsResponse = 
+
+                ListRecordsResponse recordsResponse =
                     objectMapper.readValue(responseBody, ListRecordsResponse.class);
-                
+
                 if (recordsResponse.getCode() == 0) {
                     if (recordsResponse.getItems() != null) {
                         for (ListRecordsResponse.RecordItem record : recordsResponse.getItems()) {
-                            Map<String, Object> fields = record.getFields();
-                            
+                            Map<String, Object> originalFields = record.getFields();
+
+                            // Normalize Search API response to List API format
+                            Map<String, Object> fields = SearchApiResponseNormalizer.normalizeRecordFields(originalFields);
+
                             String id = null;
                             String name = null;
-                            
+
                             if (fields != null) {
                                 if (fields.containsKey("id")) {
                                     Object idObj = fields.get("id");
@@ -246,7 +258,7 @@ public class LarkBaseService extends CommonLarkService {
                                     name = nameObj != null ? nameObj.toString() : null;
                                 }
                             }
-                            
+
                             parsedRecords.add(new LarkDatabaseRecord(id, name));
                         }
                     }
@@ -254,7 +266,7 @@ public class LarkBaseService extends CommonLarkService {
                     pageToken = recordsResponse.getPageToken();
                     hasMore = recordsResponse.hasMore();
                 } else {
-                    throw new IOException("Failed to retrieve records for table: " + tableId + 
+                    throw new IOException("Failed to retrieve records for table: " + tableId +
                             ", Error: " + recordsResponse.getMsg());
                 }
             } catch (Exception e) {
