@@ -86,25 +86,11 @@ public class LarkBaseServiceTest {
     @Test
     public void listTables_success_singlePage() throws Exception {
         String baseId = "base123";
-        List<ListAllTableResponse.BaseItem> items = Collections.singletonList(
-                ListAllTableResponse.BaseItem.builder().tableId("tbl1").name("Table 1").build()
-        );
-        ListAllTableResponse.ListData listData = ListAllTableResponse.ListData.builder()
-                .items(items)
-                .hasMore(false)
-                .pageToken(null)
-                .build();
-        ListAllTableResponse mockResponse = (ListAllTableResponse) ListAllTableResponse.builder()
-                .code(0)
-                .msg("success")
-                .data(listData)
-                .build();
-        String mockJsonResponse = "{\"code\":0, \"msg\":\"success\", \"data\":{\"items\":[{\"table_id\":\"tbl1\",\"name\":\"Table 1\"}],\"has_more\":false}}";
+        String mockJsonResponse = "{\"code\":0, \"msg\":\"success\", \"data\":{\"items\":[{\"table_id\":\"tbl1\",\"name\":\"table_1\"}],\"has_more\":false}}";
 
         when(mockHttpClient.execute(any(HttpGet.class))).thenReturn(mockHttpResponse);
         when(mockHttpResponse.getEntity()).thenReturn(mockHttpEntity);
         when(mockHttpEntity.getContent()).thenReturn(new ByteArrayInputStream(mockJsonResponse.getBytes()));
-        when(mockObjectMapper.readValue(mockJsonResponse, ListAllTableResponse.class)).thenReturn(mockResponse);
 
         List<ListAllTableResponse.BaseItem> result = larkBaseService.listTables(baseId);
 
@@ -119,18 +105,18 @@ public class LarkBaseServiceTest {
     public void listTables_success_multiplePages() throws Exception {
         String baseId = "baseMultiPage";
         List<ListAllTableResponse.BaseItem> itemsPage1 = Collections.singletonList(
-                ListAllTableResponse.BaseItem.builder().tableId("tblA").name("Table A").build());
+                ListAllTableResponse.BaseItem.builder().tableId("tblA").name("table_a").build());
         ListAllTableResponse.ListData listDataPage1 = ListAllTableResponse.ListData.builder()
                 .items(itemsPage1).hasMore(true).pageToken("page_token_2").build();
         ListAllTableResponse mockResponsePage1 = (ListAllTableResponse) ListAllTableResponse.builder().code(0).data(listDataPage1).build();
-        String jsonPage1 = "{\"data\":{\"items\":[{\"name\":\"Table A\"}],\"has_more\":true,\"page_token\":\"page_token_2\"}}";
+        String jsonPage1 = "{\"data\":{\"items\":[{\"table_id\":\"tblA\",\"name\":\"table_a\"}],\"has_more\":true,\"page_token\":\"page_token_2\"}}";
 
         List<ListAllTableResponse.BaseItem> itemsPage2 = Collections.singletonList(
-                ListAllTableResponse.BaseItem.builder().tableId("tblB").name("Table B").build());
+                ListAllTableResponse.BaseItem.builder().tableId("tblB").name("table_b").build());
         ListAllTableResponse.ListData listDataPage2 = ListAllTableResponse.ListData.builder()
                 .items(itemsPage2).hasMore(false).pageToken(null).build();
         ListAllTableResponse mockResponsePage2 = (ListAllTableResponse) ListAllTableResponse.builder().code(0).data(listDataPage2).build();
-        String jsonPage2 = "{\"data\":{\"items\":[{\"name\":\"Table B\"}],\"has_more\":false}}";
+        String jsonPage2 = "{\"data\":{\"items\":[{\"table_id\":\"tblB\",\"name\":\"table_b\"}],\"has_more\":false}}";
 
         ArgumentCaptor<HttpGet> httpGetCaptor = ArgumentCaptor.forClass(HttpGet.class);
         when(mockHttpClient.execute(httpGetCaptor.capture()))
@@ -139,8 +125,6 @@ public class LarkBaseServiceTest {
         when(mockHttpEntity.getContent())
                 .thenReturn(new ByteArrayInputStream(jsonPage1.getBytes()))
                 .thenReturn(new ByteArrayInputStream(jsonPage2.getBytes()));
-        when(mockObjectMapper.readValue(jsonPage1, ListAllTableResponse.class)).thenReturn(mockResponsePage1);
-        when(mockObjectMapper.readValue(jsonPage2, ListAllTableResponse.class)).thenReturn(mockResponsePage2);
 
         List<ListAllTableResponse.BaseItem> result = larkBaseService.listTables(baseId);
 
@@ -168,13 +152,11 @@ public class LarkBaseServiceTest {
     @Test(expected = RuntimeException.class)
     public void listTables_apiError_shouldThrowRuntimeException() throws Exception {
         String baseId = "baseApiError";
-        ListAllTableResponse mockErrorResponse = (ListAllTableResponse) ListAllTableResponse.builder().code(10001).msg("API Error").build();
         String mockErrorJson = "{\"code\":10001, \"msg\":\"API Error\"}";
 
         when(mockHttpClient.execute(any(HttpGet.class))).thenReturn(mockHttpResponse);
         when(mockHttpResponse.getEntity()).thenReturn(mockHttpEntity);
         when(mockHttpEntity.getContent()).thenReturn(new ByteArrayInputStream(mockErrorJson.getBytes()));
-        when(mockObjectMapper.readValue(mockErrorJson, ListAllTableResponse.class)).thenReturn(mockErrorResponse);
 
         larkBaseService.listTables(baseId);
     }
@@ -183,18 +165,11 @@ public class LarkBaseServiceTest {
     public void getTableFields_success_singlePage() throws Exception {
         String baseId = "base1";
         String tableId = "tbl1";
-        List<ListFieldResponse.FieldItem> items = Collections.singletonList(
-                ListFieldResponse.FieldItem.builder().fieldId("fld1").fieldName("Field 1").uiType("Text").build()
-        );
-        ListFieldResponse.ListData listData = ListFieldResponse.ListData.builder()
-                .items(items).hasMore(false).total(1).build();
-        ListFieldResponse mockResponse = (ListFieldResponse) ListFieldResponse.builder().code(0).data(listData).build();
         String mockJsonResponse = "{\"code\":0, \"data\":{\"items\":[{\"field_id\":\"fld1\",\"field_name\":\"Field 1\",\"ui_type\":\"Text\"}],\"has_more\":false}}";
 
         when(mockHttpClient.execute(any(HttpGet.class))).thenReturn(mockHttpResponse);
         when(mockHttpResponse.getEntity()).thenReturn(mockHttpEntity);
         when(mockHttpEntity.getContent()).thenReturn(new ByteArrayInputStream(mockJsonResponse.getBytes()));
-        when(mockObjectMapper.readValue(mockJsonResponse, ListFieldResponse.class)).thenReturn(mockResponse);
 
         List<ListFieldResponse.FieldItem> result = larkBaseService.getTableFields(baseId, tableId);
 

@@ -22,7 +22,7 @@ package com.amazonaws.athena.connectors.lark.base.service;
 import com.amazonaws.athena.connectors.lark.base.model.LarkDatabaseRecord;
 import com.amazonaws.athena.connectors.lark.base.model.response.ListAllFolderResponse;
 import com.amazonaws.athena.connectors.lark.base.util.CommonUtil;
-import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.util.EntityUtils;
@@ -69,37 +69,38 @@ public class LarkDriveService extends CommonLarkService{
                 logger.info("Fetching bases from Lark Drive API, url: {}", uri);
 
                 HttpGet request = new HttpGet(uri);
-                request.setHeader("Authorization", "Bearer " + tenantAccessToken);
-                request.setHeader("Content-Type", "application/json");
+                request.setHeader(HEADER_AUTHORIZATION, AUTH_BEARER_PREFIX + tenantAccessToken);
+                request.setHeader(HEADER_CONTENT_TYPE, CONTENT_TYPE_JSON);
 
-                HttpResponse response = httpClient.execute(request);
-                String responseBody = EntityUtils.toString(response.getEntity());
+                try (CloseableHttpResponse response = httpClient.execute(request)) {
+                    String responseBody = EntityUtils.toString(response.getEntity());
 
-                ListAllFolderResponse tableResponse = objectMapper.readValue(responseBody, ListAllFolderResponse.class);
+                    ListAllFolderResponse tableResponse = objectMapper.readValue(responseBody, ListAllFolderResponse.class);
 
-                // 1254002: No more data
-                if (tableResponse.getCode() == 0 || tableResponse.getCode() == 1254002) {
-                    if (tableResponse.getFiles() != null) {
+                    // 1254002: No more data
+                    if (tableResponse.getCode() == 0 || tableResponse.getCode() == 1254002) {
+                        if (tableResponse.getFiles() != null) {
 
-                        List<ListAllFolderResponse.DriveFile> filteredFiles = tableResponse.getFiles().stream()
-                                .filter(file -> file.getType().equalsIgnoreCase("bitable")).toList();
+                            List<ListAllFolderResponse.DriveFile> filteredFiles = tableResponse.getFiles().stream()
+                                    .filter(file -> file.getType().equalsIgnoreCase("bitable")).toList();
 
-                        for(ListAllFolderResponse.DriveFile file: filteredFiles) {
-                            allTables.add(
-                                    new LarkDatabaseRecord(
-                                            file.getToken(),
-                                            CommonUtil.sanitizeGlueRelatedName(file.getName())
-                                    )
-                            );
+                            for(ListAllFolderResponse.DriveFile file: filteredFiles) {
+                                allTables.add(
+                                        new LarkDatabaseRecord(
+                                                file.getToken(),
+                                                CommonUtil.sanitizeGlueRelatedName(file.getName())
+                                        )
+                                );
+                            }
+
+
                         }
 
-
+                        pageToken = tableResponse.getNextPageToken();
+                        hasMore = tableResponse.hasMore();
+                    } else {
+                        throw new IOException("Failed to retrieve tables for folder: " + folderToken + ", Error: " + tableResponse.getMsg());
                     }
-
-                    pageToken = tableResponse.getNextPageToken();
-                    hasMore = tableResponse.hasMore();
-                } else {
-                    throw new IOException("Failed to retrieve tables for folder: " + folderToken + ", Error: " + tableResponse.getMsg());
                 }
             } catch (Exception e) {
                 throw new RuntimeException("Failed to get records for folder: " + folderToken, e);

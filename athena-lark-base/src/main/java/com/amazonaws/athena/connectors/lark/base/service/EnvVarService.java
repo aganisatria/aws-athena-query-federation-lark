@@ -42,6 +42,7 @@ public class EnvVarService {
     private final boolean activateLarkBaseSource;
     private final boolean activateLarkDriveSource;
     private final boolean activateParallelSplit;
+    private final boolean enableDebugLogging;
     private final String larkBaseSources;
     private final String larkDriveSources;
 
@@ -76,6 +77,7 @@ public class EnvVarService {
         this.activateLarkBaseSource = Boolean.parseBoolean(configOptions.getOrDefault(DOES_ACTIVATE_LARK_BASE_SOURCE_ENV_VAR, "false"));
         this.activateLarkDriveSource = Boolean.parseBoolean(configOptions.getOrDefault(DOES_ACTIVATE_LARK_DRIVE_SOURCE_ENV_VAR, "false"));
         this.activateParallelSplit = Boolean.parseBoolean(configOptions.getOrDefault(DOES_ACTIVATE_PARALLEL_SPLIT_ENV_VAR, "false"));
+        this.enableDebugLogging = Boolean.parseBoolean(configOptions.getOrDefault(ENABLE_DEBUG_LOGGING_ENV_VAR, "false"));
         this.larkBaseSources = configOptions.getOrDefault(LARK_BASE_SOURCES_ENV_VAR, "");
         this.larkDriveSources = configOptions.getOrDefault(LARK_DRIVE_SOURCES_ENV_VAR, "");
 
@@ -87,6 +89,7 @@ public class EnvVarService {
     public boolean isActivateLarkBaseSource() { return activateLarkBaseSource; }
     public boolean isActivateLarkDriveSource() { return activateLarkDriveSource; }
     public boolean isActivateParallelSplit() { return activateParallelSplit; }
+    public boolean isEnableDebugLogging() { return enableDebugLogging; }
     public String getLarkBaseSources() { return larkBaseSources; }
     public String getLarkDriveSources() { return larkDriveSources; }
 }

@@ -126,6 +126,9 @@ public class BaseRecordHandler extends RecordHandler {
     @Override
     protected void readWithConstraint(BlockSpiller spiller, ReadRecordsRequest recordsRequest,
                                       QueryStatusChecker queryStatusChecker) {
+        Objects.requireNonNull(spiller, "spiller cannot be null");
+        Objects.requireNonNull(recordsRequest, "recordsRequest cannot be null");
+        Objects.requireNonNull(queryStatusChecker, "queryStatusChecker cannot be null");
 
         if (recordsRequest.getConstraints().isQueryPassThrough()) {
             logger.error("readWithConstraint for QueryPassthrough currently not supported");
@@ -145,7 +148,9 @@ public class BaseRecordHandler extends RecordHandler {
             }
         }
         RegistererExtractor localRegistererExtractor = new RegistererExtractor(larkFieldTypeMap);
-        logger.info("readWithConstraint: enter - {}", recordsRequest.getSplit());
+        if (envVarService.isEnableDebugLogging()) {
+            logger.info("readWithConstraint: enter - {}", recordsRequest.getSplit());
+        }
 
         try {
             String baseId = split.getProperty(BASE_ID_PROPERTY);
@@ -173,7 +178,12 @@ public class BaseRecordHandler extends RecordHandler {
 
             writeItemsToBlock(spiller, recordsRequest, queryStatusChecker, recordIterator, localRegistererExtractor);
         } catch (Exception e) {
-            throw new AthenaConnectorException("Error reading records",
+            String errorMsg = String.format("Error reading records from table %s.%s: %s",
+                    split.getProperty(BASE_ID_PROPERTY),
+                    split.getProperty(TABLE_ID_PROPERTY),
+                    e.getMessage());
+            logger.error(errorMsg, e);
+            throw new AthenaConnectorException(errorMsg,
                     ErrorDetails.builder().errorCode(FederationSourceErrorCode.INTERNAL_SERVICE_EXCEPTION.toString()).build());
         }
     }
@@ -198,11 +208,13 @@ public class BaseRecordHandler extends RecordHandler {
         try {
             GeneratedRowWriter rowWriter = rowWriterBuilder.build();
             processRecords(spiller, recordsRequest, queryStatusChecker, itemIterator, rowWriter);
+            if (envVarService.isEnableDebugLogging()) {
+                logger.info("Completed writing items to block");
+            }
         } catch (Exception e) {
-            logger.error("Error building/using row writer", e);
+            logger.error("Error building/using row writer: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to write items to block: " + e.getMessage(), e);
         }
-
-        logger.info("Completed writing items to block");
     }
 
     /**
@@ -234,7 +246,9 @@ public class BaseRecordHandler extends RecordHandler {
             final int currentRowNum = ++rowCount;
 
             try {
-                logger.info("Attempting to write row #{}. Flattened data: {}", currentRowNum, item);
+                if (envVarService.isEnableDebugLogging()) {
+                    logger.info("Attempting to write row #{}. Flattened data: {}", currentRowNum, item);
+                }
 
                 // Make sure all schema fields are present, provide defaults based on schema AND constraints
                 for (Field field : schema.getFields()) {
@@ -244,7 +258,9 @@ public class BaseRecordHandler extends RecordHandler {
                         ValueSet valueSet = constraintSummary.get(fieldName);
                         if (valueSet != null) {
                             constraintAllowsNull = valueSet.isNullAllowed();
-                            logger.info("Row #{}: Constraint found for field '{}'. nullAllowed={}", currentRowNum, fieldName, constraintAllowsNull);
+                            if (envVarService.isEnableDebugLogging()) {
+                                logger.info("Row #{}: Constraint found for field '{}'. nullAllowed={}", currentRowNum, fieldName, constraintAllowsNull);
+                            }
                         }
 
                         // Input null if schema allows null and constraint allows null.
@@ -252,10 +268,14 @@ public class BaseRecordHandler extends RecordHandler {
                         if (field.isNullable() && constraintAllowsNull) {
                             if (field.getType() instanceof ArrowType.Bool) {
                                 item.put(fieldName, false);
-                                logger.info("Row #{}: Missing boolean field '{}'. Defaulting to false.", currentRowNum, fieldName);
+                                if (envVarService.isEnableDebugLogging()) {
+                                    logger.info("Row #{}: Missing boolean field '{}'. Defaulting to false.", currentRowNum, fieldName);
+                                }
                             } else {
                                 item.put(fieldName, null);
-                                logger.info("Row #{}: Field '{}' is nullable and constraint allows null (or no constraint), putting null.", currentRowNum, fieldName);
+                                if (envVarService.isEnableDebugLogging()) {
+                                    logger.info("Row #{}: Field '{}' is nullable and constraint allows null (or no constraint), putting null.", currentRowNum, fieldName);
+                                }
                             }
                         } else {
                             ArrowType fieldType = field.getType();
@@ -275,7 +295,9 @@ public class BaseRecordHandler extends RecordHandler {
                             writeResult[0] = 1;
                             return 1;
                         } else {
-                            logger.info("rowWriter.writeRow returned false for row #{}. Data: {}", currentRowNum, dataToWrite);
+                            if (envVarService.isEnableDebugLogging()) {
+                                logger.info("rowWriter.writeRow returned false for row #{}. Data: {}", currentRowNum, dataToWrite);
+                            }
                             writeResult[0] = 0;
                             return 0;
                         }
@@ -298,8 +320,10 @@ public class BaseRecordHandler extends RecordHandler {
             }
         }
 
-        logger.info("Completed processing records: {} total rows processed, {} success, {} filtered/error",
-                rowCount, successCount, errorCount);
+        if (envVarService.isEnableDebugLogging()) {
+            logger.info("Completed processing records: {} total rows processed, {} success, {} filtered/error",
+                    rowCount, successCount, errorCount);
+        }
     }
 
     /**
@@ -313,7 +337,9 @@ public class BaseRecordHandler extends RecordHandler {
      */
     private Object getDefaultValueForType(ArrowType type) {
         Types.MinorType minorType = Types.getMinorTypeForArrowType(type);
-        logger.info("getDefaultValueForType: type={}, minorType={}", type, minorType);
+        if (envVarService.isEnableDebugLogging()) {
+            logger.info("getDefaultValueForType: type={}, minorType={}", type, minorType);
+        }
 
         return switch (minorType) {
             case VARCHAR, LARGEVARCHAR, VIEWVARCHAR -> "";
@@ -337,11 +363,15 @@ public class BaseRecordHandler extends RecordHandler {
             }
 
             case LIST, LARGELIST, LISTVIEW, LARGELISTVIEW, FIXED_SIZE_LIST -> {
-                logger.info("Returning empty List as default for non-nullable MinorType {}", minorType);
+                if (envVarService.isEnableDebugLogging()) {
+                    logger.info("Returning empty List as default for non-nullable MinorType {}", minorType);
+                }
                 yield Collections.emptyList();
             }
             case STRUCT, MAP -> {
-                logger.info("Returning empty Map as default for non-nullable MinorType {}", minorType);
+                if (envVarService.isEnableDebugLogging()) {
+                    logger.info("Returning empty Map as default for non-nullable MinorType {}", minorType);
+                }
                 yield Collections.emptyMap();
             }
 
@@ -407,22 +437,30 @@ public class BaseRecordHandler extends RecordHandler {
              */
             private boolean fetchNextPage() {
                 if (!hasMorePages || (expectedRowCountForSplit > 0 && currentFetchDataCount >= expectedRowCountForSplit)) {
-                    logger.info("fetchNextPage: Stopping fetch. HasMorePages={}, FetchedCount={}, ExpectedForSplit={}",
-                            hasMorePages, currentFetchDataCount, expectedRowCountForSplit);
+                    if (envVarService.isEnableDebugLogging()) {
+                        logger.info("fetchNextPage: Stopping fetch. HasMorePages={}, FetchedCount={}, ExpectedForSplit={}",
+                                hasMorePages, currentFetchDataCount, expectedRowCountForSplit);
+                    }
                     return false;
                 }
                 try {
-                    logger.info("Fetching next page: base={}, table={}, pageSize={}, pageToken={}, filter='{}', sort='{}'",
-                            baseId, tableId, pageSizeForApi, currentPageToken, finalFilterExpression, finalSortExpression);
+                    if (envVarService.isEnableDebugLogging()) {
+                        logger.info("Fetching next page: base={}, table={}, pageSize={}, pageToken={}, filter='{}', sort='{}'",
+                                baseId, tableId, pageSizeForApi, currentPageToken, finalFilterExpression, finalSortExpression);
+                    }
+
+                    com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest tableRecordsRequest =
+                            com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest.builder()
+                                    .baseId(baseId)
+                                    .tableId(tableId)
+                                    .pageSize(pageSizeForApi)
+                                    .pageToken(currentPageToken)
+                                    .filterJson(finalFilterExpression)
+                                    .sortJson(finalSortExpression)
+                                    .build();
 
                     ListRecordsResponse response = invokerCache.get(tableId).invoke(() ->
-                            larkBaseService.getTableRecords(
-                                    baseId,
-                                    tableId,
-                                    pageSizeForApi,
-                                    currentPageToken,
-                                    finalFilterExpression,
-                                    finalSortExpression)
+                            larkBaseService.getTableRecords(tableRecordsRequest)
                     );
 
                     String nextPageToken = (response != null) ? response.getPageToken() : null;
@@ -430,7 +468,9 @@ public class BaseRecordHandler extends RecordHandler {
                     List<ListRecordsResponse.RecordItem> records = (response != null) ? response.getItems() : Collections.emptyList();
                     if (records == null) records = Collections.emptyList();
 
-                    logger.info("API Response: Records={}, HasMore={}, NextToken={}", records.size(), responseHasMore, nextPageToken);
+                    if (envVarService.isEnableDebugLogging()) {
+                        logger.info("API Response: Records={}, HasMore={}, NextToken={}", records.size(), responseHasMore, nextPageToken);
+                    }
 
                     currentPageIterator = records.iterator();
 
@@ -439,7 +479,9 @@ public class BaseRecordHandler extends RecordHandler {
                     currentFetchDataCount += records.size();
 
                     if (expectedRowCountForSplit > 0 && currentFetchDataCount >= expectedRowCountForSplit) {
-                        logger.info("Reached expected row count ({}) for this split {}. Stopping further fetches.", expectedRowCountForSplit, baseId + "." + tableId);
+                        if (envVarService.isEnableDebugLogging()) {
+                            logger.info("Reached expected row count ({}) for this split {}. Stopping further fetches.", expectedRowCountForSplit, baseId + "." + tableId);
+                        }
                         hasMorePages = false;
                     }
 
