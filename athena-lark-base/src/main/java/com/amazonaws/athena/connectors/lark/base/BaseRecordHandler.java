@@ -35,6 +35,7 @@ import com.amazonaws.athena.connectors.lark.base.model.response.ListRecordsRespo
 import com.amazonaws.athena.connectors.lark.base.service.EnvVarService;
 import com.amazonaws.athena.connectors.lark.base.service.LarkBaseService;
 import com.amazonaws.athena.connectors.lark.base.translator.ConstraintTranslator;
+import com.amazonaws.athena.connectors.lark.base.translator.SearchApiFilterTranslator;
 import com.amazonaws.athena.connectors.lark.base.translator.RegistererExtractor;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -249,8 +250,13 @@ public class BaseRecordHandler extends RecordHandler {
                         // Input null if schema allows null and constraint allows null.
                         // Otherwise, insert default non-null value.
                         if (field.isNullable() && constraintAllowsNull) {
-                            item.put(fieldName, null);
-                            logger.info("Row #{}: Field '{}' is nullable and constraint allows null (or no constraint), putting null.", currentRowNum, fieldName);
+                            if (field.getType() instanceof ArrowType.Bool) {
+                                item.put(fieldName, false);
+                                logger.info("Row #{}: Missing boolean field '{}'. Defaulting to false.", currentRowNum, fieldName);
+                            } else {
+                                item.put(fieldName, null);
+                                logger.info("Row #{}: Field '{}' is nullable and constraint allows null (or no constraint), putting null.", currentRowNum, fieldName);
+                            }
                         } else {
                             ArrowType fieldType = field.getType();
                             Object defaultValue = getDefaultValueForType(fieldType);
@@ -383,7 +389,7 @@ public class BaseRecordHandler extends RecordHandler {
 
             private String buildFinalFilter() {
                 if (isParallelSplit && envVarService.isActivateParallelSplit()) {
-                    return ConstraintTranslator.toSplitFilterJson(
+                    return SearchApiFilterTranslator.toSplitFilterJson(
                             originalFilterExpression,
                             splitStartIndex,
                             splitEndIndex

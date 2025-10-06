@@ -22,6 +22,7 @@ package com.amazonaws.athena.connectors.lark.base.util;
 import com.amazonaws.athena.connectors.lark.base.model.AthenaFieldLarkBaseMapping;
 import com.amazonaws.athena.connectors.lark.base.model.NestedUIType;
 import com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum;
+import org.apache.arrow.vector.types.TimeUnit;
 import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
@@ -29,6 +30,7 @@ import org.apache.arrow.vector.types.pojo.FieldType;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 public class LarkBaseTypeUtils {
     /**
@@ -204,7 +206,18 @@ public class LarkBaseTypeUtils {
         List<Field> children = Collections.emptyList();
         FieldType fieldType;
 
-        switch (minorType) {
+        // Handle timestamp fields (when minorType is null)
+        if (minorType == null) {
+            UITypeEnum uiType = larkField.nestedUIType().uiType();
+            if (uiType == UITypeEnum.DATE_TIME || uiType == UITypeEnum.CREATED_TIME || uiType == UITypeEnum.MODIFIED_TIME) {
+                // Create Timestamp with millisecond precision and UTC timezone
+                ArrowType timestampType = new ArrowType.Timestamp(TimeUnit.MILLISECOND, "UTC");
+                fieldType = new FieldType(isNullable, timestampType, null, null);
+                return new Field(fieldName, fieldType, children);
+            }
+        }
+
+        switch (Objects.requireNonNull(minorType)) {
             case LIST:
                 Field childField = getLarkListChildField(larkField);
                 children = Collections.singletonList(childField);
@@ -213,10 +226,6 @@ public class LarkBaseTypeUtils {
             case STRUCT:
                 children = getLarkStructChildFields(larkField);
                 fieldType = new FieldType(isNullable, ArrowType.Struct.INSTANCE, null, null);
-                break;
-            case DATEMILLI, TINYINT:
-                ArrowType dateMilliType = minorType.getType();
-                fieldType = new FieldType(isNullable, dateMilliType, null);
                 break;
             case DECIMAL:
                 fieldType = new FieldType(isNullable, new ArrowType.Decimal(38, 18, 128), null, null);

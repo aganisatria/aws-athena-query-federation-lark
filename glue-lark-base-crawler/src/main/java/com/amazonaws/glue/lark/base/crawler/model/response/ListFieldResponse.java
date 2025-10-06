@@ -49,7 +49,7 @@ public final class ListFieldResponse extends BaseResponse<ListFieldResponse.List
 
     public List<FieldItem> getItems() {
         ListData data = getData();
-        return (data != null && data.getItems() != null) ? data.getItems() : Collections.emptyList();
+        return data != null ? data.getItems() : Collections.emptyList();
     }
 
     public String getPageToken() {
@@ -195,6 +195,9 @@ public final class ListFieldResponse extends BaseResponse<ListFieldResponse.List
                 }
 
                 Map<String, Object> typeMap = (Map<String, Object>) typeObj;
+                if (!typeMap.containsKey("ui_type") || typeMap.get("ui_type") == null) {
+                    return UITypeEnum.TEXT.getUiType();
+                }
                 String dataTypeObj = typeMap.get("ui_type").toString();
                 return UITypeEnum.fromString(dataTypeObj).getUiType();
             }

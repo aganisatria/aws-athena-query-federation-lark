@@ -28,6 +28,7 @@ import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -72,7 +73,8 @@ public class LarkBaseServiceTest {
     @Before
     public void setUp() throws IOException {
         larkBaseService.httpClient = mockHttpClient;
-        larkBaseService.objectMapper = mockObjectMapper;
+        // Use real ObjectMapper instead of mock to handle JSON serialization
+        larkBaseService.objectMapper = new ObjectMapper();
 
         doAnswer(invocation -> {
             larkBaseService.tenantAccessToken = MOCK_TENANT_ACCESS_TOKEN;
@@ -214,13 +216,12 @@ public class LarkBaseServiceTest {
         ListRecordsResponse.ListData listData = ListRecordsResponse.ListData.builder()
                 .items(items).hasMore(false).pageToken(null).total(1).build();
         ListRecordsResponse mockResponse = (ListRecordsResponse) ListRecordsResponse.builder().code(0).data(listData).build();
-        String mockJsonResponse = "{\"data\":{\"items\":[{\"record_id\":\"rec123\",\"fields\":{\"id\":\"rec123\",\"name\":\"Record Name\"}}],\"has_more\":false}}";
+        String mockJsonResponse = "{\"code\":0,\"data\":{\"items\":[{\"record_id\":\"rec123\",\"fields\":{\"id\":\"rec123\",\"name\":\"Record Name\"}}],\"has_more\":false}}";
 
 
-        when(mockHttpClient.execute(any(HttpGet.class))).thenReturn(mockHttpResponse);
+        when(mockHttpClient.execute(any(HttpPost.class))).thenReturn(mockHttpResponse);
         when(mockHttpResponse.getEntity()).thenReturn(mockHttpEntity);
         when(mockHttpEntity.getContent()).thenReturn(new ByteArrayInputStream(mockJsonResponse.getBytes()));
-        when(mockObjectMapper.readValue(mockJsonResponse, ListRecordsResponse.class)).thenReturn(mockResponse);
 
         List<LarkDatabaseRecord> result = larkBaseService.getTableRecords(baseId, tableId);
 

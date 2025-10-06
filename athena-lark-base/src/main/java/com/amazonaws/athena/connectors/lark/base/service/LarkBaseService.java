@@ -25,9 +25,11 @@ import com.amazonaws.athena.connectors.lark.base.model.response.ListAllTableResp
 import com.amazonaws.athena.connectors.lark.base.model.response.ListFieldResponse;
 import com.amazonaws.athena.connectors.lark.base.model.response.ListRecordsResponse;
 import com.amazonaws.athena.connectors.lark.base.util.CommonUtil;
+import com.amazonaws.athena.connectors.lark.base.util.SearchApiResponseNormalizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.util.EntityUtils;
 import org.slf4j.Logger;
@@ -102,8 +104,8 @@ public class LarkBaseService extends CommonLarkService {
     }
 
     /**
-     * Getting records from a table with or without filter
-     * <a href="https://open.larksuite.com/document/server-docs/docs/bitable-v1/app-table-record/list">DOCS</a>
+     * Getting records from a table with or without filter using the Search API
+     * <a href="https://open.larksuite.com/document/uAjLw4CM/ukTMukTMukTM/reference/bitable-v1/app-table-record/search">DOCS</a>
      * @param baseId base ID
      * @param tableId table ID
      * @param pageSize Total record per page
@@ -116,28 +118,35 @@ public class LarkBaseService extends CommonLarkService {
         refreshTenantAccessToken();
 
         try {
-            URIBuilder uriBuilder = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables/" + tableId + "/records")
-                    .addParameter("page_size", String.valueOf(pageSize));
+            URI uri = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables/" + tableId + "/records/search").build();
+
+            logger.info("Fetching records from Lark Base Search API, url: {}", uri);
+
+            // Build request body
+            com.amazonaws.athena.connectors.lark.base.model.request.SearchRecordsRequest.Builder requestBuilder =
+                    com.amazonaws.athena.connectors.lark.base.model.request.SearchRecordsRequest.builder()
+                            .pageSize((int) pageSize);
 
             if (pageToken != null && !pageToken.isEmpty()) {
-                uriBuilder.addParameter("page_token", pageToken);
+                requestBuilder.pageToken(pageToken);
             }
 
             if (filterJson != null && !filterJson.isEmpty()) {
-                uriBuilder.addParameter("filter", filterJson);
+                requestBuilder.filter(filterJson);
             }
 
             if (sortJson != null && !sortJson.isEmpty()) {
-                uriBuilder.addParameter("sort", sortJson);
+                requestBuilder.sort(sortJson);
             }
 
-            URI uri = uriBuilder.build();
+            String requestBody = OBJECT_MAPPER.writeValueAsString(requestBuilder.build());
 
-            logger.info("Fetching records from Lark Base API, url: {}", uri);
+            logger.info("Search API request body: {}", requestBody);
 
-            HttpGet request = new HttpGet(uri);
+            HttpPost request = new HttpPost(uri);
             request.setHeader("Authorization", "Bearer " + tenantAccessToken);
             request.setHeader("Content-Type", "application/json");
+            request.setEntity(new org.apache.http.entity.StringEntity(requestBody, java.nio.charset.StandardCharsets.UTF_8));
 
             HttpResponse response = httpClient.execute(request);
             String responseBody = EntityUtils.toString(response.getEntity());
@@ -157,7 +166,7 @@ public class LarkBaseService extends CommonLarkService {
     }
 
     /**
-     * Sanitize field names for all records in the response
+     * Sanitize field names and normalize Search API response format for all records
      * @param response Response object
      */
     private void sanitizeRecordFieldNames(ListRecordsResponse response) {
@@ -170,7 +179,11 @@ public class LarkBaseService extends CommonLarkService {
             Map<String, Object> originalFields = item.getFields();
 
             if (originalFields != null) {
-                for (Map.Entry<String, Object> entry : originalFields.entrySet()) {
+                // First normalize Search API format to List API format
+                Map<String, Object> normalizedFields = SearchApiResponseNormalizer.normalizeRecordFields(originalFields);
+
+                // Then sanitize field names for Glue compatibility
+                for (Map.Entry<String, Object> entry : normalizedFields.entrySet()) {
                     String sanitizedKey = CommonUtil.sanitizeGlueRelatedName(entry.getKey());
                     sanitizedFields.put(sanitizedKey, entry.getValue());
                 }

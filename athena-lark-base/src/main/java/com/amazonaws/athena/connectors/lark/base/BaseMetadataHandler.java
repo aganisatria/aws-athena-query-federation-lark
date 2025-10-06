@@ -38,6 +38,7 @@ import com.amazonaws.athena.connectors.lark.base.model.*;
 import com.amazonaws.athena.connectors.lark.base.resolver.LarkBaseTableResolver;
 import com.amazonaws.athena.connectors.lark.base.service.*;
 import com.amazonaws.athena.connectors.lark.base.translator.ConstraintTranslator;
+import com.amazonaws.athena.connectors.lark.base.translator.SearchApiFilterTranslator;
 import com.amazonaws.athena.connectors.lark.base.util.CommonUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -425,7 +426,7 @@ public class BaseMetadataHandler
         try {
             if (request.getConstraints() != null && request.getConstraints().getSummary() != null && !request.getConstraints().getSummary().isEmpty()) {
                 if (fieldNameMappings != null && !fieldNameMappings.isEmpty()) {
-                    filterExpression = ConstraintTranslator.toFilterJson(request.getConstraints().getSummary(), fieldNameMappings);
+                    filterExpression = SearchApiFilterTranslator.toFilterJson(request.getConstraints().getSummary(), fieldNameMappings);
                     logger.info("getPartitions: Translated filter constraints for {}: {}", tableName, filterExpression);
                 }
             } else {
@@ -447,7 +448,7 @@ public class BaseMetadataHandler
         String sortExpression = "";
         try {
             if (fieldNameMappings != null && !useParallelSplits && hasOrderBy && !fieldNameMappings.isEmpty()) {
-                sortExpression = ConstraintTranslator.toSortJson(request.getConstraints().getOrderByClause(), fieldNameMappings);
+                sortExpression = SearchApiFilterTranslator.toSortJson(request.getConstraints().getOrderByClause(), fieldNameMappings);
             }
         } catch (Exception e) {
             logger.warn("getPartitions: Failed to translate sort expression for {}: {}. Proceeding without sort.", tableName, e.getMessage(), e);
