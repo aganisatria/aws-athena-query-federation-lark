@@ -50,6 +50,21 @@ public class BaseExceptionFilter
     @Override
     public boolean isMatch(Exception ex)
     {
+        // Check AWS SDK throttling exceptions first (before checking message)
+        if (ex instanceof TooManyRequestsException ||
+                ex instanceof ConcurrentModificationException ||
+                ex instanceof ConcurrentRunsExceededException ||
+                ex instanceof ConflictException ||
+                ex instanceof IntegrationConflictOperationException ||
+                ex instanceof IntegrationQuotaExceededException ||
+                ex instanceof OperationTimeoutException ||
+                ex instanceof ResourceNotReadyException ||
+                ex instanceof ResourceNumberLimitExceededException ||
+                ex instanceof ThrottlingException) {
+            logger.info("Throttling detected: {}", ex.getClass().getSimpleName());
+            return true;
+        }
+
         String message = ex.getMessage();
         if (message == null) {
             return false;
@@ -82,20 +97,6 @@ public class BaseExceptionFilter
         // Base is copying
         if (message.contains("1254036") || message.contains("Base is copying")) {
             logger.info("Throttling detected: Base is copying");
-            return true;
-        }
-
-        if (ex instanceof TooManyRequestsException ||
-                ex instanceof ConcurrentModificationException ||
-                ex instanceof ConcurrentRunsExceededException ||
-                ex instanceof ConflictException ||
-                ex instanceof IntegrationConflictOperationException ||
-                ex instanceof IntegrationQuotaExceededException ||
-                ex instanceof OperationTimeoutException ||
-                ex instanceof ResourceNotReadyException ||
-                ex instanceof ResourceNumberLimitExceededException ||
-                ex instanceof ThrottlingException) {
-            logger.info("Throttling detected: {}", ex.getClass().getSimpleName());
             return true;
         }
 

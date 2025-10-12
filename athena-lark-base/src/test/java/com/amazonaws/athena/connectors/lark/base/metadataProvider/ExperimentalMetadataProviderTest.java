@@ -82,7 +82,7 @@ public class ExperimentalMetadataProviderTest {
                         .build()
         ));
 
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
 
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
 
@@ -101,7 +101,7 @@ public class ExperimentalMetadataProviderTest {
         when(larkBaseService.getTableFields("base1", "table1")).thenReturn(List.of(lookupField));
         when(larkBaseService.getLookupType("base1", "tblxxxx", "fldxxxx")).thenReturn(UITypeEnum.TEXT);
 
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
 
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
 
@@ -113,7 +113,7 @@ public class ExperimentalMetadataProviderTest {
     public void getTableSchema_noIds() throws Exception {
         when(athenaService.getAthenaQueryString(anyString())).thenReturn("SELECT * FROM somewhere.else");
 
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
 
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
 
@@ -125,7 +125,7 @@ public class ExperimentalMetadataProviderTest {
         when(athenaService.getAthenaQueryString(anyString())).thenReturn("SELECT * FROM \"base1\".\"table1\"");
         when(larkBaseService.getTableFields(anyString(), anyString())).thenThrow(new RuntimeException("API Error"));
 
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
 
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
 
@@ -137,7 +137,7 @@ public class ExperimentalMetadataProviderTest {
         when(athenaService.getAthenaQueryString(anyString())).thenReturn("SELECT * FROM \"base1\".\"table1\"");
         when(larkBaseService.getTableFields(anyString(), anyString())).thenReturn(Collections.emptyList());
 
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
 
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
 
@@ -151,7 +151,7 @@ public class ExperimentalMetadataProviderTest {
                 ListFieldResponse.FieldItem.builder().fieldName(" ").build()
         ));
 
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
 
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
 
@@ -165,7 +165,7 @@ public class ExperimentalMetadataProviderTest {
                 ListFieldResponse.FieldItem.builder().fieldName("field1").uiType(UITypeEnum.TEXT.name()).build()
         ));
 
-        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L), Mockito.mock(Schema.class), Collections.emptySet());
+        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L, Collections.emptyMap(), null), Mockito.mock(Schema.class), Collections.emptySet());
 
         Optional<PartitionInfoResult> result = metadataProvider.getPartitionInfo(new TableName("base1", "table1"), request);
 
@@ -178,7 +178,7 @@ public class ExperimentalMetadataProviderTest {
     public void getPartitionInfo_noIds() throws Exception {
         when(athenaService.getAthenaQueryString(anyString())).thenReturn("SELECT * FROM somewhere.else");
 
-        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L), Mockito.mock(Schema.class), Collections.emptySet());
+        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L, Collections.emptyMap(), null), Mockito.mock(Schema.class), Collections.emptySet());
 
         Optional<PartitionInfoResult> result = metadataProvider.getPartitionInfo(new TableName("base1", "table1"), request);
 
@@ -190,7 +190,7 @@ public class ExperimentalMetadataProviderTest {
         when(athenaService.getAthenaQueryString(anyString())).thenReturn("SELECT * FROM \"base1\".\"table1\"");
         when(larkBaseService.getTableFields(anyString(), anyString())).thenReturn(Collections.emptyList());
 
-        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L), Mockito.mock(Schema.class), Collections.emptySet());
+        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L, Collections.emptyMap(), null), Mockito.mock(Schema.class), Collections.emptySet());
 
         Optional<PartitionInfoResult> result = metadataProvider.getPartitionInfo(new TableName("base1", "table1"), request);
 
@@ -199,7 +199,7 @@ public class ExperimentalMetadataProviderTest {
 
     @Test
     public void extractOriginalIds_missingQueryId() {
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), null, "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), null, "catalog", new TableName("base1", "table1"), Collections.emptyMap());
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
         assertFalse(result.isPresent());
     }
@@ -207,7 +207,7 @@ public class ExperimentalMetadataProviderTest {
     @Test
     public void extractOriginalIds_athenaError() throws Exception {
         when(athenaService.getAthenaQueryString(anyString())).thenThrow(InvalidRequestException.builder().build());
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
         assertFalse(result.isPresent());
     }
@@ -215,7 +215,7 @@ public class ExperimentalMetadataProviderTest {
     @Test
     public void extractOriginalIds_timeoutError() throws Exception {
         when(athenaService.getAthenaQueryString(anyString())).thenThrow(new RuntimeException(new TimeoutException()));
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
         assertFalse(result.isPresent());
     }
@@ -223,7 +223,7 @@ public class ExperimentalMetadataProviderTest {
     @Test
     public void extractOriginalIds_genericError() throws Exception {
         when(athenaService.getAthenaQueryString(anyString())).thenThrow(new RuntimeException());
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
         assertFalse(result.isPresent());
     }
@@ -232,7 +232,7 @@ public class ExperimentalMetadataProviderTest {
     public void discoverTableFields_apiError() throws Exception {
         when(athenaService.getAthenaQueryString(anyString())).thenReturn("SELECT * FROM \"base1\".\"table1\"");
         when(larkBaseService.getTableFields(anyString(), anyString())).thenThrow(new RuntimeException("API Error"));
-        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L), Mockito.mock(Schema.class), Collections.emptySet());
+        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L, Collections.emptyMap(), null), Mockito.mock(Schema.class), Collections.emptySet());
         Optional<PartitionInfoResult> result = metadataProvider.getPartitionInfo(new TableName("base1", "table1"), request);
         assertFalse(result.isPresent());
     }
@@ -248,7 +248,7 @@ public class ExperimentalMetadataProviderTest {
         when(larkBaseService.getTableFields("base1", "table1")).thenReturn(List.of(lookupField));
         when(larkBaseService.getLookupType("base1", "tblxxxx", "fldxxxx")).thenReturn(UITypeEnum.TEXT);
 
-        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L), Mockito.mock(Schema.class), Collections.emptySet());
+        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L, Collections.emptyMap(), null), Mockito.mock(Schema.class), Collections.emptySet());
 
         Optional<PartitionInfoResult> result = metadataProvider.getPartitionInfo(new TableName("base1", "table1"), request);
 
@@ -275,7 +275,7 @@ public class ExperimentalMetadataProviderTest {
     public void getTableSchema_extractOriginalIdsFromQuery_returnsEmpty() throws Exception {
         when(athenaService.getAthenaQueryString(anyString())).thenReturn("SELECT * FROM somewhere.else");
 
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
 
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
 
@@ -286,7 +286,7 @@ public class ExperimentalMetadataProviderTest {
     public void getPartitionInfo_extractOriginalIdsFromQuery_returnsEmpty() throws Exception {
         when(athenaService.getAthenaQueryString(anyString())).thenReturn("SELECT * FROM somewhere.else");
 
-        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L), Mockito.mock(Schema.class), Collections.emptySet());
+        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L, Collections.emptyMap(), null), Mockito.mock(Schema.class), Collections.emptySet());
 
         Optional<PartitionInfoResult> result = metadataProvider.getPartitionInfo(new TableName("base1", "table1"), request);
 
@@ -299,7 +299,7 @@ public class ExperimentalMetadataProviderTest {
         when(larkBaseService.getTableFields(anyString(), anyString())).thenReturn(List.of(
                 ListFieldResponse.FieldItem.builder().fieldName(" ").build()
         ));
-        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L), Mockito.mock(Schema.class), Collections.emptySet());
+        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L, Collections.emptyMap(), null), Mockito.mock(Schema.class), Collections.emptySet());
         Optional<PartitionInfoResult> result = metadataProvider.getPartitionInfo(new TableName("base1", "table1"), request);
         assertFalse(result.isPresent());
     }
@@ -307,7 +307,7 @@ public class ExperimentalMetadataProviderTest {
     @Test
     public void extractOriginalIds_nullQuery() throws Exception {
         when(athenaService.getAthenaQueryString(anyString())).thenReturn(null);
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
         assertFalse(result.isPresent());
     }
@@ -323,7 +323,7 @@ public class ExperimentalMetadataProviderTest {
         when(larkBaseService.getTableFields(anyString(), anyString())).thenReturn(List.of(lookupField));
         doThrow(new RuntimeException("API Error")).when(larkBaseService).getLookupType("base1", "tblxxxx", "fldxxxx");
 
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
 
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
 
@@ -338,7 +338,7 @@ public class ExperimentalMetadataProviderTest {
                 ListFieldResponse.FieldItem.builder().fieldName(null).build()
         ));
 
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
 
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
 
@@ -356,7 +356,7 @@ public class ExperimentalMetadataProviderTest {
         when(larkBaseService.getTableFields(anyString(), anyString())).thenReturn(List.of(lookupField));
         doThrow(new RuntimeException("API Error")).when(larkBaseService).getLookupType("base1", "tblxxxx", "fldxxxx");
 
-        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L), Mockito.mock(Schema.class), Collections.emptySet());
+        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L, Collections.emptyMap(), null), Mockito.mock(Schema.class), Collections.emptySet());
 
         Optional<PartitionInfoResult> result = metadataProvider.getPartitionInfo(new TableName("base1", "table1"), request);
 
@@ -370,14 +370,14 @@ public class ExperimentalMetadataProviderTest {
         when(larkBaseService.getTableFields(anyString(), anyString())).thenReturn(List.of(
                 ListFieldResponse.FieldItem.builder().fieldName(null).build()
         ));
-        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L), Mockito.mock(Schema.class), Collections.emptySet());
+        GetTableLayoutRequest request = new GetTableLayoutRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), new Constraints(Collections.emptyMap(), Collections.emptyList(), Collections.emptyList(), 0L, Collections.emptyMap(), null), Mockito.mock(Schema.class), Collections.emptySet());
         Optional<PartitionInfoResult> result = metadataProvider.getPartitionInfo(new TableName("base1", "table1"), request);
         assertFalse(result.isPresent());
     }
 
     @Test
     public void extractOriginalIds_emptyQueryId() {
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
         assertFalse(result.isPresent());
     }
@@ -391,7 +391,7 @@ public class ExperimentalMetadataProviderTest {
                 .property(Map.of("target_field", "fldxxxx", "filter_info", Map.of("target_table", "tblxxxx")))
                 .build();
         when(larkBaseService.getTableFields(anyString(), anyString())).thenReturn(List.of(lookupField));
-        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
 
         assertTrue(result.isPresent());

@@ -1,22 +1,28 @@
 # Future Improvements and Migration Plan
 
-## 1. Checkstyle Compliance (Deferred)
+## 1. Checkstyle Compliance ✅ COMPLETED
 
 ### Status
-Currently skipped for development velocity. Must be addressed before upstream contribution.
+✅ **COMPLETED** - All checkstyle violations fixed and merged to main branch.
 
-### Action Required
-Run checkstyle and fix all violations:
+### What Was Fixed
+- Fixed all Javadoc formatting and missing documentation
+- Corrected indentation and code formatting issues
+- Added proper parameter documentation
+- Fixed whitespace and line length violations
+- Improved code structure to meet checkstyle standards
+
+### PR Details
+- **PR**: #9 - "Fix checkstyle violations across codebase"
+- **Files Modified**: 66 files (2,646 insertions, 1,184 deletions)
+- **Scope**: Both athena-lark-base and glue-lark-base-crawler modules
+- **Impact**: Code style improvements only, no functional changes
+
+### Verification
 ```bash
 JAVA_HOME="/Library/Java/JavaVirtualMachines/jdk-17.0.2.jdk/Contents/Home" mvn checkstyle:check -Dcheckstyle.consoleOutput=true
 ```
-
-### Common Issues to Fix
-- Javadoc missing or incomplete
-- Line length exceeds 120 characters
-- Import ordering
-- Whitespace issues
-- Magic numbers without explanation
+All checkstyle validations now pass for main source files.
 
 ### Reference
 - Upstream checkstyle config: https://github.com/awslabs/aws-athena-query-federation/blob/master/checkstyle.xml
@@ -24,85 +30,49 @@ JAVA_HOME="/Library/Java/JavaVirtualMachines/jdk-17.0.2.jdk/Contents/Home" mvn c
 
 ---
 
-## 2. SDK Upgrade Plan (v2025.8.1 → v2025.37.1)
+## 2. SDK Upgrade ✅ COMPLETED
 
-### Current Versions
+### Status
+✅ **COMPLETED** - Successfully upgraded from SDK v2025.8.1 to v2025.37.1.
+
+### Upgrade Details
 - **Project version**: 2022.47.1
-- **Current SDK**: 2025.8.1 (athena-lark-base/pom.xml:33)
-- **Target SDK**: 2025.37.1
+- **Previous SDK**: 2025.8.1
+- **Current SDK**: 2025.37.1 (athena-lark-base/pom.xml:30)
 
-### Upgrade Advantages
+### Changes Made
 
-#### Security & Stability
-- Zookeeper CVE fixes (updated to 3.9.4)
-- Critical dependency updates (Protobuf, AWS SDK, Elasticsearch)
-- Multiple bug fixes and stability improvements
+#### 1. Updated SDK Version
+- Updated `athena-lark-base/pom.xml` to use SDK version 2025.37.1
 
-#### New Features
-- Substrait query plan support (better query optimization)
-- OAuth improvements for DataLake Gen2
-- Pagination support for large datasets
-- Cross-account CloudWatch metrics
+#### 2. Fixed Breaking Changes
+**FederatedIdentity Constructor**
+- Old: `FederatedIdentity(String arn, String account, Map principalTags, List iamGroups)`
+- New: `FederatedIdentity(String arn, String account, Map principalTags, List iamGroups, Map configOptions)`
+- Added empty Map for `configOptions` parameter in all test usages
 
-#### Performance
-- Arrow library improvements with timestamp timezone support
-- Performance enhancements across connectors
-- Better credential handling
+**Constraints Constructor**
+- Old: `Constraints(Map summary, List expression, List orderByClause, long limit)`
+- New: `Constraints(Map summary, List expression, List orderByClause, long limit, Map queryPassthroughArguments, QueryPlan queryPlan)`
+- Added empty Map for `queryPassthroughArguments` and null for `queryPlan` in all test usages
 
-### Estimated Effort: 4-8 hours
+#### 3. Fixed BaseExceptionFilter Logic
+- Moved AWS SDK exception instanceof checks before null message check
+- This ensures throttling exceptions without messages are properly detected
+- Fixed failing test: `BaseExceptionFilterTest.testIsMatch_ThrottlingExceptions`
 
-#### Step 1: Update Dependencies (15 min)
-```xml
-<!-- In athena-lark-base/pom.xml -->
-<dependency>
-    <groupId>com.amazonaws</groupId>
-    <artifactId>aws-athena-federation-sdk</artifactId>
-    <version>2025.37.1</version>
-    <classifier>withdep</classifier>
-</dependency>
-```
-
-#### Step 2: Build & Compile (1-2 hours)
+### Test Results
 ```bash
-JAVA_HOME="/Library/Java/JavaVirtualMachines/jdk-17.0.2.jdk/Contents/Home" mvn clean package -Dcheckstyle.skip=true
+Tests run: 537, Failures: 0, Errors: 0, Skipped: 0 (athena-lark-base)
+Tests run: 209, Failures: 0, Errors: 0, Skipped: 0 (glue-lark-base-crawler)
+Total: 746 tests - ALL PASSED ✅
 ```
-- Check for compilation errors
-- Review deprecation warnings
-- Update any breaking changes
 
-#### Step 3: Run Test Suite (1-2 hours)
-```bash
-JAVA_HOME="/Library/Java/JavaVirtualMachines/jdk-17.0.2.jdk/Contents/Home" mvn test -Dcheckstyle.skip=true
-```
-- Verify all unit tests pass
-- Check for any behavioral changes
-- Pay special attention to timestamp handling (Arrow upgrade)
-
-#### Step 4: Integration Testing (2-4 hours)
-```bash
-# Deploy to test environment
-make deploy-module MODULE=athena-lark-base
-
-# Run regression tests
-./regression-test-plan.sh
-```
-- Test Lark connector functionality
-- Verify authentication flows
-- Test Search API filters
-- Check timestamp/date queries
-- Monitor Lambda logs for errors
-
-#### Step 5: Verify (1 hour)
-- Review CloudWatch logs
-- Check query performance
-- Validate all field types
-- Test edge cases
-
-### Release Notes Between Versions
-Key changes from v2025.8.1 to v2025.37.1:
-- 29 minor version increments
-- No major breaking changes mentioned
-- Primarily dependency updates and incremental improvements
+### Benefits of Upgrade
+- **Security**: Latest security patches and dependency updates
+- **Compatibility**: Aligned with latest AWS Athena Federation SDK
+- **Features**: Access to new SDK features (QueryPlan support, query passthrough arguments)
+- **Stability**: Bug fixes and improvements from 29 minor version increments
 
 ### References
 - Release v2025.37.1: https://github.com/awslabs/aws-athena-query-federation/releases/tag/v2025.37.1
@@ -115,8 +85,8 @@ Key changes from v2025.8.1 to v2025.37.1:
 
 ### Prerequisites
 1. ✅ Code complete and tested
-2. ⏳ Checkstyle compliance (see section 1)
-3. ⏳ SDK upgrade to latest version (see section 2)
+2. ✅ Checkstyle compliance (see section 1)
+3. ✅ SDK upgrade to latest version (see section 2)
 4. ⏳ Documentation complete (README, DEPLOYMENT_GUIDE, etc.)
 5. ⏳ CDK deployment templates (if required)
 
@@ -209,13 +179,15 @@ None - this is a new connector.
    - mockito-inline for static mocking
    - @{argLine} for JaCoCo integration
 
+### ✅ Recently Completed
+1. Checkstyle compliance - All violations fixed (PR #9)
+2. SDK upgrade to v2025.37.1 - Successfully upgraded with all tests passing
+
 ### ⏳ Deferred (documented here)
-1. Checkstyle compliance
-2. SDK upgrade to v2025.37.1
-3. Upstream contribution preparation
+1. Upstream contribution preparation
 
 ### 📝 Next Steps
-1. Create PR for test coverage improvements
-2. Address checkstyle when ready for upstream
-3. Schedule SDK upgrade and testing
-4. Prepare documentation for upstream contribution
+1. Prepare documentation for upstream contribution (README, deployment guides)
+2. Create CDK deployment templates if needed
+3. Plan upstream PR submission
+4. Optional: Deploy and run regression tests in AWS environment to verify SDK upgrade
