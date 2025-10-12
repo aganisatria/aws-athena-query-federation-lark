@@ -22,7 +22,7 @@
             <url>https://clojars.org/repo</url>
         </pluginRepository>
     </pluginRepositories>
-    
+
     <dependencies>
         <dependency>
             <groupId>com.amazonaws</groupId>
@@ -72,7 +72,7 @@
             <scope>runtime</scope>
         </dependency>
     </dependencies>
-    
+
     <build>
         <plugins>
             <plugin>

@@ -187,7 +187,7 @@
         </dependency>
         <dependency>
             <groupId>org.mockito</groupId>
-            <artifactId>mockito-core</artifactId>
+            <artifactId>mockito-inline</artifactId>
             <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
@@ -280,7 +280,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.12</version>
+                <version>0.8.13</version>
                 <executions>
                     <execution>
                         <goals>
@@ -410,15 +410,13 @@
                     </plugin>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <artifactId>maven-surefire-plugin</artifactId>
                         <version>${surefire.failsafe.version}</version>
                         <configuration>
-                            <argLine>--add-opens=java.base/java.nio=ALL-UNNAMED</argLine>
-                            <forkCount>3C</forkCount>
-                            <reuseForks>false</reuseForks>
-                            <includes>
-                                <include>*IntegTest</include>
-                            </includes>
+                            <argLine>@{argLine} --add-opens=java.base/java.nio=ALL-UNNAMED</argLine>
+                            <excludes>
+                                <exclude>*IntegTest</exclude>
+                            </excludes>
                         </configuration>
                     </plugin>
                 </plugins>
