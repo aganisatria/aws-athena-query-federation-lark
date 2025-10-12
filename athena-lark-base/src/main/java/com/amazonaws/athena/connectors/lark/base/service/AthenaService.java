@@ -27,7 +27,19 @@ public class AthenaService {
     private final AthenaClient athenaClient;
 
     public AthenaService() {
-        this.athenaClient = AthenaClient.builder().build();
+        this.athenaClient = getAthenaClient();
+    }
+
+    /**
+     * Constructor with dependency injection for testing.
+     * @param athenaClient the AthenaClient to use
+     */
+    public AthenaService(AthenaClient athenaClient) {
+        this.athenaClient = athenaClient;
+    }
+
+    protected AthenaClient getAthenaClient() {
+        return AthenaClient.builder().build();
     }
 
     public String getAthenaQueryString(String queryId) {

@@ -46,13 +46,19 @@ public class CommonLarkService {
 
     private final String larkAppId;
     private final String larkAppSecret;
-    protected CloseableHttpClient httpClient;
+    protected HttpClientWrapper httpClient;
     protected ObjectMapper objectMapper = new ObjectMapper();
 
     public CommonLarkService(String larkAppId, String larkAppSecret) {
         this.larkAppId = larkAppId;
         this.larkAppSecret = larkAppSecret;
-        this.httpClient = HttpClientBuilder.create().build();
+        this.httpClient = new HttpClientWrapper();
+    }
+
+    public CommonLarkService(String larkAppId, String larkAppSecret, HttpClientWrapper httpClient) {
+        this.larkAppId = larkAppId;
+        this.larkAppSecret = larkAppSecret;
+        this.httpClient = httpClient;
     }
 
     /**
