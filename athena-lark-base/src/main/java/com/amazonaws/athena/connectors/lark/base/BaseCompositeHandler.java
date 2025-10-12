@@ -21,6 +21,7 @@ package com.amazonaws.athena.connectors.lark.base;
 
 import com.amazonaws.athena.connector.lambda.connection.EnvironmentProperties;
 import com.amazonaws.athena.connector.lambda.handlers.CompositeHandler;
+import org.apache.arrow.util.VisibleForTesting;
 
 import java.io.IOException;
 
@@ -37,5 +38,16 @@ public class BaseCompositeHandler
 {
     public BaseCompositeHandler() throws IOException {
         super(new BaseMetadataHandler(new EnvironmentProperties().createEnvironment()), new BaseRecordHandler(new EnvironmentProperties().createEnvironment()));
+    }
+
+    /**
+     * Constructor for testing purposes that accepts pre-configured handlers.
+     *
+     * @param metadataHandler The metadata handler to use
+     * @param recordHandler The record handler to use
+     */
+    @VisibleForTesting
+    protected BaseCompositeHandler(BaseMetadataHandler metadataHandler, BaseRecordHandler recordHandler) {
+        super(metadataHandler, recordHandler);
     }
 }

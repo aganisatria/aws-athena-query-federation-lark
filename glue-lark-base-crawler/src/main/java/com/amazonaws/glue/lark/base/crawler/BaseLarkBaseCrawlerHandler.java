@@ -95,6 +95,14 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
         }
     }
 
+    // Constructor with dependency injection for easier testing
+    BaseLarkBaseCrawlerHandler(GlueCatalogService glueCatalogService, LarkBaseService larkBaseService, LarkDriveService larkDriveService, STSService stsService) {
+        this.glueCatalogService = glueCatalogService;
+        this.larkBaseService = larkBaseService;
+        this.larkDriveService = larkDriveService;
+        this.stsService = stsService;
+    }
+
     /**
      * Crawling Method
      */
@@ -231,7 +239,7 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
         );
     }
 
-    private Optional<ListFieldResponse.FieldItem> getLookupType(ListFieldResponse.FieldItem item, String baseId) {
+    protected Optional<ListFieldResponse.FieldItem> getLookupType(ListFieldResponse.FieldItem item, String baseId) {
         Pair<String, String> metadata = item.getLookupSourceFieldAndTableId();
         if (metadata == null) {
             return Optional.empty();

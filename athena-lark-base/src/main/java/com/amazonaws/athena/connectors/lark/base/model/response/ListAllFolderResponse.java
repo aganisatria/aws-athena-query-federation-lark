@@ -174,5 +174,23 @@ public final class ListAllFolderResponse extends BaseResponse<ListAllFolderRespo
         public ListAllFolderResponse build() {
             return new ListAllFolderResponse(this);
         }
+
+        @Override
+        public Builder code(int code) {
+            super.code(code);
+            return this;
+        }
+
+        @Override
+        public Builder msg(String msg) {
+            super.msg(msg);
+            return this;
+        }
+
+        @Override
+        public Builder data(ListData data) {
+            super.data(data);
+            return this;
+        }
     }
 }

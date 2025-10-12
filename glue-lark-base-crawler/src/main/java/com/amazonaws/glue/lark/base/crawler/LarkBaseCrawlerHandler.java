@@ -21,6 +21,10 @@ package com.amazonaws.glue.lark.base.crawler;
 
 import com.amazonaws.glue.lark.base.crawler.model.LarkDatabaseRecord;
 import com.amazonaws.glue.lark.base.crawler.model.request.LarkBasePayload;
+import com.amazonaws.glue.lark.base.crawler.service.GlueCatalogService;
+import com.amazonaws.glue.lark.base.crawler.service.LarkBaseService;
+import com.amazonaws.glue.lark.base.crawler.service.LarkDriveService;
+import com.amazonaws.glue.lark.base.crawler.service.STSService;
 import com.amazonaws.glue.lark.base.crawler.util.Util;
 import com.amazonaws.services.lambda.runtime.Context;
 import software.amazon.awssdk.services.glue.model.Table;
@@ -46,6 +50,11 @@ public class LarkBaseCrawlerHandler extends BaseLarkBaseCrawlerHandler {
 
     public LarkBaseCrawlerHandler() {
         super();
+    }
+
+    // Constructor for testing with mocks
+    LarkBaseCrawlerHandler(GlueCatalogService glueCatalogService, LarkBaseService larkBaseService, LarkDriveService larkDriveService, STSService stsService) {
+        super(glueCatalogService, larkBaseService, larkDriveService, stsService);
     }
 
     public String handleRequest(Object input, Context context) {

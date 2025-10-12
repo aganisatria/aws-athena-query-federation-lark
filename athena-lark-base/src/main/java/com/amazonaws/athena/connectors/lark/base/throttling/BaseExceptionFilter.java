@@ -35,7 +35,7 @@ public class BaseExceptionFilter
 
     public static final BaseExceptionFilter EXCEPTION_FILTER = new BaseExceptionFilter();
 
-    private BaseExceptionFilter() {}
+    public BaseExceptionFilter() {}
 
     @Override
     public boolean isMatch(Exception ex) {

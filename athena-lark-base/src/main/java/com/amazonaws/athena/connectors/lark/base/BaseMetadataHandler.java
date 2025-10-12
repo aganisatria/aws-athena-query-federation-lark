@@ -37,7 +37,6 @@ import com.amazonaws.athena.connectors.lark.base.metadataProvider.LarkSourceMeta
 import com.amazonaws.athena.connectors.lark.base.model.*;
 import com.amazonaws.athena.connectors.lark.base.resolver.LarkBaseTableResolver;
 import com.amazonaws.athena.connectors.lark.base.service.*;
-import com.amazonaws.athena.connectors.lark.base.translator.ConstraintTranslator;
 import com.amazonaws.athena.connectors.lark.base.translator.SearchApiFilterTranslator;
 import com.amazonaws.athena.connectors.lark.base.util.CommonUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -142,6 +141,52 @@ public class BaseMetadataHandler
             Map<String, String> configOptions) {
         super(glueClient, keyFactory, awsSecretsManager, athena, SOURCE_TYPE, spillBucket, spillPrefix, configOptions);
         initializeLarkServices(configOptions);
+    }
+
+    /**
+     * Full dependency injection constructor for testing purposes.
+     * This constructor allows all dependencies to be injected, making the class fully testable without
+     * requiring environment variables or real AWS services.
+     *
+     * @param glueClient The AWS Glue client.
+     * @param keyFactory The encryption key factory.
+     * @param awsSecretsManager The AWS Secrets Manager client.
+     * @param athena The AWS Athena client.
+     * @param spillBucket The S3 bucket for spilling results.
+     * @param spillPrefix The S3 prefix for spilling results.
+     * @param configOptions Configuration options for the connector.
+     * @param envVarService Service for accessing environment variables.
+     * @param larkBaseService Service for interacting with Lark Base API.
+     * @param glueCatalogService Service for Glue catalog operations.
+     * @param mappingTableDirectInitialized List of direct table mappings.
+     * @param larkSourceMetadataProvider Provider for Lark source metadata.
+     * @param experimentalMetadataProvider Provider for experimental metadata features.
+     * @param invoker Throttling invoker for rate limiting.
+     */
+    @VisibleForTesting
+    protected BaseMetadataHandler(
+            GlueClient glueClient,
+            EncryptionKeyFactory keyFactory,
+            SecretsManagerClient awsSecretsManager,
+            AthenaClient athena,
+            String spillBucket,
+            String spillPrefix,
+            Map<String, String> configOptions,
+            EnvVarService envVarService,
+            LarkBaseService larkBaseService,
+            GlueCatalogService glueCatalogService,
+            List<TableDirectInitialized> mappingTableDirectInitialized,
+            LarkSourceMetadataProvider larkSourceMetadataProvider,
+            ExperimentalMetadataProvider experimentalMetadataProvider,
+            ThrottlingInvoker invoker) {
+        super(glueClient, keyFactory, awsSecretsManager, athena, SOURCE_TYPE, spillBucket, spillPrefix, configOptions);
+        this.envVarService = envVarService;
+        this.larkBaseService = larkBaseService;
+        this.glueCatalogService = glueCatalogService;
+        this.mappingTableDirectInitialized = mappingTableDirectInitialized;
+        this.larkSourceMetadataProvider = larkSourceMetadataProvider;
+        this.experimentalMetadataProvider = experimentalMetadataProvider;
+        this.invoker = invoker;
     }
 
     /**

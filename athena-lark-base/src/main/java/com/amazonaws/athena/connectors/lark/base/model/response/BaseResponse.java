@@ -68,7 +68,19 @@ public class BaseResponse<T> {
         protected String msg;
         protected T data;
 
-        protected Builder() { }
+        public Builder() { }
+
+        @JsonProperty("code")
+        public Builder<T> code(int code) {
+            this.code = code;
+            return this;
+        }
+
+        @JsonProperty("msg")
+        public Builder<T> msg(String msg) {
+            this.msg = msg;
+            return this;
+        }
 
         @JsonProperty("data")
         public Builder<T> data(T data) {
