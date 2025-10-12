@@ -25,10 +25,12 @@ import com.fasterxml.jackson.annotation.JsonRawValue;
 
 /**
  * Request body for Lark Base Search Records API
+ *
  * @see "https://open.larksuite.com/document/uAjLw4CM/ukTMukTMukTM/reference/bitable-v1/app-table-record/search"
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public final class SearchRecordsRequest {
+public final class SearchRecordsRequest
+{
     @JsonProperty("page_size")
     private final Integer pageSize;
 
@@ -43,62 +45,76 @@ public final class SearchRecordsRequest {
     @JsonRawValue
     private final String sort;
 
-    private SearchRecordsRequest(Builder builder) {
+    private SearchRecordsRequest(Builder builder)
+    {
         this.pageSize = builder.pageSize;
         this.pageToken = builder.pageToken;
         this.filter = builder.filter;
         this.sort = builder.sort;
     }
 
-    public Integer getPageSize() {
+    public Integer getPageSize()
+    {
         return pageSize;
     }
 
-    public String getPageToken() {
+    public String getPageToken()
+    {
         return pageToken;
     }
 
-    public String getFilter() {
+    public String getFilter()
+    {
         return filter;
     }
 
-    public String getSort() {
+    public String getSort()
+    {
         return sort;
     }
 
-    public static Builder builder() {
+    public static Builder builder()
+    {
         return new Builder();
     }
 
-    public static final class Builder {
+    public static final class Builder
+    {
         private Integer pageSize;
         private String pageToken;
         private String filter;
         private String sort;
 
-        private Builder() {}
+        private Builder()
+        {
+        }
 
-        public Builder pageSize(Integer pageSize) {
+        public Builder pageSize(Integer pageSize)
+        {
             this.pageSize = pageSize;
             return this;
         }
 
-        public Builder pageToken(String pageToken) {
+        public Builder pageToken(String pageToken)
+        {
             this.pageToken = pageToken;
             return this;
         }
 
-        public Builder filter(String filter) {
+        public Builder filter(String filter)
+        {
             this.filter = filter;
             return this;
         }
 
-        public Builder sort(String sort) {
+        public Builder sort(String sort)
+        {
             this.sort = sort;
             return this;
         }
 
-        public SearchRecordsRequest build() {
+        public SearchRecordsRequest build()
+        {
             return new SearchRecordsRequest(this);
         }
     }

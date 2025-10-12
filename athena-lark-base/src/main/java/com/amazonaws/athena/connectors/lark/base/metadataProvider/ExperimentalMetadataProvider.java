@@ -7,9 +7,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
- *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,7 +23,10 @@ import com.amazonaws.athena.connector.lambda.ThrottlingInvoker;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.metadata.GetTableLayoutRequest;
 import com.amazonaws.athena.connector.lambda.metadata.GetTableRequest;
-import com.amazonaws.athena.connectors.lark.base.model.*;
+import com.amazonaws.athena.connectors.lark.base.model.AthenaFieldLarkBaseMapping;
+import com.amazonaws.athena.connectors.lark.base.model.NestedUIType;
+import com.amazonaws.athena.connectors.lark.base.model.PartitionInfoResult;
+import com.amazonaws.athena.connectors.lark.base.model.TableSchemaResult;
 import com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum;
 import com.amazonaws.athena.connectors.lark.base.model.response.ListFieldResponse;
 import com.amazonaws.athena.connectors.lark.base.service.AthenaService;
@@ -35,15 +38,20 @@ import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.athena.model.InvalidRequestException;
 import software.amazon.awssdk.utils.Pair;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+
+import static java.util.Objects.requireNonNull;
 
 /**
  * MetadataProvider implementation that retrieves metadata using the experimental approach:
  * extracting original Base/Table IDs from the Athena query history and calling Lark APIs directly.
  */
-public class ExperimentalMetadataProvider {
-
+public class ExperimentalMetadataProvider
+{
     private static final Logger logger = LoggerFactory.getLogger(ExperimentalMetadataProvider.class);
 
     private final AthenaService athenaService;
@@ -52,13 +60,15 @@ public class ExperimentalMetadataProvider {
 
     public ExperimentalMetadataProvider(AthenaService athenaService,
                                         LarkBaseService larkBaseService,
-                                        ThrottlingInvoker invoker) {
-        this.athenaService = Objects.requireNonNull(athenaService, "athenaService cannot be null");
-        this.larkBaseService = Objects.requireNonNull(larkBaseService, "larkBaseService cannot be null");
-        this.invoker = Objects.requireNonNull(invoker, "invoker cannot be null");
+                                        ThrottlingInvoker invoker)
+    {
+        this.athenaService = requireNonNull(athenaService, "athenaService cannot be null");
+        this.larkBaseService = requireNonNull(larkBaseService, "larkBaseService cannot be null");
+        this.invoker = requireNonNull(invoker, "invoker cannot be null");
     }
 
-    public Optional<TableSchemaResult> getTableSchema(GetTableRequest request) {
+    public Optional<TableSchemaResult> getTableSchema(GetTableRequest request)
+    {
         logger.info("Experimental Path: Attempting to get schema for {}", request.getTableName());
         Optional<Pair<String, String>> idsOpt = extractOriginalIdsFromQuery(request.getQueryId(), request.getTableName());
 
@@ -84,7 +94,8 @@ public class ExperimentalMetadataProvider {
                                 String newTableId = lookupId.right();
                                 String newFieldId = lookupId.left();
                                 childUIType = larkBaseService.getLookupType(baseId, newTableId, newFieldId);
-                            } catch (Exception e) {
+                            }
+                            catch (Exception e) {
                                 logger.warn("Experimental Path: Skipping field {} due to error getting lookup type: {}", field.getFieldName(), e.getMessage());
                                 continue;
                             }
@@ -103,17 +114,20 @@ public class ExperimentalMetadataProvider {
                 Schema schema = CommonUtil.buildSchemaFromLarkFields(fieldMappings);
                 logger.info("Experimental Path: Built schema: {}", schema);
                 return Optional.of(new TableSchemaResult(schema, Collections.emptySet()));
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 logger.error("Experimental Path: Error fetching fields or building schema for {}.{}: {}", baseId, tableId, e.getMessage(), e);
                 return Optional.empty();
             }
-        } else {
+        }
+        else {
             logger.info("Experimental Path: Could not extract original IDs for {}. Schema not found via this provider.", request.getTableName());
             return Optional.empty();
         }
     }
 
-    public Optional<PartitionInfoResult> getPartitionInfo(TableName tableName, GetTableLayoutRequest request) {
+    public Optional<PartitionInfoResult> getPartitionInfo(TableName tableName, GetTableLayoutRequest request)
+    {
         logger.info("Experimental Path: Attempting to get partition info for {}", tableName);
         Optional<Pair<String, String>> idsOpt = extractOriginalIdsFromQuery(request.getQueryId(), tableName);
 
@@ -128,8 +142,8 @@ public class ExperimentalMetadataProvider {
             }
 
             return Optional.of(new PartitionInfoResult(baseId, tableId, fieldMappings));
-
-        } else {
+        }
+        else {
             logger.info("Experimental Path: Could not extract original IDs for {}. Partition info not found via this provider.", tableName);
             return Optional.empty();
         }
@@ -139,7 +153,8 @@ public class ExperimentalMetadataProvider {
      * Extracts the original case-sensitive Base ID and Table ID from the raw SQL query.
      * (Moved from BaseMetadataHandler)
      */
-    private Optional<Pair<String, String>> extractOriginalIdsFromQuery(String queryId, TableName tableName) {
+    private Optional<Pair<String, String>> extractOriginalIdsFromQuery(String queryId, TableName tableName)
+    {
         if (queryId == null || queryId.isEmpty()) {
             logger.warn("Experimental Path: Query ID is missing. Cannot extract original IDs.");
             return Optional.empty();
@@ -150,18 +165,22 @@ public class ExperimentalMetadataProvider {
                 Pair<String, String> originalIds = CommonUtil.extractOriginalIdentifiers(originalQuery, tableName.getSchemaName(), tableName.getTableName());
                 if (originalIds.left() != null && originalIds.right() != null) {
                     return Optional.of(originalIds);
-                } else {
+                }
+                else {
                     logger.info("Experimental Path: Could not extract valid original Base/Table IDs from query for table {}.", tableName);
                     return Optional.empty();
                 }
-            } else {
+            }
+            else {
                 logger.warn("Experimental Path: Could not retrieve original query string for query ID {}. Cannot extract IDs.", queryId);
                 return Optional.empty();
             }
-        } catch (InvalidRequestException | TimeoutException e) {
+        }
+        catch (InvalidRequestException | TimeoutException e) {
             logger.info("Experimental Path: Could not get original query string for query ID {} (Possibly a utility query?): {}", queryId, e.getMessage());
             return Optional.empty();
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("Experimental Path: Unexpected error retrieving original query string for query ID {}: {}", queryId, e.getMessage(), e);
             return Optional.empty();
         }
@@ -171,7 +190,8 @@ public class ExperimentalMetadataProvider {
      * Discovers field mappings dynamically by calling the Lark API.
      * (Moved from BaseMetadataHandler.generateNewFields)
      */
-    private List<AthenaFieldLarkBaseMapping> discoverTableFields(String larkBaseId, String larkTableId) {
+    private List<AthenaFieldLarkBaseMapping> discoverTableFields(String larkBaseId, String larkTableId)
+    {
         List<AthenaFieldLarkBaseMapping> fieldMappings = new ArrayList<>();
         logger.info("Experimental Path: Discovering fields for {}-{}", larkBaseId, larkTableId);
         try {
@@ -188,7 +208,8 @@ public class ExperimentalMetadataProvider {
                             String newTableId = lookupId.right();
                             String newFieldId = lookupId.left();
                             childUIType = larkBaseService.getLookupType(larkBaseId, newTableId, newFieldId);
-                        } catch (Exception e) {
+                        }
+                        catch (Exception e) {
                             logger.warn("Experimental Path: Skipping field {} due to error getting lookup type: {}", field.getFieldName(), e.getMessage());
                             continue;
                         }
@@ -198,7 +219,8 @@ public class ExperimentalMetadataProvider {
                     fieldMappings.add(new AthenaFieldLarkBaseMapping(prestoFieldName, larkFieldName, nestedUIType));
                 }
             }
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("Experimental Path: Failed to discover fields for table {}-{}: {}. Returning empty field list.", larkBaseId, larkTableId, e.getMessage(), e);
         }
         logger.info("Experimental Path: Discovered {} fields for {}-{}", fieldMappings.size(), larkBaseId, larkTableId);

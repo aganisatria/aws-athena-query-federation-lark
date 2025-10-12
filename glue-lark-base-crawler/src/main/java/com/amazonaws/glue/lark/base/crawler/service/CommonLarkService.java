@@ -7,9 +7,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -31,7 +31,8 @@ import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
 
-public class CommonLarkService {
+public class CommonLarkService
+{
     protected static final String LARK_API_BASE_URL = "https://open.larksuite.com/open-apis";
     protected static final String LARK_AUTH_URL = LARK_API_BASE_URL + "/auth";
 
@@ -43,7 +44,8 @@ public class CommonLarkService {
     protected HttpClient httpClient;
     protected ObjectMapper objectMapper = new ObjectMapper();
 
-    public CommonLarkService(String larkAppId, String larkAppSecret) {
+    public CommonLarkService(String larkAppId, String larkAppSecret)
+    {
         this.larkAppId = larkAppId;
         this.larkAppSecret = larkAppSecret;
         this.httpClient = HttpClientBuilder.create().build();
@@ -51,10 +53,12 @@ public class CommonLarkService {
 
     /**
      * Refresh tenant access token. We use synchronized to ensure that only one thread can refresh the token at a time.
-     * @see "https://open.larksuite.com/document/server-docs/getting-started/api-access-token/auth-v3/tenant_access_token_internal"
+     *
      * @throws IOException If failed to refresh tenant access token
+     * @see "https://open.larksuite.com/document/server-docs/getting-started/api-access-token/auth-v3/tenant_access_token_internal"
      */
-    protected synchronized void refreshTenantAccessToken() throws IOException {
+    protected synchronized void refreshTenantAccessToken() throws IOException
+    {
         boolean needsRefresh = tenantAccessToken == null || System.currentTimeMillis() >= tokenExpiry;
 
         if (!needsRefresh) {

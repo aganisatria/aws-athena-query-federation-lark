@@ -7,9 +7,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
- *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -44,25 +44,30 @@ import java.util.stream.Collectors;
 /**
  * Service for Lark
  */
-public class LarkBaseService extends CommonLarkService {
+public class LarkBaseService extends CommonLarkService
+{
     private static final Logger logger = LoggerFactory.getLogger(LarkBaseService.class);
     private static final String LARK_BASE_URL = LARK_API_BASE_URL + "/bitable/v1/apps";
-    final int PAGE_SIZE = 100;
+    final int pageSize = 100;
 
-    public LarkBaseService(String larkAppId, String larkAppSecret) {
+    public LarkBaseService(String larkAppId, String larkAppSecret)
+    {
         super(larkAppId, larkAppSecret);
     }
 
     /**
      * List all tables.
-     * @see "https://open.larksuite.com/document/server-docs/docs/bitable-v1/app-table/list"
+     *
      * @param baseId The base ID
      * @return The list of tables
+     * @see "https://open.larksuite.com/document/server-docs/docs/bitable-v1/app-table/list"
      */
-    public List<ListAllTableResponse.BaseItem> listTables(String baseId) {
+    public List<ListAllTableResponse.BaseItem> listTables(String baseId)
+    {
         try {
             refreshTenantAccessToken();
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new RuntimeException("Failed to refresh Lark access token", e);
         }
 
@@ -70,68 +75,74 @@ public class LarkBaseService extends CommonLarkService {
         String pageToken = "";
         boolean hasMore;
         int count = 0;
-        
+
         do {
             try {
                 URIBuilder uriBuilder = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables")
-                        .addParameter("page_size", String.valueOf(PAGE_SIZE));
-                
+                        .addParameter("page_size", String.valueOf(pageSize));
+
                 if (!pageToken.isEmpty()) {
                     uriBuilder.addParameter("page_token", pageToken);
                 }
-                
+
                 URI uri = uriBuilder.build();
-                
+
                 HttpGet request = new HttpGet(uri);
                 request.setHeader("Authorization", "Bearer " + tenantAccessToken);
                 request.setHeader("Content-Type", "application/json");
-                
+
                 HttpResponse response = httpClient.execute(request);
                 String responseBody = EntityUtils.toString(response.getEntity());
-                
+
                 ListAllTableResponse tableResponse = objectMapper.readValue(responseBody, ListAllTableResponse.class);
 
                 System.out.println("Table response: " + tableResponse.getItems());
                 System.out.println("Count: " + count);
                 count++;
-                
+
                 // 1254002: No more data
                 if (tableResponse.getCode() == 0 || tableResponse.getCode() == 1254002) {
                     if (tableResponse.getItems() != null) {
                         allTables.addAll(tableResponse.getItems());
                     }
-                    
+
                     pageToken = tableResponse.getPageToken();
                     hasMore = tableResponse.hasMore();
-                    
+
                     logger.info("Retrieved {} tables from base {}, has_more={}",
                             tableResponse.getItems() != null ? tableResponse.getItems().size() : 0,
                             baseId, hasMore);
-                } else {
+                }
+                else {
                     logger.error("Failed to list tables for base {}: {}", baseId, responseBody);
                     throw new IOException("Failed to retrieve tables for base: " + baseId + ", Error: " + tableResponse.getMsg());
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 logger.error("Failed to get records for base {}: {}", baseId, e.getMessage());
                 throw new RuntimeException("Failed to get records for base: " + baseId, e);
             }
-        } while (hasMore && pageToken != null && !pageToken.isEmpty());
-        
+        }
+        while (hasMore && pageToken != null && !pageToken.isEmpty());
+
         logger.info("Retrieved a total of {} tables from base {}", allTables.size(), baseId);
         return allTables;
     }
 
     /**
      * Get all fields for a table.
-     * @see "https://open.larksuite.com/document/server-docs/docs/bitable-v1/app-table-field/list"
-     * @param baseId The base ID
+     *
+     * @param baseId  The base ID
      * @param tableId The table ID
      * @return The list of fields
+     * @see "https://open.larksuite.com/document/server-docs/docs/bitable-v1/app-table-field/list"
      */
-    public List<ListFieldResponse.FieldItem> getTableFields(String baseId, String tableId) {
+    public List<ListFieldResponse.FieldItem> getTableFields(String baseId, String tableId)
+    {
         try {
             refreshTenantAccessToken();
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             logger.error("Failed to refresh Lark access token", e);
             throw new RuntimeException("Failed to refresh Lark access token", e);
         }
@@ -143,7 +154,7 @@ public class LarkBaseService extends CommonLarkService {
         do {
             try {
                 URIBuilder uriBuilder = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables/" + tableId + "/fields")
-                        .addParameter("page_size", String.valueOf(PAGE_SIZE));
+                        .addParameter("page_size", String.valueOf(pageSize));
 
                 if (!pageToken.isEmpty()) {
                     uriBuilder.addParameter("page_token", pageToken);
@@ -176,14 +187,17 @@ public class LarkBaseService extends CommonLarkService {
 
                     logger.info("Retrieved {} fields from table {}, has_more={}",
                             fields != null ? fields.size() : 0, tableId, hasMore);
-                } else {
+                }
+                else {
                     throw new IOException("Failed to retrieve fields for table: " + tableId + ", Error: " + fieldResponse.getMsg());
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 logger.error("Failed to get fields for table {}: {}", tableId, e.getMessage());
                 throw new RuntimeException("Failed to get fields for table: " + tableId, e);
             }
-        } while (hasMore && pageToken != null && !pageToken.isEmpty());
+        }
+        while (hasMore && pageToken != null && !pageToken.isEmpty());
 
         logger.info("Retrieved a total of {} fields from table {}", allFields.size(), tableId);
         return allFields;
@@ -191,15 +205,18 @@ public class LarkBaseService extends CommonLarkService {
 
     /**
      * Get all records for a table using the Search API.
-     * @see "https://open.larksuite.com/document/uAjLw4CM/ukTMukTMukTM/reference/bitable-v1/app-table-record/search"
-     * @param baseId The base ID
+     *
+     * @param baseId  The base ID
      * @param tableId The table ID
      * @return The list of records
+     * @see "https://open.larksuite.com/document/uAjLw4CM/ukTMukTMukTM/reference/bitable-v1/app-table-record/search"
      */
-    public List<LarkDatabaseRecord> getTableRecords(String baseId, String tableId) {
+    public List<LarkDatabaseRecord> getTableRecords(String baseId, String tableId)
+    {
         try {
             refreshTenantAccessToken();
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             logger.error("Failed to refresh Lark access token", e);
             throw new RuntimeException("Failed to refresh Lark access token", e);
         }
@@ -212,10 +229,9 @@ public class LarkBaseService extends CommonLarkService {
             try {
                 URI uri = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables/" + tableId + "/records/search").build();
 
-                // Build request body
                 com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.Builder requestBuilder =
                         com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.builder()
-                                .pageSize(PAGE_SIZE);
+                                .pageSize(pageSize);
 
                 if (!pageToken.isEmpty()) {
                     requestBuilder.pageToken(pageToken);
@@ -234,7 +250,7 @@ public class LarkBaseService extends CommonLarkService {
                 String responseBody = EntityUtils.toString(response.getEntity());
 
                 ListRecordsResponse recordsResponse =
-                    objectMapper.readValue(responseBody, ListRecordsResponse.class);
+                        objectMapper.readValue(responseBody, ListRecordsResponse.class);
 
                 if (recordsResponse.getCode() == 0) {
                     if (recordsResponse.getItems() != null) {
@@ -265,24 +281,29 @@ public class LarkBaseService extends CommonLarkService {
 
                     pageToken = recordsResponse.getPageToken();
                     hasMore = recordsResponse.hasMore();
-                } else {
+                }
+                else {
                     throw new IOException("Failed to retrieve records for table: " + tableId +
                             ", Error: " + recordsResponse.getMsg());
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 throw new RuntimeException("Failed to get records for table: " + tableId, e);
             }
-        } while (hasMore && pageToken != null && !pageToken.isEmpty());
+        }
+        while (hasMore && pageToken != null && !pageToken.isEmpty());
 
         return sanitizeRecords(parsedRecords);
     }
 
     /**
      * Sanitize records.
+     *
      * @param records The list of records
      * @return The sanitized list of records
      */
-    public List<LarkDatabaseRecord> sanitizeRecords(List<LarkDatabaseRecord> records) {
+    public List<LarkDatabaseRecord> sanitizeRecords(List<LarkDatabaseRecord> records)
+    {
         List<LarkDatabaseRecord> sanitizedRecords = records.stream()
                 .map(record -> {
                     String sanitizedId = record.id();

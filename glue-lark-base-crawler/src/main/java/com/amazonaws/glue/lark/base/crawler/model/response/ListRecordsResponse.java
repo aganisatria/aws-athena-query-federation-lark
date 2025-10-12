@@ -7,9 +7,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -32,80 +32,109 @@ import java.util.Map;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonDeserialize(builder = ListRecordsResponse.Builder.class)
-public final class ListRecordsResponse extends BaseResponse<ListRecordsResponse.ListData> {
-
-    private ListRecordsResponse(Builder builder) {
+public final class ListRecordsResponse extends BaseResponse<ListRecordsResponse.ListData>
+{
+    private ListRecordsResponse(Builder builder)
+    {
         super(builder);
     }
 
-    public static Builder builder() {
+    public static Builder builder()
+    {
         return new Builder();
     }
 
-    public List<RecordItem> getItems() {
+    public List<RecordItem> getItems()
+    {
         ListData data = getData();
         return data != null ? data.items() : Collections.emptyList();
     }
 
-    public String getPageToken() {
+    public String getPageToken()
+    {
         ListData data = getData();
         return (data != null) ? data.pageToken() : null;
     }
 
-    public boolean hasMore() {
+    public boolean hasMore()
+    {
         ListData data = getData();
         return (data != null) && data.hasMore();
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonDeserialize(builder = RecordItem.Builder.class)
-    public static final class RecordItem {
+    public static final class RecordItem
+    {
         private final String recordId;
         private final Map<String, Object> fields;
 
-        private RecordItem(Builder builder) {
+        private RecordItem(Builder builder)
+        {
             this.recordId = builder.recordId;
             this.fields = builder.fields != null ? Map.copyOf(builder.fields) : Collections.emptyMap();
         }
 
         @JsonProperty("record_id")
-        public String getRecordId() {
+        public String getRecordId()
+        {
             return recordId;
         }
 
-        public Map<String, Object> getFields() {
+        public Map<String, Object> getFields()
+        {
             return fields;
         }
 
-        public static Builder builder() { return new Builder(); }
+        public static Builder builder()
+        {
+            return new Builder();
+        }
 
         @JsonIgnoreProperties(ignoreUnknown = true)
-        public static final class Builder {
+        public static final class Builder
+        {
             private Map<String, Object> fields;
             private String recordId;
 
-            private Builder() {}
+            private Builder()
+            {
+            }
 
             @SuppressWarnings("unused")
             @JsonProperty("fields")
-            public Builder fields(Map<String, Object> fields) { this.fields = fields; return this; }
+            public Builder fields(Map<String, Object> fields)
+            {
+                this.fields = fields;
+                return this;
+            }
+
             @SuppressWarnings("unused")
             @JsonProperty("record_id")
-            public Builder recordId(String recordId) { this.recordId = recordId; return this; }
+            public Builder recordId(String recordId)
+            {
+                this.recordId = recordId;
+                return this;
+            }
 
-            public RecordItem build() { return new RecordItem(this); }
+            public RecordItem build()
+            {
+                return new RecordItem(this);
+            }
         }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonDeserialize(builder = ListData.Builder.class)
-    public static final class ListData {
+    public static final class ListData
+    {
         private final List<RecordItem> items;
         private final String pageToken;
         private final boolean hasMore;
         private final int total;
 
-        private ListData(Builder builder){
+        private ListData(Builder builder)
+        {
             this.items = builder.items != null ? List.copyOf(builder.items) : Collections.emptyList();
             this.pageToken = builder.pageToken;
             this.hasMore = builder.hasMore;
@@ -113,48 +142,95 @@ public final class ListRecordsResponse extends BaseResponse<ListRecordsResponse.
         }
 
         @JsonProperty("items")
-        public List<RecordItem> items() { return items; }
+        public List<RecordItem> items()
+        {
+            return items;
+        }
+
         @JsonProperty("page_token")
-        public String pageToken() { return pageToken; }
+        public String pageToken()
+        {
+            return pageToken;
+        }
+
         @JsonProperty("has_more")
-        public boolean hasMore() { return hasMore; }
+        public boolean hasMore()
+        {
+            return hasMore;
+        }
+
         @JsonProperty("total")
-        public int total() { return total; }
+        public int total()
+        {
+            return total;
+        }
 
-        public static Builder builder() { return new Builder(); }
+        public static Builder builder()
+        {
+            return new Builder();
+        }
 
-        public static final class Builder {
+        public static final class Builder
+        {
             private List<RecordItem> items;
             private String pageToken;
             private boolean hasMore;
             private int total;
 
-            private Builder() {}
+            private Builder()
+            {
+            }
 
             @SuppressWarnings("unused")
             @JsonProperty("items")
-            public Builder items(List<RecordItem> items) { this.items = items; return this;}
+            public Builder items(List<RecordItem> items)
+            {
+                this.items = items;
+                return this;
+            }
+
             @SuppressWarnings("unused")
             @JsonProperty("page_token")
-            public Builder pageToken(String pageToken) { this.pageToken = pageToken; return this;}
+            public Builder pageToken(String pageToken)
+            {
+                this.pageToken = pageToken;
+                return this;
+            }
+
             @SuppressWarnings("unused")
             @JsonProperty("has_more")
-            public Builder hasMore(boolean hasMore) { this.hasMore = hasMore; return this;}
+            public Builder hasMore(boolean hasMore)
+            {
+                this.hasMore = hasMore;
+                return this;
+            }
+
             @SuppressWarnings("unused")
             @JsonProperty("total")
-            public Builder total(int total) { this.total = total; return this;}
+            public Builder total(int total)
+            {
+                this.total = total;
+                return this;
+            }
 
-            public ListData build() { return new ListData(this);}
+            public ListData build()
+            {
+                return new ListData(this);
+            }
         }
     }
 
-    public static final class Builder extends BaseResponse.Builder<ListData> {
-        private Builder() { super(); }
+    public static final class Builder extends BaseResponse.Builder<ListData>
+    {
+        private Builder()
+        {
+            super();
+        }
 
         @Override
-        public ListRecordsResponse build() {
+        public ListRecordsResponse build()
+        {
             return new ListRecordsResponse(this);
         }
     }
 }
-

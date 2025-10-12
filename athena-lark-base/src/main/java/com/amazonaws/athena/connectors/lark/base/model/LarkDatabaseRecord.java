@@ -21,7 +21,10 @@ package com.amazonaws.athena.connectors.lark.base.model;
 
 /**
  * Record for Lark Database Record
- * @param id The database ID
+ *
+ * @param id   The database ID
  * @param name The database name
  */
-public record LarkDatabaseRecord(String id, String name) {}
+public record LarkDatabaseRecord(String id, String name)
+{
+}

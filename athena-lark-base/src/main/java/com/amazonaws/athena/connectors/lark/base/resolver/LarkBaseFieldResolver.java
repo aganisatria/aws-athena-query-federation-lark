@@ -33,11 +33,13 @@ import java.util.Map;
  * Relies solely on direct key matching within Maps. List handling removed.
  * This may cause failures if assumptions are incorrect or data structure changes.
  */
-public class LarkBaseFieldResolver implements FieldResolver {
+public class LarkBaseFieldResolver implements FieldResolver
+{
     private static final Logger logger = LoggerFactory.getLogger(LarkBaseFieldResolver.class);
 
     @Override
-    public Object getFieldValue(Field field, Object dataContext) {
+    public Object getFieldValue(Field field, Object dataContext)
+    {
         if (dataContext == null) {
             return null;
         }
@@ -49,7 +51,8 @@ public class LarkBaseFieldResolver implements FieldResolver {
             logger.info("LarkBaseFieldResolver: Field='{}', DataContext is Map, Value for key='{}' is '{}' (type: {})",
                     fieldNameInFocus, fieldNameInFocus, value, (value != null ? value.getClass().getName() : "null"));
             return value;
-        } else {
+        }
+        else {
             logger.info("LarkBaseFieldResolver: Field='{}', DataContext is NOT a Map (type: {}). Returning dataContext as is.",
                     fieldNameInFocus, dataContext.getClass().getName());
             return dataContext;

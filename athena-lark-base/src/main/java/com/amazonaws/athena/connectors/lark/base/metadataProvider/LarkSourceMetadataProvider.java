@@ -7,9 +7,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
- *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -32,24 +32,27 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
+
+import static java.util.Objects.requireNonNull;
 
 /**
  * MetadataProvider implementation that retrieves metadata based on pre-resolved mappings
  * loaded from Lark Base/Drive sources during initialization.
  */
-public class LarkSourceMetadataProvider {
-
+public class LarkSourceMetadataProvider
+{
     private static final Logger logger = LoggerFactory.getLogger(LarkSourceMetadataProvider.class);
 
     private final List<TableDirectInitialized> resolvedMappings;
 
-    public LarkSourceMetadataProvider(List<TableDirectInitialized> resolvedMappings) {
-        this.resolvedMappings = Objects.requireNonNull(resolvedMappings, "resolvedMappings cannot be null");
+    public LarkSourceMetadataProvider(List<TableDirectInitialized> resolvedMappings)
+    {
+        this.resolvedMappings = requireNonNull(resolvedMappings, "resolvedMappings cannot be null");
     }
 
-    public Optional<TableSchemaResult> getTableSchema(GetTableRequest request) {
+    public Optional<TableSchemaResult> getTableSchema(GetTableRequest request)
+    {
         logger.info("Lark Source Path: Attempting to get schema for {}", request.getTableName());
         Optional<TableDirectInitialized> mappingOpt = findMapping(request.getTableName());
 
@@ -58,13 +61,15 @@ public class LarkSourceMetadataProvider {
             Schema schema = CommonUtil.buildSchemaFromLarkFields(mapping.columns());
             logger.info("Lark Source Path: Found mapping for {} with schema: {}", request.getTableName(), schema);
             return Optional.of(new TableSchemaResult(schema, Collections.emptySet()));
-        } else {
+        }
+        else {
             logger.info("Lark Source Path: No mapping found for {}", request.getTableName());
             return Optional.empty();
         }
     }
 
-    public Optional<PartitionInfoResult> getPartitionInfo(TableName tableName) {
+    public Optional<PartitionInfoResult> getPartitionInfo(TableName tableName)
+    {
         logger.info("Lark Source Path: Attempting to get partition info for {}", tableName);
         Optional<TableDirectInitialized> mappingOpt = findMapping(tableName);
 
@@ -81,7 +86,8 @@ public class LarkSourceMetadataProvider {
             }
 
             return Optional.of(new PartitionInfoResult(baseId, tableId, columns));
-        } else {
+        }
+        else {
             logger.info("Lark Source Path: No mapping found for {}", tableName);
             return Optional.empty();
         }
@@ -91,7 +97,8 @@ public class LarkSourceMetadataProvider {
      * Finds the pre-resolved mapping for the given table name.
      * (Moved from BaseMetadataHandler)
      */
-    private Optional<TableDirectInitialized> findMapping(TableName tableName) {
+    private Optional<TableDirectInitialized> findMapping(TableName tableName)
+    {
         String requestedSchemaLower = tableName.getSchemaName().toLowerCase();
         String requestedTableLower = tableName.getTableName().toLowerCase();
         return this.resolvedMappings.stream()

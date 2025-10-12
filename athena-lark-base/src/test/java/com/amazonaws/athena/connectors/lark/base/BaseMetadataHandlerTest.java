@@ -80,17 +80,14 @@ public class BaseMetadataHandlerTest {
     private ThrottlingInvoker mockInvoker;
 
     private BlockAllocator allocator;
-    private EncryptionKeyFactory keyFactory;
     private BaseMetadataHandler handler;
-    private Map<String, String> configOptions;
-    private List<TableDirectInitialized> mockMappingTable;
 
     @Before
     public void setUp() {
         allocator = new BlockAllocatorImpl();
-        keyFactory = new LocalKeyFactory();
-        configOptions = new HashMap<>();
-        mockMappingTable = Collections.emptyList();
+        EncryptionKeyFactory keyFactory = new LocalKeyFactory();
+        Map<String, String> configOptions = new HashMap<>();
+        List<TableDirectInitialized> mockMappingTable = Collections.emptyList();
 
         handler = new BaseMetadataHandler(
                 mockGlueClient,

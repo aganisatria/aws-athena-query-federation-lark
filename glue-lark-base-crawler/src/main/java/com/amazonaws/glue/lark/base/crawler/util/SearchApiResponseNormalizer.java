@@ -28,7 +28,7 @@ import java.util.Map;
 
 /**
  * Normalizes Lark Base Search API responses to match List API format.
- *
+ * <p>
  * The Search API returns different field formats than the List API:
  * - TEXT fields: Search API returns [{text, type}], List API returns plain string
  * - FORMULA/LOOKUP fields: Search API wraps in {type, value}, List API returns value directly
@@ -40,10 +40,13 @@ public final class SearchApiResponseNormalizer
 {
     private static final Logger logger = LoggerFactory.getLogger(SearchApiResponseNormalizer.class);
 
-    private SearchApiResponseNormalizer() {}
+    private SearchApiResponseNormalizer()
+    {
+    }
 
     /**
      * Normalizes all fields in a record from Search API format to List API format
+     *
      * @param searchFields The fields from Search API response
      * @return Normalized fields matching List API format
      */
@@ -68,8 +71,9 @@ public final class SearchApiResponseNormalizer
 
     /**
      * Normalizes a single field value
+     *
      * @param fieldName The field name (for logging)
-     * @param value The value from Search API
+     * @param value     The value from Search API
      * @return Normalized value
      */
     private static Object normalizeFieldValue(String fieldName, Object value)
@@ -86,7 +90,7 @@ public final class SearchApiResponseNormalizer
             if (mapValue.containsKey("type") && mapValue.containsKey("value")) {
                 Object unwrappedValue = mapValue.get("value");
                 logger.debug("Unwrapping formula/lookup value for field '{}': {} -> {}",
-                    fieldName, value, unwrappedValue);
+                        fieldName, value, unwrappedValue);
                 // Recursively normalize the unwrapped value
                 return normalizeFieldValue(fieldName, unwrappedValue);
             }
@@ -109,20 +113,20 @@ public final class SearchApiResponseNormalizer
                 // CREATED_USER and MODIFIED_USER: extract first element for STRUCT compatibility
                 // These fields come as arrays from Search API but schema expects single object
                 if (firstMap.containsKey("id") && firstMap.containsKey("name") &&
-                    (fieldName.contains("created_user") || fieldName.contains("modified_user"))) {
+                        (fieldName.contains("created_user") || fieldName.contains("modified_user"))) {
                     logger.debug("Converting {}_user array to single object for field '{}'",
-                        fieldName.contains("created") ? "created" : "modified", fieldName);
+                            fieldName.contains("created") ? "created" : "modified", fieldName);
                     return firstItem;
                 }
 
                 // Text fields: extract text from single-element arrays
                 if (firstMap.containsKey("text") && firstMap.containsKey("type") &&
-                    "text".equals(firstMap.get("type"))) {
+                        "text".equals(firstMap.get("type"))) {
                     // For single element text arrays, extract the text value
                     if (listValue.size() == 1) {
                         String extractedText = (String) firstMap.get("text");
                         logger.debug("Extracting text from single-element array for field '{}': {} -> {}",
-                            fieldName, value, extractedText);
+                                fieldName, value, extractedText);
                         return extractedText;
                     }
                     // For multi-element arrays (shouldn't happen for TEXT fields, but keep array)

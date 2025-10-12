@@ -7,9 +7,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -39,7 +39,8 @@ import static com.amazonaws.glue.lark.base.crawler.util.Util.constructTableLocat
 /**
  * Lark Base Crawler Handler
  */
-public class LarkBaseCrawlerHandler extends BaseLarkBaseCrawlerHandler {
+public class LarkBaseCrawlerHandler extends BaseLarkBaseCrawlerHandler
+{
     // {
     //     "larkBaseDataSourceId": "base123",
     //     "larkTableDataSourceId": "table456"
@@ -48,16 +49,19 @@ public class LarkBaseCrawlerHandler extends BaseLarkBaseCrawlerHandler {
     private String larkBaseDataSourceId;
     private String larkTableDataSourceId;
 
-    public LarkBaseCrawlerHandler() {
+    public LarkBaseCrawlerHandler()
+    {
         super();
     }
 
     // Constructor for testing with mocks
-    LarkBaseCrawlerHandler(GlueCatalogService glueCatalogService, LarkBaseService larkBaseService, LarkDriveService larkDriveService, STSService stsService) {
+    LarkBaseCrawlerHandler(GlueCatalogService glueCatalogService, LarkBaseService larkBaseService, LarkDriveService larkDriveService, STSService stsService)
+    {
         super(glueCatalogService, larkBaseService, larkDriveService, stsService);
     }
 
-    public String handleRequest(Object input, Context context) {
+    public String handleRequest(Object input, Context context)
+    {
         LarkBasePayload payload = OBJECT_MAPPER.convertValue(input, LarkBasePayload.class);
 
         this.larkBaseDataSourceId = payload.larkBaseDataSourceId();
@@ -67,17 +71,20 @@ public class LarkBaseCrawlerHandler extends BaseLarkBaseCrawlerHandler {
     }
 
     @Override
-    String getCrawlingMethod() {
+    String getCrawlingMethod()
+    {
         return "LarkBase";
     }
 
     @Override
-    String getCrawlingSource() {
+    String getCrawlingSource()
+    {
         return larkBaseDataSourceId + ":" + larkTableDataSourceId;
     }
 
     @Override
-    List<LarkDatabaseRecord> getLarkDatabases() {
+    List<LarkDatabaseRecord> getLarkDatabases()
+    {
         List<LarkDatabaseRecord> listRecordsResponse = super.larkBaseService.getTableRecords(
                 larkBaseDataSourceId, larkTableDataSourceId);
 
@@ -91,7 +98,8 @@ public class LarkBaseCrawlerHandler extends BaseLarkBaseCrawlerHandler {
     }
 
     @Override
-    Map<String, String> getAdditionalTableInputParameter() {
+    Map<String, String> getAdditionalTableInputParameter()
+    {
         return Map.of(
                 "larkBaseDataSourceId", larkBaseDataSourceId,
                 "larkTableDataSourceId", larkTableDataSourceId
@@ -99,7 +107,8 @@ public class LarkBaseCrawlerHandler extends BaseLarkBaseCrawlerHandler {
     }
 
     @Override
-    boolean additionalTableInputChanged(TableInput newTableInput, Table existingTable) {
+    boolean additionalTableInputChanged(TableInput newTableInput, Table existingTable)
+    {
         Map<String, String> newParams = newTableInput.parameters();
         Map<String, String> existingParams = existingTable.parameters();
 
@@ -117,4 +126,3 @@ public class LarkBaseCrawlerHandler extends BaseLarkBaseCrawlerHandler {
         return !expectedLocation.equals(existingTable.storageDescriptor().location());
     }
 }
-

@@ -7,9 +7,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,56 +23,67 @@ import static java.util.Objects.requireNonNull;
 
 /**
  * Record for Lark Base Crawler Table Input Parameters
- * 
+ *
  */
-public class TableInputParameters {
+public class TableInputParameters
+{
     protected final String larkTableName;
     protected final String larkBaseId;
     protected final String larkTableId;
 
-    private TableInputParameters(Builder builder) {
+    private TableInputParameters(Builder builder)
+    {
         this.larkTableName = builder.larkTableName;
         this.larkBaseId = builder.larkBaseId;
         this.larkTableId = builder.larkTableId;
     }
 
-    public String getLarkTableName() {
+    public String getLarkTableName()
+    {
         return larkTableName;
     }
 
-    public String getLarkBaseId() {
+    public String getLarkBaseId()
+    {
         return larkBaseId;
     }
 
-    public String getLarkTableId() {
+    public String getLarkTableId()
+    {
         return larkTableId;
     }
 
-    public static Builder builder() {
+    public static Builder builder()
+    {
         return new Builder();
     }
 
-    public static class Builder {
+    public static class Builder
+    {
         private String larkTableName;
         private String larkBaseId;
         private String larkTableId;
 
-        public Builder larkTableName(String larkTableName) {
+        public Builder larkTableName(String larkTableName)
+        {
             this.larkTableName = larkTableName;
             return this;
         }
 
-        public Builder larkBaseId(String larkBaseId) {
+        public Builder larkBaseId(String larkBaseId)
+        {
             this.larkBaseId = larkBaseId;
             return this;
         }
 
-        public Builder larkTableId(String larkTableId) {
+        public Builder larkTableId(String larkTableId)
+        {
             this.larkTableId = larkTableId;
             return this;
         }
 
-        public TableInputParameters build() {
+        public TableInputParameters build()
+        {
             requireNonNull(larkTableName, "larkTableName is required");
             requireNonNull(larkBaseId, "larkBaseId is required");
             requireNonNull(larkTableId, "larkTableId is required");

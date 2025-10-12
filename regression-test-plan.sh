@@ -13,7 +13,7 @@
 #
 # ==============================================================================
 
-set -e  # Exit on error
+# set -e  # Commented out to allow tests to continue on non-critical failures
 
 # Load environment variables from .env if it exists
 if [ -f .env ]; then
@@ -605,7 +605,7 @@ test_edge_cases() {
 
     # Test 48: Reserved fields
     run_test_query \
-        "SELECT \\$reserved_record_id, \\$reserved_table_id, \\$reserved_base_id FROM \"$TEST_DATABASE\".\"$TEST_TABLE\" LIMIT 5" \
+        "SELECT \"\$reserved_record_id\", \"\$reserved_table_id\", \"\$reserved_base_id\" FROM \"$TEST_DATABASE\".\"$TEST_TABLE\" LIMIT 5" \
         "Read reserved system fields"
 }
 

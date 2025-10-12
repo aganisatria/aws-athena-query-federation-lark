@@ -7,9 +7,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
- *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,7 +19,13 @@
  */
 package com.amazonaws.glue.lark.base.crawler;
 
-import com.amazonaws.glue.lark.base.crawler.model.*;
+import com.amazonaws.glue.lark.base.crawler.model.ColumnParameters;
+import com.amazonaws.glue.lark.base.crawler.model.DatabaseProcessResult;
+import com.amazonaws.glue.lark.base.crawler.model.LarkDatabaseRecord;
+import com.amazonaws.glue.lark.base.crawler.model.SecretValue;
+import com.amazonaws.glue.lark.base.crawler.model.TableInputParameters;
+import com.amazonaws.glue.lark.base.crawler.model.TableOnUpdateDatabaseProcessResult;
+import com.amazonaws.glue.lark.base.crawler.model.UpdateDatabaseProcessResult;
 import com.amazonaws.glue.lark.base.crawler.model.enums.UITypeEnum;
 import com.amazonaws.glue.lark.base.crawler.model.response.ListAllTableResponse;
 import com.amazonaws.glue.lark.base.crawler.model.response.ListFieldResponse;
@@ -44,14 +50,21 @@ import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueReques
 import software.amazon.awssdk.utils.Pair;
 
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
  * Base class for Lark Base Crawler Handler, can be extended by other classes to implement specific logic
  */
-abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, String> {
-
+abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, String>
+{
     private static final Logger logger = LoggerFactory.getLogger(BaseLarkBaseCrawlerHandler.class);
     protected static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final int CONNECT_TIMEOUT = 250;
@@ -61,7 +74,8 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
     protected final LarkDriveService larkDriveService;
     protected final STSService stsService;
 
-    public BaseLarkBaseCrawlerHandler() {
+    public BaseLarkBaseCrawlerHandler()
+    {
         try {
             this.stsService = new STSService();
             String catalogId = stsService.getAccountId();
@@ -89,14 +103,14 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
             this.larkBaseService = new LarkBaseService(larkAppID, larkAppSecret);
             this.larkDriveService = new LarkDriveService(larkAppID, larkAppSecret);
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             throw new RuntimeException(e);
-
         }
     }
 
-    // Constructor with dependency injection for easier testing
-    BaseLarkBaseCrawlerHandler(GlueCatalogService glueCatalogService, LarkBaseService larkBaseService, LarkDriveService larkDriveService, STSService stsService) {
+    BaseLarkBaseCrawlerHandler(GlueCatalogService glueCatalogService, LarkBaseService larkBaseService, LarkDriveService larkDriveService, STSService stsService)
+    {
         this.glueCatalogService = glueCatalogService;
         this.larkBaseService = larkBaseService;
         this.larkDriveService = larkDriveService;
@@ -110,21 +124,25 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     /**
      * Get Crawling Source
+     *
      * @return The crawling source
      */
     abstract String getCrawlingSource();
 
     /**
      * Get Lark Databases
+     *
      * @return The Lark Databases
      */
     abstract List<LarkDatabaseRecord> getLarkDatabases();
 
     /**
      * Get Glue Databases
+     *
      * @return The Glue Databases
      */
-    private List<Database> getGlueDatabases() {
+    private List<Database> getGlueDatabases()
+    {
         List<Database> databases = glueCatalogService.getDatabases();
 
         return databases.stream()
@@ -135,25 +153,28 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     /**
      * Get Additional Table Input Parameters when comparing new and old data
+     *
      * @return The Table Input
      */
     abstract Map<String, String> getAdditionalTableInputParameter();
 
     /**
      * Additional comparator of table input changed
+     *
      * @param newTableInput New Table Input
      * @param existingTable Existing Table Object
      */
     abstract boolean additionalTableInputChanged(TableInput newTableInput, Table existingTable);
 
-
     /**
      * Check if the table input changed
+     *
      * @param newTableInput The new table input
      * @param existingTable The existing table
      * @return True if the table input changed, false otherwise
      */
-    boolean doesTableInputChanged(TableInput newTableInput, Table existingTable) {
+    boolean doesTableInputChanged(TableInput newTableInput, Table existingTable)
+    {
         Map<String, String> newParams = newTableInput.parameters();
         Map<String, String> existingParams = existingTable.parameters();
 
@@ -175,12 +196,14 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     /**
      * Remove Non Existent Lark Databases
+     *
      * @param databasesFromCatalog The databases from catalog
-     * @param databaseFromLark The database from Lark
+     * @param databaseFromLark     The database from Lark
      * @return The remaining databases
      */
     private List<Database> removeNonExistentLarkDatabases(List<Database> databasesFromCatalog,
-                                                          List<LarkDatabaseRecord> databaseFromLark) {
+                                                          List<LarkDatabaseRecord> databaseFromLark)
+    {
         List<String> databaseNamesToDelete = new ArrayList<>();
         Set<String> larkDatabaseNames = databaseFromLark.stream()
                 .map(LarkDatabaseRecord::name)
@@ -191,7 +214,8 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
         for (Database database : databasesFromCatalog) {
             if (!larkDatabaseNames.contains(database.name())) {
                 databaseNamesToDelete.add(database.name());
-            } else {
+            }
+            else {
                 remainingDatabases.add(database);
             }
         }
@@ -205,12 +229,14 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     /**
      * Construct New Tables
+     *
      * @param databaseId The database ID
-     * @param tableId The table ID
-     * @param tableName The table name
+     * @param tableId    The table ID
+     * @param tableName  The table name
      * @return The table input
      */
-    private TableInput constructNewTables(String databaseId, String tableId, String tableName) {
+    private TableInput constructNewTables(String databaseId, String tableId, String tableName)
+    {
         List<ListFieldResponse.FieldItem> listFieldResponse = larkBaseService.getTableFields(databaseId, tableId);
 
         ArrayList<ColumnParameters> columns = listFieldResponse.stream()
@@ -239,7 +265,8 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
         );
     }
 
-    protected Optional<ListFieldResponse.FieldItem> getLookupType(ListFieldResponse.FieldItem item, String baseId) {
+    protected Optional<ListFieldResponse.FieldItem> getLookupType(ListFieldResponse.FieldItem item, String baseId)
+    {
         Pair<String, String> metadata = item.getLookupSourceFieldAndTableId();
         if (metadata == null) {
             return Optional.empty();
@@ -253,16 +280,19 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
                     .stream()
                     .filter(fieldItem -> fieldItem.getFieldId().equals(fieldId))
                     .findFirst();
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("Error getting lookup type for fieldId: {} and tableId: {}", fieldId, tableId, e);
             return Optional.empty();
         }
     }
 
-    private String getLarkBaseOriginalColumnType(ListFieldResponse.FieldItem item, String baseId) {
+    private String getLarkBaseOriginalColumnType(ListFieldResponse.FieldItem item, String baseId)
+    {
         if (item.getUIType().equals(UITypeEnum.FORMULA)) {
             return item.getUIType().getUiType() + "<" + item.getFormulaType() + ">";
-        } else if (item.getUIType().equals(UITypeEnum.LOOKUP)) {
+        }
+        else if (item.getUIType().equals(UITypeEnum.LOOKUP)) {
             Optional<ListFieldResponse.FieldItem> fieldOptional = getLookupType(item, baseId);
             if (fieldOptional.isPresent()) {
                 ListFieldResponse.FieldItem field = fieldOptional.get();
@@ -272,14 +302,16 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
                         if (newUIType == UITypeEnum.LOOKUP) {
                             return item.getUIType().getUiType() + "<" + getLarkBaseOriginalColumnType(field, baseId) + ">";
-                        } else {
+                        }
+                        else {
                             return item.getUIType().getUiType() + "<" + newUIType.getUiType() + ">";
                         }
-
-                    } catch (IllegalArgumentException e) {
+                    }
+                    catch (IllegalArgumentException e) {
                         return item.getUIType().getUiType() + "<NULL>";
                     }
-                } else {
+                }
+                else {
                     return item.getUIType().getUiType() + "<NULL>";
                 }
             }
@@ -290,7 +322,8 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
         return item.getUIType().getUiType();
     }
 
-    private String getFormulaOrLookupFieldType(ListFieldResponse.FieldItem item, String baseId) {
+    private String getFormulaOrLookupFieldType(ListFieldResponse.FieldItem item, String baseId)
+    {
         switch (item.getUIType()) {
             case FORMULA:
                 return item.getFormulaGlueCatalogType();
@@ -304,14 +337,16 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
                             if (newUIType == UITypeEnum.LOOKUP) {
                                 return getFormulaOrLookupFieldType(field, baseId);
-                            } else {
+                            }
+                            else {
                                 return newUIType.getGlueCatalogType(null);
                             }
-
-                        } catch (IllegalArgumentException e) {
+                        }
+                        catch (IllegalArgumentException e) {
                             return null;
                         }
-                    } else {
+                    }
+                    else {
                         return null;
                     }
                 }
@@ -324,9 +359,11 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     /**
      * Create Tables for New Databases
+     *
      * @param databaseToCreate The database to create
      */
-    private void createTablesForNewDatabases(Map<String, String> databaseToCreate) {
+    private void createTablesForNewDatabases(Map<String, String> databaseToCreate)
+    {
         Map<String, List<TableInput>> batchCreateTableRequest = new HashMap<>();
 
         for (Map.Entry<String, String> databaseItem : databaseToCreate.entrySet()) {
@@ -352,19 +389,22 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
             logger.info("Creating tables for {} databases", batchCreateTableRequest.size());
             glueCatalogService.batchCreateTable(batchCreateTableRequest);
             logger.info("Tables on database {} created successfully", databaseToCreate.keySet());
-        } else {
+        }
+        else {
             logger.info("No tables to create on database {}", databaseToCreate.keySet());
         }
     }
 
     /**
      * Create Glue Databases
+     *
      * @param databasesFromCatalog The databases from catalog
-     * @param databaseFromLark The database from Lark
+     * @param databaseFromLark     The database from Lark
      * @return The database process result
      */
     private DatabaseProcessResult createGlueDatabases(List<Database> databasesFromCatalog,
-                                                      List<LarkDatabaseRecord> databaseFromLark) {
+                                                      List<LarkDatabaseRecord> databaseFromLark)
+    {
         Map<String, String> databaseToCreate = new HashMap<>();
         Set<String> existingDatabaseNames = databasesFromCatalog.stream()
                 .map(Database::name)
@@ -376,12 +416,13 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
         for (LarkDatabaseRecord recordItem : databaseFromLark) {
             if (!existingDatabaseNames.contains(recordItem.name())) {
                 databaseToCreate.put(recordItem.name(), Util.constructDatabaseLocationURI(
-                        getCrawlingMethod(),getCrawlingSource(), recordItem.id()));
+                        getCrawlingMethod(), getCrawlingSource(), recordItem.id()));
                 logger.info("Marking database for creation: {}, locationUri: {}",
                         recordItem.name(), Util.constructDatabaseLocationURIPrefix(
                                 getCrawlingMethod(), getCrawlingSource()
                         ));
-            } else {
+            }
+            else {
                 recordsToKeep.add(recordItem);
             }
         }
@@ -401,7 +442,8 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
             logger.info("Step 4.1: Creating tables for new databases");
             this.createTablesForNewDatabases(databaseToCreate);
             logger.info("Step 4.1: Tables created successfully");
-        } else {
+        }
+        else {
             logger.info("No databases to create");
         }
 
@@ -410,12 +452,13 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     /**
      * Update Glue Databases
+     *
      * @param databasesFromCatalog The databases from catalog
-     * @param databaseFromLark The database from Lark
+     * @param databaseFromLark     The database from Lark
      */
     private void updateGlueDatabases(List<Database> databasesFromCatalog,
-                                     List<LarkDatabaseRecord> databaseFromLark) {
-
+                                     List<LarkDatabaseRecord> databaseFromLark)
+    {
         Map<String, String> databaseToUpdate = new HashMap<>();
         Map<String, List<TableInput>> tablesToCreate = new HashMap<>();
         Map<String, List<TableInput>> tablesToUpdate = new HashMap<>();
@@ -431,7 +474,8 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
                         logger.info("Step 5.1: Identifying databases that have changed");
                         databaseToUpdate.put(database.name(), pivotLocationURI);
                         logger.info("Step 5.1: Finished identifying databases that have changed");
-                    } else {
+                    }
+                    else {
                         logger.info("No changes needed for database: {}", database.name());
                     }
 
@@ -456,7 +500,8 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
         if (!databaseToUpdate.isEmpty()) {
             glueCatalogService.batchUpdateDatabase(databaseToUpdate);
             logger.info("Step 6: Databases updated successfully");
-        } else {
+        }
+        else {
             logger.info("Step 6: No databases to update");
         }
         logger.info("Step 6: Finished updating databases");
@@ -465,7 +510,8 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
         if (!tablesToDelete.isEmpty()) {
             glueCatalogService.batchDeleteTable(tablesToDelete);
             logger.info("Step 7: Tables deleted successfully");
-        } else {
+        }
+        else {
             logger.info("Step 7: No tables to delete");
         }
         logger.info("Step 7: Finished deleting tables that don't exist in Lark anymore");
@@ -474,7 +520,8 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
         if (!tablesToCreate.isEmpty()) {
             glueCatalogService.batchCreateTable(tablesToCreate);
             logger.info("Step 8: Tables created successfully");
-        } else {
+        }
+        else {
             logger.info("Step 8: No tables to create");
         }
         logger.info("Step 8: Finished creating tables that exist in Lark but not in Glue");
@@ -483,7 +530,8 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
         if (!tablesToUpdate.isEmpty()) {
             glueCatalogService.batchUpdateTable(tablesToUpdate);
             logger.info("Step 9: Tables updated successfully");
-        } else {
+        }
+        else {
             logger.info("Step 9: No tables to update");
         }
         logger.info("Step 9: Finished updating tables with changed metadata");
@@ -491,13 +539,14 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     /**
      * Process Tables for Database
-     * @param database The database
+     *
+     * @param database   The database
      * @param recordItem The record item
      * @return The update database process result
      */
     private UpdateDatabaseProcessResult processTablesForDatabase(Database database,
-                                                                 LarkDatabaseRecord recordItem) {
-
+                                                                 LarkDatabaseRecord recordItem)
+    {
         logger.info("Step 5.2.1: Getting existing tables from Glue");
         List<Table> originalExistingTables = glueCatalogService.getTables(database.name());
         logger.info("Step 5.2.1: Found {} tables in Glue for database: {}", originalExistingTables.size(), database.name());
@@ -548,12 +597,14 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     /**
      * Identify Tables to Delete
-     * @param existingTables The existing tables
+     *
+     * @param existingTables      The existing tables
      * @param larkTableNamesLower The Lark table names lower
      * @return The table on update database process result
      */
     private TableOnUpdateDatabaseProcessResult<Table> identifyTablesToDelete(List<Table> existingTables,
-                                                                             Set<String> larkTableNamesLower) {
+                                                                             Set<String> larkTableNamesLower)
+    {
         List<Table> tablesToDelete = new ArrayList<>();
         List<Table> tablesToKeep = new ArrayList<>();
 
@@ -566,7 +617,8 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
             if (!existsInLark) {
                 logger.info("Step 5.3.1: Marking table for deletion: {}", tableName);
                 tablesToDelete.add(table);
-            } else {
+            }
+            else {
                 tablesToKeep.add(table);
             }
         }
@@ -576,12 +628,13 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     /**
      * Identify Tables to Create
-     * @param databaseId The database ID
-     * @param larkTables The Lark tables
-     * @param existingTables The existing tables
+     *
+     * @param databaseId          The database ID
+     * @param larkTables          The Lark tables
+     * @param existingTables      The existing tables
      * @param larkTableNamesLower The Lark table names lower
-     * @param larkTableNameMap The Lark table name map
-     * @param glueTableNameMap The Glue table name map
+     * @param larkTableNameMap    The Lark table name map
+     * @param glueTableNameMap    The Glue table name map
      * @return The tables to create
      */
     private List<TableInput> identifyTablesToCreate(String databaseId,
@@ -589,7 +642,8 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
                                                     List<Table> existingTables,
                                                     Set<String> larkTableNamesLower,
                                                     Map<String, String> larkTableNameMap,
-                                                    Map<String, String> glueTableNameMap) {
+                                                    Map<String, String> glueTableNameMap)
+    {
         List<TableInput> tablesToCreate = new ArrayList<>();
         Set<String> larkTableNamesToProcess = new HashSet<>(larkTableNamesLower);
 
@@ -599,7 +653,6 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
                     .map(Table::name)
                     .collect(Collectors.toSet())
                     .contains(glueTableNameMap.get(tableName))) {
-
                 // INFO: Find ID table in Lark based on table name in Lark
                 String tableId = larkTables.stream()
                         .filter(item -> item.getName().equals(larkTableNameMap.get(tableName)))
@@ -619,22 +672,23 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     /**
      * Identify Tables to Update
-     * @param databaseId The database ID
-     * @param larkTables The Lark tables
-     * @param existingTables The existing tables
+     *
+     * @param databaseId              The database ID
+     * @param larkTables              The Lark tables
+     * @param existingTables          The existing tables
      * @param existingTableNamesLower The existing table names lower
      * @return The tables to update
      */
     private List<TableInput> identifyTablesToUpdate(String databaseId,
                                                     List<ListAllTableResponse.BaseItem> larkTables,
                                                     List<Table> existingTables,
-                                                    Set<String> existingTableNamesLower) {
+                                                    Set<String> existingTableNamesLower)
+    {
         List<TableInput> tablesToUpdate = new ArrayList<>();
 
         for (ListAllTableResponse.BaseItem tableItem : larkTables) {
             String tableName = tableItem.getName();
             if (existingTableNamesLower.contains(tableName.toLowerCase())) {
-
                 // INFO: Find existing table in Glue based on table name in Lark
                 Table existingTable = existingTables.stream()
                         .filter(table -> table.name().equalsIgnoreCase(tableName))
@@ -659,12 +713,14 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     /**
      * Handle Request
-     * @param input The input
+     *
+     * @param input   The input
      * @param context The context
      * @return The result
      */
     @Override
-    public String handleRequest(Object input, Context context) {
+    public String handleRequest(Object input, Context context)
+    {
         // Step 1: Get records from Lark
         logger.info("Step 1: Fetching records from Lark Base");
         List<LarkDatabaseRecord> listRecordsResponse = this.getLarkDatabases();
@@ -696,5 +752,4 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
         return "Success";
     }
-
 }

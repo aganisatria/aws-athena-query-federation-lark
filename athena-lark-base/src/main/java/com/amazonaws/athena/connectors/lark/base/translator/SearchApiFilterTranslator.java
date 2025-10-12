@@ -8,7 +8,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,19 +19,30 @@
  */
 package com.amazonaws.athena.connectors.lark.base.translator;
 
-import com.amazonaws.athena.connector.lambda.domain.predicate.*;
+import com.amazonaws.athena.connector.lambda.domain.predicate.AllOrNoneValueSet;
+import com.amazonaws.athena.connector.lambda.domain.predicate.EquatableValueSet;
+import com.amazonaws.athena.connector.lambda.domain.predicate.Marker;
+import com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField;
+import com.amazonaws.athena.connector.lambda.domain.predicate.Range;
+import com.amazonaws.athena.connector.lambda.domain.predicate.SortedRangeSet;
+import com.amazonaws.athena.connector.lambda.domain.predicate.ValueSet;
 import com.amazonaws.athena.connectors.lark.base.model.AthenaFieldLarkBaseMapping;
 import com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RESERVED_SPLIT_KEY;
 
 /**
  * Translates Athena constraints into Lark Bitable Search API JSON filter format.
+ *
  * @see "https://open.larksuite.com/document/uAjLw4CM/ukTMukTMukTM/reference/bitable-v1/app-table-record/search"
  * @see "https://open.larksuite.com/document/uAjLw4CM/ukTMukTMukTM/reference/bitable-v1/app-table-record/record-filter-guide"
  */
@@ -40,7 +51,9 @@ public final class SearchApiFilterTranslator
     private static final Logger logger = LoggerFactory.getLogger(SearchApiFilterTranslator.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    private SearchApiFilterTranslator() {}
+    private SearchApiFilterTranslator()
+    {
+    }
 
     /**
      * Converts Athena constraints to Search API JSON filter format.
@@ -194,7 +207,7 @@ public final class SearchApiFilterTranslator
             }
         }
 
-        // Handle ranges (>, <, >=, <=)
+        // Handle ranges (>, <, >= , <= )
         try {
             List<Range> ranges = rangeSet.getRanges().getOrderedRanges();
             if (ranges != null) {

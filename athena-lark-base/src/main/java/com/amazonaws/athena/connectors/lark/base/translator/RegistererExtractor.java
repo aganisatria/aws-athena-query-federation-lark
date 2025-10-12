@@ -8,7 +8,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,7 +21,12 @@ package com.amazonaws.athena.connectors.lark.base.translator;
 
 import com.amazonaws.athena.connector.lambda.data.BlockUtils;
 import com.amazonaws.athena.connector.lambda.data.writers.GeneratedRowWriter;
-import com.amazonaws.athena.connector.lambda.data.writers.extractors.*;
+import com.amazonaws.athena.connector.lambda.data.writers.extractors.BigIntExtractor;
+import com.amazonaws.athena.connector.lambda.data.writers.extractors.BitExtractor;
+import com.amazonaws.athena.connector.lambda.data.writers.extractors.DateMilliExtractor;
+import com.amazonaws.athena.connector.lambda.data.writers.extractors.DecimalExtractor;
+import com.amazonaws.athena.connector.lambda.data.writers.extractors.TinyIntExtractor;
+import com.amazonaws.athena.connector.lambda.data.writers.extractors.VarCharExtractor;
 import com.amazonaws.athena.connector.lambda.data.writers.holders.NullableDecimalHolder;
 import com.amazonaws.athena.connector.lambda.data.writers.holders.NullableVarCharHolder;
 import com.amazonaws.athena.connectors.lark.base.model.NestedUIType;
@@ -39,7 +44,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -47,7 +56,8 @@ import java.util.stream.Collectors;
  * Utility class responsible for registering appropriate field extractors and writers
  * with a GeneratedRowWriter based on the Arrow schema definition for Lark Base data.
  */
-public class RegistererExtractor {
+public class RegistererExtractor
+{
     private static final Logger logger = LoggerFactory.getLogger(RegistererExtractor.class);
 
     // Excel epoch constants
@@ -55,13 +65,14 @@ public class RegistererExtractor {
     private static final long MILLIS_PER_DAY = TimeUnit.DAYS.toMillis(1);
 
     // Timestamp detection thresholds
-    private static final long TIMESTAMP_MILLIS_THRESHOLD = 10_000_000_000L;  // ~March 1973
+    private static final long TIMESTAMP_MILLIS_THRESHOLD = 10_000_000_000L; // ~March 1973
     private static final long TIMESTAMP_SECONDS_THRESHOLD = 100_000;
     private static final long SECONDS_TO_MILLIS = 1000L;
 
     private final Map<String, NestedUIType> larkFieldTypeMapping;
 
-    public RegistererExtractor(Map<String, NestedUIType> larkFieldTypeMapping) {
+    public RegistererExtractor(Map<String, NestedUIType> larkFieldTypeMapping)
+    {
         this.larkFieldTypeMapping = larkFieldTypeMapping != null ? larkFieldTypeMapping : Collections.emptyMap();
     }
 
@@ -69,9 +80,10 @@ public class RegistererExtractor {
      * Registers extractors and field writers for all fields in the provided schema.
      *
      * @param rowWriterBuilder The builder for the GeneratedRowWriter.
-     * @param schema           The Arrow schema defining the target structure.
+     * @param schema The Arrow schema defining the target structure.
      */
-    public void registerExtractorsForSchema(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Schema schema) {
+    public void registerExtractorsForSchema(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Schema schema)
+    {
         for (Field field : schema.getFields()) {
             ArrowType arrowType = field.getType();
 
@@ -123,7 +135,8 @@ public class RegistererExtractor {
      * @param context The raw context object.
      * @return A Map<String, Object> representing the row data, or an empty map if conversion fails.
      */
-    private Map<String, Object> getContextMap(Object context) {
+    private Map<String, Object> getContextMap(Object context)
+    {
         if (!(context instanceof Map<?, ?> rawMap)) {
             return Collections.emptyMap();
         }
@@ -143,9 +156,10 @@ public class RegistererExtractor {
      * Sets value to 0 and isSet to 1 if input is null or conversion fails.
      *
      * @param rowWriterBuilder The builder for the GeneratedRowWriter.
-     * @param field            The Arrow field definition (TinyInt).
+     * @param field The Arrow field definition (TinyInt).
      */
-    private void registerTinyIntExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field) {
+    private void registerTinyIntExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field)
+    {
         rowWriterBuilder.withExtractor(field.getName(), (TinyIntExtractor) (Object context, NullableTinyIntHolder dst) -> {
             dst.value = 0;
             dst.isSet = 1;
@@ -160,18 +174,23 @@ public class RegistererExtractor {
             try {
                 if (value instanceof Boolean) {
                     dst.value = (byte) (((Boolean) value) ? 1 : 0);
-                } else if (value instanceof Number) {
+                }
+                else if (value instanceof Number) {
                     dst.value = ((Number) value).byteValue();
-                } else if (value instanceof String strValue) {
+                }
+                else if (value instanceof String strValue) {
                     if ("true".equalsIgnoreCase(strValue)) {
                         dst.value = (byte) 1;
-                    } else if ("false".equalsIgnoreCase(strValue)) {
+                    }
+                    else if ("false".equalsIgnoreCase(strValue)) {
                         dst.value = (byte) 0;
-                    } else {
+                    }
+                    else {
                         dst.value = Byte.parseByte(strValue);
                     }
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 dst.value = 0;
                 dst.isSet = 1;
             }
@@ -184,9 +203,10 @@ public class RegistererExtractor {
      * Sets value to 0 (false) and isSet to 1 if input is null or conversion fails.
      *
      * @param rowWriterBuilder The builder for the GeneratedRowWriter.
-     * @param field            The Arrow field definition (Bit).
+     * @param field The Arrow field definition (Bit).
      */
-    private void registerBitExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field) {
+    private void registerBitExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field)
+    {
         rowWriterBuilder.withExtractor(field.getName(), (BitExtractor) (Object context, NullableBitHolder dst) -> {
             Map<String, Object> item = getContextMap(context);
             Object value = item.get(field.getName());
@@ -195,7 +215,8 @@ public class RegistererExtractor {
 
             if (value instanceof Boolean && ((Boolean) value)) {
                 dst.value = 1;
-            } else {
+            }
+            else {
                 dst.value = 0;
             }
         });
@@ -207,9 +228,10 @@ public class RegistererExtractor {
      * Sets value to null (isSet=0) if input is null. Uses String.valueOf() as a fallback.
      *
      * @param rowWriterBuilder The builder for the GeneratedRowWriter.
-     * @param field            The Arrow field definition (VarChar).
+     * @param field The Arrow field definition (VarChar).
      */
-    private void registerVarCharExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field) {
+    private void registerVarCharExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field)
+    {
         rowWriterBuilder.withExtractor(field.getName(), (VarCharExtractor) (Object context, NullableVarCharHolder dst) -> {
             dst.isSet = 0;
             String athenaFieldName = field.getName();
@@ -240,7 +262,7 @@ public class RegistererExtractor {
                             }
                         }
                     }
-                    else if (uiType == UITypeEnum.TEXT && rawValue instanceof Map<?,?> mapVal && mapVal.containsKey("text")) {
+                    else if (uiType == UITypeEnum.TEXT && rawValue instanceof Map<?, ?> mapVal && mapVal.containsKey("text")) {
                         Object textVal = mapVal.get("text");
                         outputValue = (textVal != null) ? String.valueOf(textVal) : null;
                     }
@@ -254,7 +276,8 @@ public class RegistererExtractor {
                     dst.value = outputValue;
                     dst.isSet = 1;
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 logger.error("VarCharExtractor: Error untuk field '{}', nilai mentah tipe {}: {}. Nilai: {}",
                         athenaFieldName, rawValue.getClass().getName(), e.getMessage(), rawValue, e);
                 dst.isSet = 0;
@@ -269,11 +292,11 @@ public class RegistererExtractor {
      * Note: Precision/scale from the Field definition are used by the writer, not explicitly checked here.
      *
      * @param rowWriterBuilder The builder for the GeneratedRowWriter.
-     * @param field            The Arrow field definition (Decimal).
+     * @param field The Arrow field definition (Decimal).
      */
-    private void registerDecimalExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field) {
+    private void registerDecimalExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field)
+    {
         rowWriterBuilder.withExtractor(field.getName(), (DecimalExtractor) (Object context, NullableDecimalHolder dst) -> {
-
             dst.value = BigDecimal.ZERO;
             dst.isSet = 1;
             String fieldName = field.getName();
@@ -287,14 +310,17 @@ public class RegistererExtractor {
             try {
                 if (value instanceof BigDecimal) {
                     dst.value = (BigDecimal) value;
-                } else if (value instanceof Number) {
+                }
+                else if (value instanceof Number) {
                     dst.value = new BigDecimal(value.toString());
-                } else if (value instanceof String strValue) {
+                }
+                else if (value instanceof String strValue) {
                     if (!strValue.isEmpty()) {
                         dst.value = new BigDecimal(strValue);
                     }
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 dst.value = BigDecimal.ZERO;
                 dst.isSet = 1;
             }
@@ -308,12 +334,13 @@ public class RegistererExtractor {
      * 2. Unix Timestamps in seconds (numbers > 100,000, converted to milliseconds)
      * 3. Excel-like serial date numbers (days since 1900-01-01, converted to Unix milliseconds)
      *
-     * @param numValue   The numeric value to convert
-     * @param fieldName  Field name for logging
+     * @param numValue The numeric value to convert
+     * @param fieldName Field name for logging
      * @param extractorType Type of extractor calling this method (for logging)
      * @return Converted timestamp in milliseconds, or null if value is zero
      */
-    private Long convertToTimestampMillis(Number numValue, String fieldName, String extractorType) {
+    private Long convertToTimestampMillis(Number numValue, String fieldName, String extractorType)
+    {
         long longValue = numValue.longValue();
         double doubleValue = numValue.doubleValue();
 
@@ -350,9 +377,10 @@ public class RegistererExtractor {
      * Sets value to null (isSet=0) if input is null, zero, or conversion fails.
      *
      * @param rowWriterBuilder The builder for the GeneratedRowWriter.
-     * @param field            The Arrow field definition (DateMilli).
+     * @param field The Arrow field definition (DateMilli).
      */
-    private void registerDateMilliExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field) {
+    private void registerDateMilliExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field)
+    {
         rowWriterBuilder.withExtractor(field.getName(), (DateMilliExtractor) (Object context, NullableDateMilliHolder dst) -> {
             dst.isSet = 0;
             String fieldName = field.getName();
@@ -370,7 +398,8 @@ public class RegistererExtractor {
                         dst.isSet = 1;
                     }
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 logger.error("DateMilliExtractor: Error extracting date for field '{}': {}", fieldName, e.getMessage(), e);
                 dst.isSet = 0;
             }
@@ -383,9 +412,10 @@ public class RegistererExtractor {
      * Sets value to null (isSet=0) if input is null, zero, or conversion fails.
      *
      * @param rowWriterBuilder The builder for the GeneratedRowWriter.
-     * @param field            The Arrow field definition (Timestamp).
+     * @param field The Arrow field definition (Timestamp).
      */
-    private void registerTimestampMilliExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field) {
+    private void registerTimestampMilliExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field)
+    {
         rowWriterBuilder.withExtractor(field.getName(), (BigIntExtractor) (Object context, NullableBigIntHolder dst) -> {
             dst.isSet = 0;
             String fieldName = field.getName();
@@ -403,14 +433,16 @@ public class RegistererExtractor {
                         dst.isSet = 1;
                     }
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 logger.error("TimestampMilliExtractor: Error extracting timestamp for field '{}': {}", fieldName, e.getMessage(), e);
                 dst.isSet = 0;
             }
         });
     }
 
-    private void registerListFieldWriterFactory(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field) {
+    private void registerListFieldWriterFactory(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field)
+    {
         LarkBaseFieldResolver resolver = new LarkBaseFieldResolver();
         String fieldName = field.getName();
         NestedUIType larkTypeInfo = this.larkFieldTypeMapping.get(fieldName);
@@ -437,11 +469,10 @@ public class RegistererExtractor {
                     if (larkTypeInfo != null && larkTypeInfo.uiType() == UITypeEnum.LOOKUP &&
                             larkTypeInfo.childType() == UITypeEnum.TEXT &&
                             field.getChildren().get(0).getType() instanceof ArrowType.Utf8) {
-
                         processedList = listValue.stream()
                                 .filter(element -> element instanceof Map)
                                 .map(element -> {
-                                    Map<?,?> mapElement = (Map<?,?>) element;
+                                    Map<?, ?> mapElement = (Map<?, ?>) element;
                                     return mapElement.containsKey("text") ? String.valueOf(mapElement.get("text")) : null;
                                 })
                                 .filter(Objects::nonNull)
@@ -452,7 +483,8 @@ public class RegistererExtractor {
                     try {
                         BlockUtils.setComplexValue(vector, rowNum, resolver, processedList);
                         return true;
-                    } catch (Exception e) {
+                    }
+                    catch (Exception e) {
                         logger.error("FieldWriterFactory for List field '{}': Error writing list. ProcessedList type: {}. Exception: {}",
                                 fieldName, processedList.getClass().getName(), e.getMessage(), e);
                         BlockUtils.setComplexValue(vector, rowNum, resolver, null);
@@ -461,7 +493,8 @@ public class RegistererExtractor {
                 });
     }
 
-    private void registerStructFieldWriterFactory(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field) {
+    private void registerStructFieldWriterFactory(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field)
+    {
         LarkBaseFieldResolver resolver = new LarkBaseFieldResolver();
         String fieldName = field.getName();
 
@@ -485,7 +518,8 @@ public class RegistererExtractor {
                     try {
                         BlockUtils.setComplexValue(vector, rowNum, resolver, rawStructValue);
                         return true;
-                    } catch (Exception e) {
+                    }
+                    catch (Exception e) {
                         logger.error("FieldWriterFactory for Struct field '{}': Error writing struct. Value type: {}. Exception: {}",
                                 fieldName, rawStructValue.getClass().getName(), e.getMessage(), e);
                         BlockUtils.setComplexValue(vector, rowNum, resolver, null);

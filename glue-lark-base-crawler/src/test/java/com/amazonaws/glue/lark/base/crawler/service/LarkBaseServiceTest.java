@@ -138,7 +138,7 @@ public class LarkBaseServiceTest {
         verify(mockHttpClient, times(2)).execute(any(HttpGet.class));
 
         List<HttpGet> capturedRequests = httpGetCaptor.getAllValues();
-        assertTrue(capturedRequests.get(0).getURI().toString().contains("page_size=" + larkBaseService.PAGE_SIZE));
+        assertTrue(capturedRequests.get(0).getURI().toString().contains("page_size=" + larkBaseService.pageSize));
         assertFalse(capturedRequests.get(0).getURI().toString().contains("page_token"));
         assertTrue(capturedRequests.get(1).getURI().toString().contains("page_token=page_token_2"));
     }

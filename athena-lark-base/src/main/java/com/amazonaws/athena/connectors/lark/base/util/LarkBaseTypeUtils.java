@@ -7,9 +7,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
- *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -30,9 +30,16 @@ import org.apache.arrow.vector.types.pojo.FieldType;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 
-public class LarkBaseTypeUtils {
+import static java.util.Objects.requireNonNull;
+
+public final class LarkBaseTypeUtils
+{
+    private LarkBaseTypeUtils()
+    {
+        // Prevent instantiation
+    }
+
     /**
      * Maps a Lark field definition (using UITypeEnum) to an Arrow MinorType.
      * This reflects the logic used in UITypeEnum.getGlueCatalogType.
@@ -40,7 +47,8 @@ public class LarkBaseTypeUtils {
      * @param larkField The FieldItem from Lark API response.
      * @return The corresponding Arrow MinorType.
      */
-    public static Types.MinorType larkFieldToArrowMinorType(AthenaFieldLarkBaseMapping larkField) {
+    public static Types.MinorType larkFieldToArrowMinorType(AthenaFieldLarkBaseMapping larkField)
+    {
         UITypeEnum uiType = larkField.nestedUIType().uiType();
 
         return switch (uiType) {
@@ -63,7 +71,7 @@ public class LarkBaseTypeUtils {
             case MULTI_SELECT, USER, GROUP_CHAT, ATTACHMENT, SINGLE_LINK, DUPLEX_LINK, LOOKUP -> Types.MinorType.LIST;
 
             // Glue: struct<...> -> Arrow: STRUCT
-            case URL, LOCATION, CREATED_USER, MODIFIED_USER  -> Types.MinorType.STRUCT;
+            case URL, LOCATION, CREATED_USER, MODIFIED_USER -> Types.MinorType.STRUCT;
 
             // Glue: depends on formulaType -> Arrow: depends on resolved type
             case FORMULA -> {
@@ -84,7 +92,8 @@ public class LarkBaseTypeUtils {
      * @param larkField The Lark FieldItem representing the LIST.
      * @return The Arrow Field definition for the list's child element.
      */
-    public static Field getLarkListChildField(AthenaFieldLarkBaseMapping larkField) {
+    public static Field getLarkListChildField(AthenaFieldLarkBaseMapping larkField)
+    {
         UITypeEnum uiType = larkField.nestedUIType().uiType();
 
         return switch (uiType) {
@@ -156,7 +165,8 @@ public class LarkBaseTypeUtils {
      * @param larkField The Lark FieldItem representing the STRUCT.
      * @return A List of Arrow Field definitions for the struct's children.
      */
-    public static List<Field> getLarkStructChildFields(AthenaFieldLarkBaseMapping larkField) {
+    public static List<Field> getLarkStructChildFields(AthenaFieldLarkBaseMapping larkField)
+    {
         UITypeEnum uiType = larkField.nestedUIType().uiType();
 
         return switch (uiType) {
@@ -199,7 +209,8 @@ public class LarkBaseTypeUtils {
      * @param larkField The FieldItem from Lark API.
      * @return The corresponding Arrow Field definition.
      */
-    public static Field larkFieldToArrowField(AthenaFieldLarkBaseMapping larkField) {
+    public static Field larkFieldToArrowField(AthenaFieldLarkBaseMapping larkField)
+    {
         String fieldName = larkField.larkBaseFieldName();
         Types.MinorType minorType = larkFieldToArrowMinorType(larkField);
         boolean isNullable = true;
@@ -217,7 +228,7 @@ public class LarkBaseTypeUtils {
             }
         }
 
-        switch (Objects.requireNonNull(minorType)) {
+        switch (requireNonNull(minorType)) {
             case LIST:
                 Field childField = getLarkListChildField(larkField);
                 children = Collections.singletonList(childField);
