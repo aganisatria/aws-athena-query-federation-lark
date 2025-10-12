@@ -80,7 +80,6 @@ public class BaseResponse<T> {
             this.msg = msg;
             return this;
         }
-
         @JsonProperty("data")
         public Builder<T> data(T data) {
             this.data = data;

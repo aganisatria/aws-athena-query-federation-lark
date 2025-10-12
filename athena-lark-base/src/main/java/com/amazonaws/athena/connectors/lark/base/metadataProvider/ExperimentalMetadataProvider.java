@@ -66,20 +66,28 @@ public class ExperimentalMetadataProvider {
             String baseId = idsOpt.get().left();
             String tableId = idsOpt.get().right();
             try {
+                logger.info("Experimental Path: Getting table fields for baseId: {}, tableId: {}", baseId, tableId);
                 List<ListFieldResponse.FieldItem> larkFields = invoker.invoke(() -> larkBaseService.getTableFields(baseId, tableId));
+                logger.info("Experimental Path: Got {} fields from Lark", larkFields.size());
 
                 List<AthenaFieldLarkBaseMapping> fieldMappings = new ArrayList<>();
 
                 for (ListFieldResponse.FieldItem field : larkFields) {
                     String larkFieldName = field.getFieldName();
                     if (larkFieldName != null && !larkFieldName.trim().isEmpty()) {
-                        Pair<String, String> lookupId = field.getTargetFieldAndTableForLookup();
-                        String newTableId = lookupId.right();
-                        String newFieldId = lookupId.left();
+                        logger.info("Experimental Path: Processing field: {}", larkFieldName);
                         UITypeEnum childUIType = field.getFormulaGlueCatalogUITypeEnum();
 
                         if (childUIType.equals(UITypeEnum.LOOKUP)) {
-                            childUIType = larkBaseService.getLookupType(baseId, newTableId, newFieldId);
+                            try {
+                                Pair<String, String> lookupId = field.getTargetFieldAndTableForLookup();
+                                String newTableId = lookupId.right();
+                                String newFieldId = lookupId.left();
+                                childUIType = larkBaseService.getLookupType(baseId, newTableId, newFieldId);
+                            } catch (Exception e) {
+                                logger.warn("Experimental Path: Skipping field {} due to error getting lookup type: {}", field.getFieldName(), e.getMessage());
+                                continue;
+                            }
                         }
 
                         NestedUIType nestedUIType = new NestedUIType(field.getUIType(), childUIType);
@@ -93,6 +101,7 @@ public class ExperimentalMetadataProvider {
                 }
 
                 Schema schema = CommonUtil.buildSchemaFromLarkFields(fieldMappings);
+                logger.info("Experimental Path: Built schema: {}", schema);
                 return Optional.of(new TableSchemaResult(schema, Collections.emptySet()));
             } catch (Exception e) {
                 logger.error("Experimental Path: Error fetching fields or building schema for {}.{}: {}", baseId, tableId, e.getMessage(), e);
@@ -174,10 +183,15 @@ public class ExperimentalMetadataProvider {
                     UITypeEnum childUIType = field.getFormulaGlueCatalogUITypeEnum();
 
                     if (childUIType.equals(UITypeEnum.LOOKUP)) {
-                        Pair<String, String> lookupId = field.getTargetFieldAndTableForLookup();
-                        String newTableId = lookupId.right();
-                        String newFieldId = lookupId.left();
-                        childUIType = larkBaseService.getLookupType(larkBaseId, newTableId, newFieldId);
+                        try {
+                            Pair<String, String> lookupId = field.getTargetFieldAndTableForLookup();
+                            String newTableId = lookupId.right();
+                            String newFieldId = lookupId.left();
+                            childUIType = larkBaseService.getLookupType(larkBaseId, newTableId, newFieldId);
+                        } catch (Exception e) {
+                            logger.warn("Experimental Path: Skipping field {} due to error getting lookup type: {}", field.getFieldName(), e.getMessage());
+                            continue;
+                        }
                     }
 
                     NestedUIType nestedUIType = new NestedUIType(field.getUIType(), childUIType);

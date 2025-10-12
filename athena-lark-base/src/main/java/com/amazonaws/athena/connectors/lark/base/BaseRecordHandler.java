@@ -34,7 +34,6 @@ import com.amazonaws.athena.connectors.lark.base.model.NestedUIType;
 import com.amazonaws.athena.connectors.lark.base.model.response.ListRecordsResponse;
 import com.amazonaws.athena.connectors.lark.base.service.EnvVarService;
 import com.amazonaws.athena.connectors.lark.base.service.LarkBaseService;
-import com.amazonaws.athena.connectors.lark.base.translator.ConstraintTranslator;
 import com.amazonaws.athena.connectors.lark.base.translator.SearchApiFilterTranslator;
 import com.amazonaws.athena.connectors.lark.base.translator.RegistererExtractor;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -99,21 +98,11 @@ public class BaseRecordHandler extends RecordHandler {
      */
     @VisibleForTesting
     protected BaseRecordHandler(S3Client amazonS3, SecretsManagerClient secretsManager,
-                                AthenaClient amazonAthena, java.util.Map<String, String> configOptions) {
+                                AthenaClient amazonAthena, java.util.Map<String, String> configOptions, EnvVarService envVarService, LarkBaseService larkBaseService, LoadingCache<String, ThrottlingInvoker> invokerCache) {
         super(amazonS3, secretsManager, amazonAthena, SOURCE_TYPE, configOptions);
-        ThrottlingInvoker invoker = ThrottlingInvoker.newDefaultBuilder(EXCEPTION_FILTER, configOptions).build();
-        this.envVarService = new EnvVarService(configOptions, invoker);
-
-        this.larkBaseService = new LarkBaseService(envVarService.getLarkAppId(), envVarService.getLarkAppSecret());
-        this.invokerCache = CacheBuilder.newBuilder().build(
-                new CacheLoader<>() {
-                    @Override
-                    @Nonnull
-                    public ThrottlingInvoker load(@Nonnull String tableName) {
-                        return invoker;
-                    }
-                }
-        );
+        this.envVarService = envVarService;
+        this.larkBaseService = larkBaseService;
+        this.invokerCache = invokerCache;
     }
 
     /**
@@ -195,7 +184,7 @@ public class BaseRecordHandler extends RecordHandler {
      * @param queryStatusChecker QueryStatusChecker
      * @param itemIterator Iterator of items
      */
-    private void writeItemsToBlock(
+    protected void writeItemsToBlock(
             BlockSpiller spiller,
             ReadRecordsRequest recordsRequest,
             QueryStatusChecker queryStatusChecker,
@@ -398,7 +387,7 @@ public class BaseRecordHandler extends RecordHandler {
      * @param originalSortExpression   The sort expression string to pass to the API.
      * @return An Iterator over records (Map<String, Object>).
      */
-    private Iterator<Map<String, Object>> getIterator(
+    protected Iterator<Map<String, Object>> getIterator(
             String baseId,
             String tableId,
             int pageSizeForApi,
