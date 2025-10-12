@@ -28,6 +28,7 @@ import software.amazon.awssdk.services.sts.StsClient;
 import software.amazon.awssdk.services.sts.model.GetCallerIdentityResponse;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -57,5 +58,29 @@ public class STSServiceTest {
     public void getAccountId_sdkThrowsException() {
         when(mockStsClient.getCallerIdentity()).thenThrow(new RuntimeException("AWS SDK Error"));
         stsService.getAccountId();
+    }
+
+    @Test
+    public void testConstructorWithStsClient() {
+        StsClient customClient = mockStsClient;
+        STSService service = new STSService(customClient);
+        assertNotNull("STSService should be instantiated with custom StsClient", service);
+    }
+
+    @Test
+    public void testDefaultConstructor() {
+        // This test covers the default constructor which calls StsClient.create()
+        // It will pass if AWS credentials are properly configured in the environment
+        try {
+            STSService service = new STSService();
+            assertNotNull("STSService should be instantiated with default constructor", service);
+        } catch (Exception e) {
+            // If AWS credentials are not configured, this test will fail
+            // In CI/CD or AWS environment with proper credentials, this should pass
+            throw new AssertionError(
+                "Default constructor test requires AWS credentials to be configured. " +
+                "Error: " + e.getMessage(), e
+            );
+        }
     }
 }
