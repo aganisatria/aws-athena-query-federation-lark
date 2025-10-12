@@ -28,7 +28,7 @@ import java.util.Map;
 
 /**
  * Normalizes Search API responses to match the structure expected by List API extractors.
- *
+ * <p>
  * The Search API has a different response format:
  * - TEXT fields: [{"text": "value", "type": "text"}] instead of plain string
  * - FORMULA fields: {"type": N, "value": [...]} instead of direct values
@@ -40,7 +40,9 @@ public final class SearchApiResponseNormalizer
 {
     private static final Logger logger = LoggerFactory.getLogger(SearchApiResponseNormalizer.class);
 
-    private SearchApiResponseNormalizer() {}
+    private SearchApiResponseNormalizer()
+    {
+    }
 
     /**
      * Normalizes a single record's fields from Search API format to List API format.
@@ -118,15 +120,14 @@ public final class SearchApiResponseNormalizer
                 // CREATED_USER and MODIFIED_USER: Search API returns arrays but they're STRUCT types
                 // Need to extract first element for compatibility
                 if (firstMap.containsKey("id") && firstMap.containsKey("name") &&
-                    (fieldName.contains("created_user") || fieldName.contains("modified_user"))) {
+                        (fieldName.contains("created_user") || fieldName.contains("modified_user"))) {
                     logger.debug("Converting CREATED_USER/MODIFIED_USER array to single object for field '{}'", fieldName);
                     return firstItem;
                 }
 
                 // Check if this is a text object array
                 if (firstMap.containsKey("text") && firstMap.containsKey("type") &&
-                    "text".equals(firstMap.get("type"))) {
-
+                        "text".equals(firstMap.get("type"))) {
                     // If single item, extract just the text value (for TEXT fields)
                     if (listValue.size() == 1) {
                         String textValue = (String) firstMap.get("text");

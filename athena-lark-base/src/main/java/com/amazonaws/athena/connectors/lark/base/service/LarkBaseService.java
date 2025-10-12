@@ -40,6 +40,7 @@ import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.utils.Pair;
 
 import javax.annotation.Nonnull;
+
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -47,12 +48,13 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE;
+import static java.util.Objects.requireNonNull;
 
-public class LarkBaseService extends CommonLarkService {
+public class LarkBaseService extends CommonLarkService
+{
     private static final Logger logger = LoggerFactory.getLogger(LarkBaseService.class);
     private static final String LARK_BASE_URL = LARK_API_BASE_URL + "/bitable/v1/apps";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -63,15 +65,18 @@ public class LarkBaseService extends CommonLarkService {
     // Cache table fields to avoid N+1 query problem when resolving lookup types
     private final LoadingCache<String, List<ListFieldResponse.FieldItem>> tableFieldsCache;
 
-    public LarkBaseService(String larkAppId, String larkAppSecret) {
+    public LarkBaseService(String larkAppId, String larkAppSecret)
+    {
         super(larkAppId, larkAppSecret);
         this.tableFieldsCache = CacheBuilder.newBuilder()
                 .maximumSize(FIELD_CACHE_MAX_SIZE)
                 .expireAfterWrite(FIELD_CACHE_TTL_MINUTES, TimeUnit.MINUTES)
-                .build(new CacheLoader<String, List<ListFieldResponse.FieldItem>>() {
+                .build(new CacheLoader<String, List<ListFieldResponse.FieldItem>>()
+                {
                     @Override
                     @Nonnull
-                    public List<ListFieldResponse.FieldItem> load(@Nonnull String tableKey) throws Exception {
+                    public List<ListFieldResponse.FieldItem> load(@Nonnull String tableKey) throws Exception
+                    {
                         String[] parts = tableKey.split("\\|");
                         if (parts.length != 2) {
                             throw new IllegalArgumentException("Invalid table key format: " + tableKey);
@@ -81,15 +86,18 @@ public class LarkBaseService extends CommonLarkService {
                 });
     }
 
-    public LarkBaseService(String larkAppId, String larkAppSecret, HttpClientWrapper httpClient) {
+    public LarkBaseService(String larkAppId, String larkAppSecret, HttpClientWrapper httpClient)
+    {
         super(larkAppId, larkAppSecret, httpClient);
         this.tableFieldsCache = CacheBuilder.newBuilder()
                 .maximumSize(FIELD_CACHE_MAX_SIZE)
                 .expireAfterWrite(FIELD_CACHE_TTL_MINUTES, TimeUnit.MINUTES)
-                .build(new CacheLoader<String, List<ListFieldResponse.FieldItem>>() {
+                .build(new CacheLoader<String, List<ListFieldResponse.FieldItem>>()
+                {
                     @Override
                     @Nonnull
-                    public List<ListFieldResponse.FieldItem> load(@Nonnull String tableKey) throws Exception {
+                    public List<ListFieldResponse.FieldItem> load(@Nonnull String tableKey) throws Exception
+                    {
                         String[] parts = tableKey.split("\\|");
                         if (parts.length != 2) {
                             throw new IllegalArgumentException("Invalid table key format: " + tableKey);
@@ -101,11 +109,13 @@ public class LarkBaseService extends CommonLarkService {
 
     /**
      * Get all records from a table
-     * @param baseId base ID
+     *
+     * @param baseId  base ID
      * @param tableId table ID
      * @return Response with list of records and pagination token
      */
-    public List<LarkDatabaseRecord> getDatabaseRecords(String baseId, String tableId) throws IOException {
+    public List<LarkDatabaseRecord> getDatabaseRecords(String baseId, String tableId) throws IOException
+    {
         List<LarkDatabaseRecord> parsedRecords = new ArrayList<>();
         String pageToken = null;
         boolean hasMore;
@@ -147,10 +157,12 @@ public class LarkBaseService extends CommonLarkService {
 
                 pageToken = recordsResponse.getPageToken();
                 hasMore = recordsResponse.hasMore();
-            } else {
+            }
+            else {
                 throw new IOException("Failed to retrieve records for table: " + tableId + ", Error: " + recordsResponse.getMsg());
             }
-        } while (hasMore);
+        }
+        while (hasMore);
 
         return parsedRecords;
     }
@@ -163,8 +175,9 @@ public class LarkBaseService extends CommonLarkService {
      * @return Response with list of records and pagination token
      * @throws IOException if API communication fails
      */
-    public ListRecordsResponse getTableRecords(com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest request) throws IOException {
-        Objects.requireNonNull(request, "request cannot be null");
+    public ListRecordsResponse getTableRecords(com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest request) throws IOException
+    {
+        requireNonNull(request, "request cannot be null");
         refreshTenantAccessToken();
 
         try {
@@ -207,20 +220,24 @@ public class LarkBaseService extends CommonLarkService {
                 if (recordsResponse.getCode() == 0) {
                     sanitizeRecordFieldNames(recordsResponse);
                     return recordsResponse;
-                } else {
+                }
+                else {
                     throw new IOException("Failed to retrieve records for table: " + request.getTableId() + ", Error: " + recordsResponse.getMsg());
                 }
             }
-        } catch (URISyntaxException e) {
+        }
+        catch (URISyntaxException e) {
             throw new IOException("Invalid URI for Lark Base API", e);
         }
     }
 
     /**
      * Sanitize field names and normalize Search API response format for all records
+     *
      * @param response Response object
      */
-    private void sanitizeRecordFieldNames(ListRecordsResponse response) {
+    private void sanitizeRecordFieldNames(ListRecordsResponse response)
+    {
         if (response.getItems() == null) {
             return;
         }
@@ -245,25 +262,20 @@ public class LarkBaseService extends CommonLarkService {
     }
 
     /**
-     * Get all fields for a table.
-     * @see "https://open.larksuite.com/document/server-docs/docs/bitable-v1/app-table-field/list"
-     * @param baseId The base ID
-     * @param tableId The table ID
-     * @return The list of fields
-     */
-    /**
      * Get table fields from cache if available, otherwise fetch from API.
      * This prevents N+1 query problem when resolving lookup field types.
-     *
+     * @see "https://open.larksuite.com/document/server-docs/docs/bitable-v1/app-table-field/list"
      * @param baseId  The base ID
      * @param tableId The table ID
      * @return List of field items
      */
-    public List<ListFieldResponse.FieldItem> getTableFields(String baseId, String tableId) {
+    public List<ListFieldResponse.FieldItem> getTableFields(String baseId, String tableId)
+    {
         String cacheKey = baseId + "|" + tableId;
         try {
             return tableFieldsCache.get(cacheKey);
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.warn("Failed to get fields from cache for {}.{}, falling back to direct fetch: {}",
                     baseId, tableId, e.getMessage(), e);
             return fetchTableFieldsUncached(baseId, tableId);
@@ -278,10 +290,12 @@ public class LarkBaseService extends CommonLarkService {
      * @param tableId The table ID
      * @return List of field items
      */
-    private List<ListFieldResponse.FieldItem> fetchTableFieldsUncached(String baseId, String tableId) {
+    private List<ListFieldResponse.FieldItem> fetchTableFieldsUncached(String baseId, String tableId)
+    {
         try {
             refreshTenantAccessToken();
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new RuntimeException("Failed to refresh Lark access token", e);
         }
 
@@ -320,28 +334,34 @@ public class LarkBaseService extends CommonLarkService {
 
                         pageToken = fieldResponse.getPageToken();
                         hasMore = fieldResponse.hasMore();
-                    } else {
+                    }
+                    else {
                         throw new IOException("Failed to retrieve fields for table: " + tableId + ", Error: " + fieldResponse.getMsg());
                     }
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 throw new RuntimeException("Failed to get fields for table: " + tableId, e);
             }
-        } while (hasMore && pageToken != null && !pageToken.isEmpty());
+        }
+        while (hasMore && pageToken != null && !pageToken.isEmpty());
 
         return allFields;
     }
 
     /**
      * List all tables.
-     * @see "https://open.larksuite.com/document/server-docs/docs/bitable-v1/app-table/list"
+     *
      * @param baseId The base ID
      * @return The list of tables
+     * @see "https://open.larksuite.com/document/server-docs/docs/bitable-v1/app-table/list"
      */
-    public List<ListAllTableResponse.BaseItem> listTables(String baseId) {
+    public List<ListAllTableResponse.BaseItem> listTables(String baseId)
+    {
         try {
             refreshTenantAccessToken();
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new RuntimeException("Failed to refresh Lark access token", e);
         }
 
@@ -378,18 +398,22 @@ public class LarkBaseService extends CommonLarkService {
 
                         pageToken = tableResponse.getPageToken();
                         hasMore = tableResponse.hasMore();
-                    } else {
+                    }
+                    else {
                         throw new IOException("Failed to retrieve tables for base: " + baseId + ", Error: " + tableResponse.getMsg());
                     }
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 throw new RuntimeException("Failed to get records for base: " + baseId, e);
             }
-        } while (hasMore && pageToken != null && !pageToken.isEmpty());
+        }
+        while (hasMore && pageToken != null && !pageToken.isEmpty());
         return allTables;
     }
 
-    public UITypeEnum getLookupType(String baseId, String tableId, String fieldId) {
+    public UITypeEnum getLookupType(String baseId, String tableId, String fieldId)
+    {
         List<ListFieldResponse.FieldItem> fields = getTableFields(baseId, tableId);
         for (ListFieldResponse.FieldItem field : fields) {
             if (field.getFieldId().equalsIgnoreCase(fieldId)) {

@@ -8,7 +8,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,11 +21,25 @@ package com.amazonaws.athena.connectors.lark.base;
 
 import com.amazonaws.athena.connector.lambda.QueryStatusChecker;
 import com.amazonaws.athena.connector.lambda.ThrottlingInvoker;
-import com.amazonaws.athena.connector.lambda.data.*;
+import com.amazonaws.athena.connector.lambda.data.Block;
+import com.amazonaws.athena.connector.lambda.data.BlockAllocator;
+import com.amazonaws.athena.connector.lambda.data.BlockUtils;
+import com.amazonaws.athena.connector.lambda.data.BlockWriter;
+import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.domain.Split;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.handlers.GlueMetadataHandler;
-import com.amazonaws.athena.connector.lambda.metadata.*;
+import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesRequest;
+import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesResponse;
+import com.amazonaws.athena.connector.lambda.metadata.GetSplitsRequest;
+import com.amazonaws.athena.connector.lambda.metadata.GetSplitsResponse;
+import com.amazonaws.athena.connector.lambda.metadata.GetTableLayoutRequest;
+import com.amazonaws.athena.connector.lambda.metadata.GetTableRequest;
+import com.amazonaws.athena.connector.lambda.metadata.GetTableResponse;
+import com.amazonaws.athena.connector.lambda.metadata.ListSchemasRequest;
+import com.amazonaws.athena.connector.lambda.metadata.ListSchemasResponse;
+import com.amazonaws.athena.connector.lambda.metadata.ListTablesRequest;
+import com.amazonaws.athena.connector.lambda.metadata.ListTablesResponse;
 import com.amazonaws.athena.connector.lambda.metadata.optimizations.DataSourceOptimizations;
 import com.amazonaws.athena.connector.lambda.metadata.optimizations.OptimizationSubType;
 import com.amazonaws.athena.connector.lambda.metadata.optimizations.pushdown.FilterPushdownSubType;
@@ -34,9 +48,18 @@ import com.amazonaws.athena.connector.lambda.metadata.optimizations.pushdown.Top
 import com.amazonaws.athena.connector.lambda.security.EncryptionKeyFactory;
 import com.amazonaws.athena.connectors.lark.base.metadataProvider.ExperimentalMetadataProvider;
 import com.amazonaws.athena.connectors.lark.base.metadataProvider.LarkSourceMetadataProvider;
-import com.amazonaws.athena.connectors.lark.base.model.*;
+import com.amazonaws.athena.connectors.lark.base.model.AthenaFieldLarkBaseMapping;
+import com.amazonaws.athena.connectors.lark.base.model.AthenaLarkBaseMapping;
+import com.amazonaws.athena.connectors.lark.base.model.NestedUIType;
+import com.amazonaws.athena.connectors.lark.base.model.PartitionInfoResult;
+import com.amazonaws.athena.connectors.lark.base.model.TableDirectInitialized;
+import com.amazonaws.athena.connectors.lark.base.model.TableSchemaResult;
 import com.amazonaws.athena.connectors.lark.base.resolver.LarkBaseTableResolver;
-import com.amazonaws.athena.connectors.lark.base.service.*;
+import com.amazonaws.athena.connectors.lark.base.service.AthenaService;
+import com.amazonaws.athena.connectors.lark.base.service.EnvVarService;
+import com.amazonaws.athena.connectors.lark.base.service.GlueCatalogService;
+import com.amazonaws.athena.connectors.lark.base.service.LarkBaseService;
+import com.amazonaws.athena.connectors.lark.base.service.LarkDriveService;
 import com.amazonaws.athena.connectors.lark.base.translator.SearchApiFilterTranslator;
 import com.amazonaws.athena.connectors.lark.base.util.CommonUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -54,12 +77,33 @@ import software.amazon.awssdk.services.glue.model.Table;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.utils.Pair;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static com.amazonaws.athena.connector.lambda.metadata.ListTablesRequest.UNLIMITED_PAGE_SIZE_VALUE;
-import static com.amazonaws.athena.connectors.lark.base.BaseConstants.*;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.BASE_ID_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.EXPECTED_ROW_COUNT_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.FILTER_EXPRESSION_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.IS_PARALLEL_SPLIT_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_BASE_FLAG;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_TYPE_MAPPING_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RESERVED_SPLIT_KEY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.SORT_EXPRESSION_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.SOURCE_TYPE;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.SPLIT_END_INDEX_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.SPLIT_START_INDEX_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.TABLE_ID_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.throttling.BaseExceptionFilter.EXCEPTION_FILTER;
-
+import static java.util.Objects.requireNonNull;
 
 /**
  * This class is responsible for providing metadata for the tables and schemas in the Lark Base data source.
@@ -93,7 +137,8 @@ public class BaseMetadataHandler
      * Initialize Lark services by retrieving app credentials from AWS Secrets Manager.
      * This is common code used by both constructors.
      */
-    private void initializeLarkServices(Map<String, String> configOptions) {
+    private void initializeLarkServices(Map<String, String> configOptions)
+    {
         this.invoker = ThrottlingInvoker.newDefaultBuilder(EXCEPTION_FILTER, configOptions).build();
         this.envVarService = new EnvVarService(configOptions, invoker);
         AthenaService athenaService = new AthenaService();
@@ -114,12 +159,13 @@ public class BaseMetadataHandler
         }
     }
 
-    public BaseMetadataHandler(Map<String, String> configOptions) {
+    public BaseMetadataHandler(Map<String, String> configOptions)
+    {
         super(SOURCE_TYPE, configOptions);
         initializeLarkServices(configOptions);
     }
 
-        /**
+    /**
      * Constructs a new BaseMetadataHandler instance.
      *
      * @param glueClient The AWS Glue client.
@@ -129,7 +175,7 @@ public class BaseMetadataHandler
      * @param spillBucket The S3 bucket for spilling results.
      * @param spillPrefix The S3 prefix for spilling results.
      * @param configOptions Configuration options for the connector.
-         */
+     */
     @VisibleForTesting
     protected BaseMetadataHandler(
             GlueClient glueClient,
@@ -138,7 +184,8 @@ public class BaseMetadataHandler
             AthenaClient athena,
             String spillBucket,
             String spillPrefix,
-            Map<String, String> configOptions) {
+            Map<String, String> configOptions)
+    {
         super(glueClient, keyFactory, awsSecretsManager, athena, SOURCE_TYPE, spillBucket, spillPrefix, configOptions);
         initializeLarkServices(configOptions);
     }
@@ -178,7 +225,8 @@ public class BaseMetadataHandler
             List<TableDirectInitialized> mappingTableDirectInitialized,
             LarkSourceMetadataProvider larkSourceMetadataProvider,
             ExperimentalMetadataProvider experimentalMetadataProvider,
-            ThrottlingInvoker invoker) {
+            ThrottlingInvoker invoker)
+    {
         super(glueClient, keyFactory, awsSecretsManager, athena, SOURCE_TYPE, spillBucket, spillPrefix, configOptions);
         this.envVarService = envVarService;
         this.larkBaseService = larkBaseService;
@@ -242,13 +290,14 @@ public class BaseMetadataHandler
      *
      * @param allocator Tool for creating and managing Apache Arrow Blocks.
      * @param request Provides details on who made the request and which Athena catalog and database they are querying.
-     *                May include a nextToken for pagination.
+     * May include a nextToken for pagination.
      * @return A ListTablesResponse which primarily contains a List<TableName> enumerating the tables in this
      * catalog, database tuple. It also contains the catalog name corresponding the Athena catalog that was queried,
      * and potentially a nextToken if more tables exist.
      */
     @Override
-    public ListTablesResponse doListTables(BlockAllocator allocator, ListTablesRequest request) throws Exception {
+    public ListTablesResponse doListTables(BlockAllocator allocator, ListTablesRequest request) throws Exception
+    {
         String requestedSchema = request.getSchemaName();
 
         if (envVarService.isEnableDebugLogging()) {
@@ -268,7 +317,7 @@ public class BaseMetadataHandler
         }
 
         // 2. Always add tables from Lark mapping if the feature is active
-        //    (This will add the same tables again if they are in Glue, but Set will handle duplicates)
+        // (This will add the same tables again if they are in Glue, but Set will handle duplicates)
         if (envVarService.isActivateLarkBaseSource() || envVarService.isActivateLarkDriveSource()) {
             if (envVarService.isEnableDebugLogging()) {
                 logger.info("doListTables: Checking Lark Base source mapping. envVarService.isActivateLarkBaseSource()={}, mappingTableDirectInitialized empty={}",
@@ -296,12 +345,14 @@ public class BaseMetadataHandler
                 if (envVarService.isEnableDebugLogging()) {
                     logger.info("doListTables: Finished checking Lark mapping. Added {} unique tables from mapping for schema {}.", larkTablesAddedCount, requestedSchema);
                 }
-            } else {
+            }
+            else {
                 if (envVarService.isEnableDebugLogging()) {
                     logger.info("doListTables: Lark mapping is empty. No tables added from mapping.");
                 }
             }
-        } else {
+        }
+        else {
             if (envVarService.isEnableDebugLogging()) {
                 logger.info("doListTables: Lark Base source feature is not active (envVarService.isActivateLarkBaseSource()=false).");
             }
@@ -330,7 +381,8 @@ public class BaseMetadataHandler
      * @throws RuntimeException if unable to retrieve the table definition from Glue.
      */
     @Override
-    public GetTableResponse doGetTable(BlockAllocator allocator, GetTableRequest request) {
+    public GetTableResponse doGetTable(BlockAllocator allocator, GetTableRequest request)
+    {
         if (envVarService.isEnableDebugLogging()) {
             logger.info("doGetTable: Using Strategy Pattern for table {}", request.getTableName());
         }
@@ -372,12 +424,15 @@ public class BaseMetadataHandler
                 logger.info("doGetTable: Found schema from Glue.");
                 Schema finalSchema = CommonUtil.addReservedFields(glueResponse.getSchema());
                 return new GetTableResponse(request.getCatalogName(), request.getTableName(), finalSchema, glueResponse.getPartitionColumns());
-            } else {
+            }
+            else {
                 logger.warn("doGetTable: Glue fallback returned null or no schema for {}.", request.getTableName());
             }
-        } catch (EntityNotFoundException e) {
+        }
+        catch (EntityNotFoundException e) {
             logger.warn("doGetTable: Glue fallback: Table {} not found in Glue.", request.getTableName());
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.warn("doGetTable: Error during Glue fallback for {}: {}", request.getTableName(), e.getMessage(), e);
         }
 
@@ -415,7 +470,8 @@ public class BaseMetadataHandler
     /**
      * Resolves partition information from various providers (Lark source, experimental, or Glue fallback).
      */
-    private Optional<PartitionInfoResult> resolvePartitionInfo(TableName tableName, GetTableLayoutRequest request) {
+    private Optional<PartitionInfoResult> resolvePartitionInfo(TableName tableName, GetTableLayoutRequest request)
+    {
         if (envVarService.isActivateLarkBaseSource() || envVarService.isActivateLarkDriveSource()) {
             logger.info("getPartitions: Attempting to get partition info from Lark Base source.");
             Optional<PartitionInfoResult> larkSourcePartitionInfo = larkSourceMetadataProvider.getPartitionInfo(tableName);
@@ -441,16 +497,19 @@ public class BaseMetadataHandler
                 List<AthenaFieldLarkBaseMapping> mappings = glueCatalogService.getFieldNameMappings(tableName.getSchemaName(), tableName.getTableName());
                 return Optional.of(new PartitionInfoResult(ids.left(), ids.right(), mappings));
             }
-        } catch (EntityNotFoundException e) {
+        }
+        catch (EntityNotFoundException e) {
             logger.warn("getPartitions: Glue Fallback: Table {} not found in Glue.", tableName);
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.warn("getPartitions: Error during Glue fallback for {}: {}", tableName, e.getMessage(), e);
         }
 
         return Optional.empty();
     }
 
-    private long extractQueryLimit(GetTableLayoutRequest request) {
+    private long extractQueryLimit(GetTableLayoutRequest request)
+    {
         if (request.getConstraints() != null && request.getConstraints().hasLimit()) {
             long limit = request.getConstraints().getLimit();
             logger.info("getPartitions: Query has LIMIT {}", limit);
@@ -459,7 +518,8 @@ public class BaseMetadataHandler
         return -1;
     }
 
-    private String buildFieldTypeMappingJson(List<AthenaFieldLarkBaseMapping> fieldNameMappings, TableName tableName) {
+    private String buildFieldTypeMappingJson(List<AthenaFieldLarkBaseMapping> fieldNameMappings, TableName tableName)
+    {
         if (fieldNameMappings == null || fieldNameMappings.isEmpty()) {
             return "";
         }
@@ -472,14 +532,16 @@ public class BaseMetadataHandler
         try {
             ObjectMapper objectMapper = new ObjectMapper();
             return objectMapper.writeValueAsString(larkFieldTypeMap);
-        } catch (JsonProcessingException e) {
+        }
+        catch (JsonProcessingException e) {
             logger.warn("getPartitions: Failed to serialize Lark field type mapping for {}.{}: {}",
                     tableName.getSchemaName(), tableName.getTableName(), e.getMessage());
             return "";
         }
     }
 
-    private String translateFilterExpression(GetTableLayoutRequest request, List<AthenaFieldLarkBaseMapping> fieldNameMappings, TableName tableName) {
+    private String translateFilterExpression(GetTableLayoutRequest request, List<AthenaFieldLarkBaseMapping> fieldNameMappings, TableName tableName)
+    {
         if (request.getConstraints() == null || request.getConstraints().getSummary() == null || request.getConstraints().getSummary().isEmpty()) {
             logger.info("getPartitions: No constraints to translate for {}", tableName);
             return "";
@@ -493,13 +555,15 @@ public class BaseMetadataHandler
             String filterExpression = SearchApiFilterTranslator.toFilterJson(request.getConstraints().getSummary(), fieldNameMappings);
             logger.info("getPartitions: Translated filter constraints for {}: {}", tableName, filterExpression);
             return filterExpression;
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.warn("getPartitions: Failed to translate filter constraints for {}: {}. Proceeding with empty filter.", tableName, e.getMessage(), e);
             return "";
         }
     }
 
-    private boolean hasParallelSplitKey(List<AthenaFieldLarkBaseMapping> fieldNameMappings) {
+    private boolean hasParallelSplitKey(List<AthenaFieldLarkBaseMapping> fieldNameMappings)
+    {
         if (fieldNameMappings == null) {
             return false;
         }
@@ -507,27 +571,31 @@ public class BaseMetadataHandler
                 .anyMatch(m -> RESERVED_SPLIT_KEY.equalsIgnoreCase(m.athenaName()));
     }
 
-    private boolean hasOrderByClause(GetTableLayoutRequest request) {
+    private boolean hasOrderByClause(GetTableLayoutRequest request)
+    {
         return request.getConstraints() != null &&
                 request.getConstraints().getOrderByClause() != null &&
                 !request.getConstraints().getOrderByClause().isEmpty();
     }
 
     private String translateSortExpression(GetTableLayoutRequest request, List<AthenaFieldLarkBaseMapping> fieldNameMappings,
-                                          boolean useParallelSplits, boolean hasOrderBy, TableName tableName) {
+                                           boolean useParallelSplits, boolean hasOrderBy, TableName tableName)
+    {
         if (fieldNameMappings == null || useParallelSplits || !hasOrderBy || fieldNameMappings.isEmpty()) {
             return "";
         }
 
         try {
             return SearchApiFilterTranslator.toSortJson(request.getConstraints().getOrderByClause(), fieldNameMappings);
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.warn("getPartitions: Failed to translate sort expression for {}: {}. Proceeding without sort.", tableName, e.getMessage(), e);
             return "";
         }
     }
 
-    private long calculateEffectiveRowCount(long totalRowCount, long queryLimit, boolean hasOrderBy) {
+    private long calculateEffectiveRowCount(long totalRowCount, long queryLimit, boolean hasOrderBy)
+    {
         if (hasOrderBy) {
             logger.info("getPartitions: ORDER BY detected. Ignoring LIMIT {}. Effective count: {}", queryLimit, totalRowCount);
             return totalRowCount;
@@ -543,9 +611,10 @@ public class BaseMetadataHandler
     }
 
     private void writeParallelPartitions(BlockWriter blockWriter, String baseId, String tableId,
-                                        String filterExpression, String fieldTypeMappingJson,
-                                        long queryLimit, boolean hasOrderBy) {
-        int totalRowCount = getTotalRowCount(baseId, tableId, null, "");
+                                         String filterExpression, String fieldTypeMappingJson,
+                                         long queryLimit, boolean hasOrderBy)
+    {
+        int totalRowCount = getTotalRowCount(baseId, tableId, null);
         long effectiveRowCount = calculateEffectiveRowCount(totalRowCount, queryLimit, hasOrderBy);
 
         if (effectiveRowCount == 0 && totalRowCount > 0) {
@@ -579,9 +648,10 @@ public class BaseMetadataHandler
     }
 
     private void writeSinglePartition(BlockWriter blockWriter, String baseId, String tableId,
-                                     String filterExpression, String sortExpression, String fieldTypeMappingJson,
-                                     long queryLimit, boolean useParallelSplits, boolean hasOrderBy) {
-        int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression, "");
+                                      String filterExpression, String sortExpression, String fieldTypeMappingJson,
+                                      long queryLimit, boolean useParallelSplits, boolean hasOrderBy)
+    {
+        int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression);
         long effectiveRowCount = calculateEffectiveRowCount(totalRowCount, queryLimit, useParallelSplits && hasOrderBy);
 
         if (effectiveRowCount == 0 && totalRowCount > 0) {
@@ -608,7 +678,8 @@ public class BaseMetadataHandler
         logger.info("getPartitions: Successfully wrote 1 single partition row.");
     }
 
-    private int getTotalRowCount(String baseId, String tableId, String filterExpression, String sortExpression) {
+    private int getTotalRowCount(String baseId, String tableId, String filterExpression)
+    {
         try {
             com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest request =
                     com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest.builder()
@@ -616,13 +687,14 @@ public class BaseMetadataHandler
                             .tableId(tableId)
                             .pageSize(1)
                             .filterJson(filterExpression)
-                            .sortJson(sortExpression)
+                            .sortJson("")
                             .build();
 
             int total = invoker.invoke(() -> larkBaseService.getTableRecords(request)).getTotal();
             logger.info("getPartitions: Estimated total row count matching filter: {}", total);
             return total;
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             throw new RuntimeException("Failed to estimate row count for partition planning.", e);
         }
     }
@@ -639,10 +711,11 @@ public class BaseMetadataHandler
      * @param queryStatusChecker Allows checking if the query is still active.
      */
     @Override
-    public void getPartitions(BlockWriter blockWriter, GetTableLayoutRequest request, QueryStatusChecker queryStatusChecker) {
-        Objects.requireNonNull(blockWriter, "blockWriter cannot be null");
-        Objects.requireNonNull(request, "request cannot be null");
-        Objects.requireNonNull(queryStatusChecker, "queryStatusChecker cannot be null");
+    public void getPartitions(BlockWriter blockWriter, GetTableLayoutRequest request, QueryStatusChecker queryStatusChecker)
+    {
+        requireNonNull(blockWriter, "blockWriter cannot be null");
+        requireNonNull(request, "request cannot be null");
+        requireNonNull(queryStatusChecker, "queryStatusChecker cannot be null");
 
         logger.info("getPartitions: Using Strategy Pattern for table {}", request.getTableName());
         TableName tableName = request.getTableName();
@@ -674,7 +747,8 @@ public class BaseMetadataHandler
         if (useParallelSplits && envVarService.isActivateParallelSplit()) {
             writeParallelPartitions(blockWriter, baseId, tableId, filterExpression, fieldTypeMappingJson,
                     queryLimit, hasOrderBy);
-        } else {
+        }
+        else {
             writeSinglePartition(blockWriter, baseId, tableId, filterExpression, sortExpression,
                     fieldTypeMappingJson, queryLimit, useParallelSplits, hasOrderBy);
         }
@@ -690,14 +764,15 @@ public class BaseMetadataHandler
      *
      * @param allocator Tool for creating and managing Apache Arrow Blocks.
      * @param request Provides details of the catalog, database, table, and the single partition generated
-     *                by `getPartitions`.
+     * by `getPartitions`.
      * @return A GetSplitsResponse containing:
      * 1. A Set containing the single Split representing the entire read operation for the table/query.
      * 2. A null continuation token (as all splits are generated at once).
      * @throws RuntimeException if the number of partitions received is not exactly one.
      */
     @Override
-    public GetSplitsResponse doGetSplits(BlockAllocator allocator, GetSplitsRequest request) {
+    public GetSplitsResponse doGetSplits(BlockAllocator allocator, GetSplitsRequest request)
+    {
         TableName tableName = request.getTableName();
         logger.info("doGetSplits: enter for table {}", tableName);
 
@@ -749,7 +824,7 @@ public class BaseMetadataHandler
                         logger.info("doGetSplits: Applying LIMIT {} as page size for split row {} (Top-N optimization)", pageSizeForSplit, rowNum);
                     }
                 }
-                if (!isParallelSplit && finalExpectedRowCount > limit && limit >=0) {
+                if (!isParallelSplit && finalExpectedRowCount > limit && limit >= 0) {
                     finalExpectedRowCount = limit;
                 }
             }
@@ -765,7 +840,6 @@ public class BaseMetadataHandler
                     .add(SPLIT_END_INDEX_PROPERTY, String.valueOf(splitEndIndex))
                     .add(LARK_FIELD_TYPE_MAPPING_PROPERTY, larkFieldTypeMappingJson);
 
-
             if (!isParallelSplit && !sortExpression.isEmpty()) {
                 splitBuilder.add(SORT_EXPRESSION_PROPERTY, sortExpression);
             }
@@ -773,22 +847,49 @@ public class BaseMetadataHandler
             splits.add(splitBuilder.build());
             logger.debug("doGetSplits: Created split for partition row {}: Parallel={}, Range={}-{}, PageSize={}, ExpectedRows={}",
                     rowNum, isParallelSplit, splitStartIndex, splitEndIndex, pageSizeForSplit, finalExpectedRowCount);
-
         }
 
         logger.info("doGetSplits: Finished. Returning {} splits for table {}", splits.size(), request.getTableName());
         return new GetSplitsResponse(request.getCatalogName(), splits, null);
     }
 
-    private static class FieldReaderUtil {
-        static String readText(FieldReader reader, int position) {
-            if (reader == null) return ""; reader.setPosition(position); return reader.isSet() ? reader.readText().toString() : ""; }
-        static int readInt(FieldReader reader, int position) {
-            if (reader == null) return 0; reader.setPosition(position); return reader.isSet() ? (reader.readInteger() != null ? reader.readInteger() : 0) : 0; }
-        static long readLong(FieldReader reader, int position) {
-            if (reader == null) return 0L; reader.setPosition(position); return reader.isSet() ? (reader.readLong() != null ? reader.readLong() : 0L) : 0L; }
-        static boolean readBoolean(FieldReader reader, int position) {
-            if (reader == null) return false; reader.setPosition(position); return reader.isSet() && (reader.readBoolean() != null ? reader.readBoolean() : false); }
+    private static class FieldReaderUtil
+    {
+        static String readText(FieldReader reader, int position)
+        {
+            if (reader == null) {
+                return "";
+            }
+            reader.setPosition(position);
+            return reader.isSet() ? reader.readText().toString() : "";
+        }
+
+        static int readInt(FieldReader reader, int position)
+        {
+            if (reader == null) {
+                return 0;
+            }
+            reader.setPosition(position);
+            return reader.isSet() ? (reader.readInteger() != null ? reader.readInteger() : 0) : 0;
+        }
+
+        static long readLong(FieldReader reader, int position)
+        {
+            if (reader == null) {
+                return 0L;
+            }
+            reader.setPosition(position);
+            return reader.isSet() ? (reader.readLong() != null ? reader.readLong() : 0L) : 0L;
+        }
+
+        static boolean readBoolean(FieldReader reader, int position)
+        {
+            if (reader == null) {
+                return false;
+            }
+            reader.setPosition(position);
+            return reader.isSet() && (reader.readBoolean() != null ? reader.readBoolean() : false);
+        }
     }
 
     /**
@@ -800,29 +901,29 @@ public class BaseMetadataHandler
      * The optimizations enabled in this implementation are:
      * <p>
      * 1. LIMIT Pushdown:
-     *    - Capability: Pushes the LIMIT clause from Athena queries to the Lark Bitable API.
-     *    - Benefit: Only the approximate number of records needed might be fetched initially (controlled by page size),
-     *      and Athena stops requesting more data once the limit is reached. While not a direct translation of LIMIT N
-     *      to the API, declaring support allows Athena to optimize by stopping early.
-     *    - Implementation: Primarily relies on Athena stopping calls to the RecordHandler. The connector itself uses 'page_size'.
-     *    - Example: "SELECT * FROM table LIMIT 100" - Athena will stop asking the RecordHandler for data after 100 records.
+     * - Capability: Pushes the LIMIT clause from Athena queries to the Lark Bitable API.
+     * - Benefit: Only the approximate number of records needed might be fetched initially (controlled by page size),
+     * and Athena stops requesting more data once the limit is reached. While not a direct translation of LIMIT N
+     * to the API, declaring support allows Athena to optimize by stopping early.
+     * - Implementation: Primarily relies on Athena stopping calls to the RecordHandler. The connector itself uses 'page_size'.
+     * - Example: "SELECT * FROM table LIMIT 100" - Athena will stop asking the RecordHandler for data after 100 records.
      * <p>
      * 2. TOP N Pushdown:
-     *    - Capability: Pushes ORDER BY + LIMIT operations to the data source.
-     *    - Benefit: Sorting happens at the data source, eliminating the need for Athena to
-     *      fetch the entire dataset and sort it.
-     *    - Implementation: Combines 'sort' and 'page_size' parameters in the Lark Bitable API.
-     *    - Example: "SELECT * FROM table ORDER BY column DESC LIMIT 10" will request the top 10
-     *      records, already sorted, from the API (within the first page).
+     * - Capability: Pushes ORDER BY + LIMIT operations to the data source.
+     * - Benefit: Sorting happens at the data source, eliminating the need for Athena to
+     * fetch the entire dataset and sort it.
+     * - Implementation: Combines 'sort' and 'page_size' parameters in the Lark Bitable API.
+     * - Example: "SELECT * FROM table ORDER BY column DESC LIMIT 10" will request the top 10
+     * records, already sorted, from the API (within the first page).
      * <p>
      * 3. Filter Pushdown:
-     *    - Capability: Pushes WHERE clause predicates to the data source.
-     *    - Benefit: Data filtering happens at the source, dramatically reducing the volume of
-     *      data transferred to Athena.
-     *    - Implementation: Translates WHERE clauses to the 'filter' parameter in the Lark Bitable API.
-     *    - Supported filter types: EQUATABLE_VALUE_SET, SORTED_RANGE_SET, ALL_OR_NONE_VALUE_SET, NULLABLE_COMPARISON.
-     *    - Example: "SELECT * FROM table WHERE status = 'active' AND created_date > '2023-01-01'" will filter records at the API level.
-     *    - Unsupported filters: LIKE, REGEX, and other complex expressions.
+     * - Capability: Pushes WHERE clause predicates to the data source.
+     * - Benefit: Data filtering happens at the source, dramatically reducing the volume of
+     * data transferred to Athena.
+     * - Implementation: Translates WHERE clauses to the 'filter' parameter in the Lark Bitable API.
+     * - Supported filter types: EQUATABLE_VALUE_SET, SORTED_RANGE_SET, ALL_OR_NONE_VALUE_SET, NULLABLE_COMPARISON.
+     * - Example: "SELECT * FROM table WHERE status = 'active' AND created_date > '2023-01-01'" will filter records at the API level.
+     * - Unsupported filters: LIKE, REGEX, and other complex expressions.
      * <p>
      * When a query is executed, Athena uses these capabilities to optimize the execution plan,
      * pushing as much of the query processing as possible to the Lark Bitable API, reducing
@@ -858,7 +959,7 @@ public class BaseMetadataHandler
         // This allows filtering to happen at the data source level
         Map.Entry<String, List<OptimizationSubType>> filterPushdownCapability =
                 DataSourceOptimizations.SUPPORTS_FILTER_PUSHDOWN.withSupportedSubTypes(
-                        // Support for basic comparison operators (=, !=, >, <, >=, <=)
+                        // Support for basic comparison operators (=, !=, >, <, >= , <= )
                         FilterPushdownSubType.EQUATABLE_VALUE_SET,
                         // Support for range filters like BETWEEN or combined conditions
                         FilterPushdownSubType.SORTED_RANGE_SET,

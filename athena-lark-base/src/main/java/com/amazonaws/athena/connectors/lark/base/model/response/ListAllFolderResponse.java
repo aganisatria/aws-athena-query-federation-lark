@@ -29,40 +29,47 @@ import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonDeserialize(builder = ListAllFolderResponse.Builder.class)
-public final class ListAllFolderResponse extends BaseResponse<ListAllFolderResponse.ListData> {
-
-    private ListAllFolderResponse(Builder builder) {
+public final class ListAllFolderResponse extends BaseResponse<ListAllFolderResponse.ListData>
+{
+    private ListAllFolderResponse(Builder builder)
+    {
         super(builder);
     }
 
-    public static Builder builder() {
+    public static Builder builder()
+    {
         return new Builder();
     }
 
-    public List<DriveFile> getFiles() {
+    public List<DriveFile> getFiles()
+    {
         ListData data = getData();
         return data != null ? data.getFiles() : Collections.emptyList();
     }
 
-    public String getNextPageToken() {
+    public String getNextPageToken()
+    {
         ListData data = getData();
         return (data != null) ? data.getNextPageToken() : null;
     }
 
-    public boolean hasMore() {
+    public boolean hasMore()
+    {
         ListData data = getData();
         return (data != null) && data.hasMore();
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonDeserialize(builder = DriveFile.Builder.class)
-    public static final class DriveFile {
+    public static final class DriveFile
+    {
         private final String name;
         private final String parentToken;
         private final String token;
         private final String type;
 
-        private DriveFile(Builder builder) {
+        private DriveFile(Builder builder)
+        {
             this.name = builder.name;
             this.parentToken = builder.parentToken;
             this.token = builder.token;
@@ -70,125 +77,200 @@ public final class ListAllFolderResponse extends BaseResponse<ListAllFolderRespo
         }
 
         @JsonProperty("name")
-        public String getName() {
+        public String getName()
+        {
             return CommonUtil.sanitizeGlueRelatedName(name);
         }
 
         @SuppressWarnings("unused")
-        public String getRawName() {
+        public String getRawName()
+        {
             return name;
         }
 
         @SuppressWarnings("unused")
         @JsonProperty("parent_token")
-        public String getParentToken() {
+        public String getParentToken()
+        {
             return parentToken;
         }
 
         @JsonProperty("token")
-        public String getToken() {
+        public String getToken()
+        {
             return token;
         }
 
         @JsonProperty("type")
-        public String getType() {
+        public String getType()
+        {
             return type;
         }
 
-        public static Builder builder() { return new Builder(); }
+        public static Builder builder()
+        {
+            return new Builder();
+        }
 
         @JsonIgnoreProperties(ignoreUnknown = true)
-        public static final class Builder {
+        public static final class Builder
+        {
             private String name;
             private String parentToken;
             private String token;
             private String type;
 
-            private Builder() {}
+            private Builder()
+            {
+            }
 
             @JsonProperty("name")
-            public Builder name(String name) { this.name = name; return this; }
+            public Builder name(String name)
+            {
+                this.name = name;
+                return this;
+            }
+
             @SuppressWarnings("unused")
             @JsonProperty("parent_token")
-            public Builder parentToken(String parentToken) { this.parentToken = parentToken; return this; }
+            public Builder parentToken(String parentToken)
+            {
+                this.parentToken = parentToken;
+                return this;
+            }
+
             @SuppressWarnings("unused")
             @JsonProperty("token")
-            public Builder token(String token) { this.token = token; return this; }
-            @JsonProperty("type")
-            public Builder type(String type) { this.type = type; return this; }
+            public Builder token(String token)
+            {
+                this.token = token;
+                return this;
+            }
 
-            public DriveFile build() { return new DriveFile(this); }
+            @JsonProperty("type")
+            public Builder type(String type)
+            {
+                this.type = type;
+                return this;
+            }
+
+            public DriveFile build()
+            {
+                return new DriveFile(this);
+            }
         }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonDeserialize(builder = ListData.Builder.class)
-    public static final class ListData {
+    public static final class ListData
+    {
         private final List<DriveFile> files;
         private final String nextPageToken;
         private final boolean hasMore;
 
-        private ListData(Builder builder) {
+        private ListData(Builder builder)
+        {
             this.files = builder.files != null ? List.copyOf(builder.files) : Collections.emptyList(); // Ensure immutable list
             this.nextPageToken = builder.nextPageToken;
             this.hasMore = builder.hasMore;
         }
 
         @JsonProperty("files")
-        public List<DriveFile> getFiles() { return files; }
-        @JsonProperty("next_page_token")
-        public String getNextPageToken() { return nextPageToken; }
-        @JsonProperty("has_more")
-        public boolean hasMore() { return hasMore; }
+        public List<DriveFile> getFiles()
+        {
+            return files;
+        }
 
-        public static Builder builder() { return new Builder(); }
+        @JsonProperty("next_page_token")
+        public String getNextPageToken()
+        {
+            return nextPageToken;
+        }
+
+        @JsonProperty("has_more")
+        public boolean hasMore()
+        {
+            return hasMore;
+        }
+
+        public static Builder builder()
+        {
+            return new Builder();
+        }
 
         @JsonIgnoreProperties(ignoreUnknown = true)
-        public static final class Builder {
+        public static final class Builder
+        {
             private List<DriveFile> files;
             private String nextPageToken;
             private boolean hasMore;
 
-            private Builder() {}
+            private Builder()
+            {
+            }
 
             @SuppressWarnings("unused")
             @JsonProperty("files")
-            public Builder files(List<DriveFile> files) { this.files = files; return this; }
+            public Builder files(List<DriveFile> files)
+            {
+                this.files = files;
+                return this;
+            }
+
             @SuppressWarnings("unused")
             @JsonProperty("next_page_token")
-            public Builder nextPageToken(String nextPageToken) { this.nextPageToken = nextPageToken; return this; }
+            public Builder nextPageToken(String nextPageToken)
+            {
+                this.nextPageToken = nextPageToken;
+                return this;
+            }
+
             @SuppressWarnings("unused")
             @JsonProperty("has_more")
-            public Builder hasMore(boolean hasMore) { this.hasMore = hasMore; return this; }
+            public Builder hasMore(boolean hasMore)
+            {
+                this.hasMore = hasMore;
+                return this;
+            }
 
-            public ListData build() { return new ListData(this); }
+            public ListData build()
+            {
+                return new ListData(this);
+            }
         }
     }
 
-    public static final class Builder extends BaseResponse.Builder<ListData> {
-        private Builder() {
+    public static final class Builder extends BaseResponse.Builder<ListData>
+    {
+        private Builder()
+        {
             super();
         }
 
         @Override
-        public ListAllFolderResponse build() {
+        public ListAllFolderResponse build()
+        {
             return new ListAllFolderResponse(this);
         }
 
         @Override
-        public Builder code(int code) {
+        public Builder code(int code)
+        {
             super.code(code);
             return this;
         }
 
         @Override
-        public Builder msg(String msg) {
+        public Builder msg(String msg)
+        {
             super.msg(msg);
             return this;
         }
 
         @Override
-        public Builder data(ListData data) {
+        public Builder data(ListData data)
+        {
             super.data(data);
             return this;
         }

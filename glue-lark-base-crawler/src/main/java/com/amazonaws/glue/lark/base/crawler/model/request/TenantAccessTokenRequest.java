@@ -28,7 +28,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 public record TenantAccessTokenRequest(
         @JsonProperty("app_id") String appId,
         @JsonProperty("app_secret") String appSecret) {
-
     @JsonCreator
     public TenantAccessTokenRequest {}
 }

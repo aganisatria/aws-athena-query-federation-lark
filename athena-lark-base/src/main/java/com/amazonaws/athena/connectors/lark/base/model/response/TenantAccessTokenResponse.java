@@ -31,4 +31,6 @@ public record TenantAccessTokenResponse(
         @JsonProperty("msg") String msg,
         @JsonProperty("expire") int expire,
         @JsonProperty("tenant_access_token") String tenantAccessToken
-) { }
+)
+{
+}

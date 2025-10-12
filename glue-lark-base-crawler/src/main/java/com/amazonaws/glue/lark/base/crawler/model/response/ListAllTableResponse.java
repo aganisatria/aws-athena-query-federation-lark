@@ -32,39 +32,46 @@ import java.util.List;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonDeserialize(builder = ListAllTableResponse.Builder.class)
-public final class ListAllTableResponse extends BaseResponse<ListAllTableResponse.ListData> {
-
-    private ListAllTableResponse(Builder builder) {
+public final class ListAllTableResponse extends BaseResponse<ListAllTableResponse.ListData>
+{
+    private ListAllTableResponse(Builder builder)
+    {
         super(builder);
     }
 
-    public static Builder builder() {
+    public static Builder builder()
+    {
         return new Builder();
     }
 
-    public List<BaseItem> getItems() {
+    public List<BaseItem> getItems()
+    {
         ListData data = getData();
         return data != null ? data.getItems() : Collections.emptyList();
     }
 
-    public String getPageToken() {
+    public String getPageToken()
+    {
         ListData data = getData();
         return (data != null) ? data.getPageToken() : null;
     }
 
-    public boolean hasMore() {
+    public boolean hasMore()
+    {
         ListData data = getData();
         return (data != null) && data.hasMore();
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonDeserialize(builder = BaseItem.Builder.class)
-    public static final class BaseItem {
+    public static final class BaseItem
+    {
         private final String tableId;
         private final String revision;
         private final String name;
 
-        private BaseItem(Builder builder) {
+        private BaseItem(Builder builder)
+        {
             this.tableId = builder.tableId;
             this.revision = builder.revision;
             this.name = builder.name;
@@ -72,90 +79,165 @@ public final class ListAllTableResponse extends BaseResponse<ListAllTableRespons
 
         @SuppressWarnings("unused")
         @JsonProperty("table_id")
-        public String getTableId() { return tableId; }
+        public String getTableId()
+        {
+            return tableId;
+        }
+
         @SuppressWarnings("unused")
         @JsonProperty("revision")
-        public String getRevision() { return revision; }
+        public String getRevision()
+        {
+            return revision;
+        }
 
         @JsonProperty("name")
-        public String getName() {
+        public String getName()
+        {
             return Util.sanitizeGlueRelatedName(name);
         }
 
         @SuppressWarnings("unused")
-        public String getRawName() { return name; }
+        public String getRawName()
+        {
+            return name;
+        }
 
-        public static Builder builder() { return new Builder(); }
+        public static Builder builder()
+        {
+            return new Builder();
+        }
 
-        public static final class Builder {
+        public static final class Builder
+        {
             private String tableId;
             private String revision;
             private String name;
 
-            private Builder() {}
+            private Builder()
+            {
+            }
 
             @SuppressWarnings("unused")
             @JsonProperty("table_id")
-            public Builder tableId(String tableId) { this.tableId = tableId; return this; }
+            public Builder tableId(String tableId)
+            {
+                this.tableId = tableId;
+                return this;
+            }
+
             @SuppressWarnings("unused")
             @JsonProperty("revision")
-            public Builder revision(String revision) { this.revision = revision; return this; }
-            @JsonProperty("name")
-            public Builder name(String name) { this.name = name; return this; }
+            public Builder revision(String revision)
+            {
+                this.revision = revision;
+                return this;
+            }
 
-            public BaseItem build() { return new BaseItem(this); }
+            @JsonProperty("name")
+            public Builder name(String name)
+            {
+                this.name = name;
+                return this;
+            }
+
+            public BaseItem build()
+            {
+                return new BaseItem(this);
+            }
         }
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonDeserialize(builder = ListData.Builder.class)
-    public static final class ListData {
+    public static final class ListData
+    {
         private final List<BaseItem> items;
         private final String pageToken;
         private final boolean hasMore;
 
-        private ListData(Builder builder) {
+        private ListData(Builder builder)
+        {
             this.items = builder.items != null ? List.copyOf(builder.items) : Collections.emptyList();
             this.pageToken = builder.pageToken;
             this.hasMore = builder.hasMore;
         }
 
         @JsonProperty("items")
-        public List<BaseItem> getItems() { return items; }
-        @JsonProperty("page_token")
-        public String getPageToken() { return pageToken; }
-        @JsonProperty("has_more")
-        public boolean hasMore() { return hasMore; }
+        public List<BaseItem> getItems()
+        {
+            return items;
+        }
 
-        public static Builder builder() { return new Builder(); }
+        @JsonProperty("page_token")
+        public String getPageToken()
+        {
+            return pageToken;
+        }
+
+        @JsonProperty("has_more")
+        public boolean hasMore()
+        {
+            return hasMore;
+        }
+
+        public static Builder builder()
+        {
+            return new Builder();
+        }
 
         @JsonIgnoreProperties(ignoreUnknown = true)
-        public static final class Builder {
+        public static final class Builder
+        {
             private List<BaseItem> items;
             private String pageToken;
             private boolean hasMore;
 
-            private Builder() {}
+            private Builder()
+            {
+            }
 
             @SuppressWarnings("unused")
             @JsonProperty("items")
-            public Builder items(List<BaseItem> items) { this.items = items; return this; }
+            public Builder items(List<BaseItem> items)
+            {
+                this.items = items;
+                return this;
+            }
+
             @SuppressWarnings("unused")
             @JsonProperty("page_token")
-            public Builder pageToken(String pageToken) { this.pageToken = pageToken; return this; }
+            public Builder pageToken(String pageToken)
+            {
+                this.pageToken = pageToken;
+                return this;
+            }
+
             @SuppressWarnings("unused")
             @JsonProperty("has_more")
-            public Builder hasMore(boolean hasMore) { this.hasMore = hasMore; return this; }
+            public Builder hasMore(boolean hasMore)
+            {
+                this.hasMore = hasMore;
+                return this;
+            }
 
-            public ListData build() { return new ListData(this); }
+            public ListData build()
+            {
+                return new ListData(this);
+            }
         }
     }
 
-    public static final class Builder extends BaseResponse.Builder<ListData> {
-        private Builder() { super(); }
+    public static final class Builder extends BaseResponse.Builder<ListData>
+    {
+        private Builder()
+        {
+            super();
+        }
 
         @Override
-        public ListAllTableResponse build() {
+        public ListAllTableResponse build()
+        {
             return new ListAllTableResponse(this);
         }
     }

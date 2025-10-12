@@ -29,14 +29,15 @@ import java.io.IOException;
  * This class is the entry point for the Athena Lambda function. It is used to create the CompositeHandler
  * which is the glue between the metadata and record handling logic.
  * <p>
- *     This class is used to create the CompositeHandler with the BaseMetadataHandler and BaseRecordHandler.
- *     The BaseMetadataHandler is used to handle metadata requests and the BaseRecordHandler is used to handle
- *     record requests.
+ * This class is used to create the CompositeHandler with the BaseMetadataHandler and BaseRecordHandler.
+ * The BaseMetadataHandler is used to handle metadata requests and the BaseRecordHandler is used to handle
+ * record requests.
  */
 public class BaseCompositeHandler
         extends CompositeHandler
 {
-    public BaseCompositeHandler() throws IOException {
+    public BaseCompositeHandler() throws IOException
+    {
         super(new BaseMetadataHandler(new EnvironmentProperties().createEnvironment()), new BaseRecordHandler(new EnvironmentProperties().createEnvironment()));
     }
 
@@ -44,10 +45,11 @@ public class BaseCompositeHandler
      * Constructor for testing purposes that accepts pre-configured handlers.
      *
      * @param metadataHandler The metadata handler to use
-     * @param recordHandler The record handler to use
+     * @param recordHandler   The record handler to use
      */
     @VisibleForTesting
-    protected BaseCompositeHandler(BaseMetadataHandler metadataHandler, BaseRecordHandler recordHandler) {
+    protected BaseCompositeHandler(BaseMetadataHandler metadataHandler, BaseRecordHandler recordHandler)
+    {
         super(metadataHandler, recordHandler);
     }
 }

@@ -19,7 +19,7 @@
  */
 package com.amazonaws.athena.connectors.lark.base.model.request;
 
-import java.util.Objects;
+import static java.util.Objects.requireNonNull;
 
 /**
  * Request parameters for fetching table records from Lark Base.
@@ -34,40 +34,48 @@ public final class TableRecordsRequest
     private final String filterJson;
     private final String sortJson;
 
-    private TableRecordsRequest(Builder builder) {
-        this.baseId = Objects.requireNonNull(builder.baseId, "baseId cannot be null");
-        this.tableId = Objects.requireNonNull(builder.tableId, "tableId cannot be null");
+    private TableRecordsRequest(Builder builder)
+    {
+        this.baseId = requireNonNull(builder.baseId, "baseId cannot be null");
+        this.tableId = requireNonNull(builder.tableId, "tableId cannot be null");
         this.pageSize = builder.pageSize;
         this.pageToken = builder.pageToken;
         this.filterJson = builder.filterJson;
         this.sortJson = builder.sortJson;
     }
 
-    public String getBaseId() {
+    public String getBaseId()
+    {
         return baseId;
     }
 
-    public String getTableId() {
+    public String getTableId()
+    {
         return tableId;
     }
 
-    public long getPageSize() {
+    public long getPageSize()
+    {
         return pageSize;
     }
 
-    public String getPageToken() {
+    public String getPageToken()
+    {
         return pageToken;
     }
 
-    public String getFilterJson() {
+    public String getFilterJson()
+    {
         return filterJson;
     }
 
-    public String getSortJson() {
+    public String getSortJson()
+    {
         return sortJson;
     }
 
-    public static Builder builder() {
+    public static Builder builder()
+    {
         return new Builder();
     }
 
@@ -80,39 +88,48 @@ public final class TableRecordsRequest
         private String filterJson;
         private String sortJson;
 
-        private Builder() {}
+        private Builder()
+        {
+        }
 
-        public Builder baseId(String baseId) {
+        public Builder baseId(String baseId)
+        {
             this.baseId = baseId;
             return this;
         }
 
-        public Builder tableId(String tableId) {
+        public Builder tableId(String tableId)
+        {
             this.tableId = tableId;
             return this;
         }
 
-        public Builder pageSize(long pageSize) {
+        public Builder pageSize(long pageSize)
+        {
             this.pageSize = pageSize;
             return this;
         }
 
-        public Builder pageToken(String pageToken) {
+        public Builder pageToken(String pageToken)
+        {
             this.pageToken = pageToken;
             return this;
         }
 
-        public Builder filterJson(String filterJson) {
+        public Builder filterJson(String filterJson)
+        {
             this.filterJson = filterJson;
             return this;
         }
 
-        public Builder sortJson(String sortJson) {
+        public Builder sortJson(String sortJson)
+        {
             this.sortJson = sortJson;
             return this;
         }
 
-        public TableRecordsRequest build() {
+        public TableRecordsRequest build()
+        {
             return new TableRecordsRequest(this);
         }
     }

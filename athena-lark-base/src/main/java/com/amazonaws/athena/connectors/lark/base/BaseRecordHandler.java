@@ -8,7 +8,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,8 +34,8 @@ import com.amazonaws.athena.connectors.lark.base.model.NestedUIType;
 import com.amazonaws.athena.connectors.lark.base.model.response.ListRecordsResponse;
 import com.amazonaws.athena.connectors.lark.base.service.EnvVarService;
 import com.amazonaws.athena.connectors.lark.base.service.LarkBaseService;
-import com.amazonaws.athena.connectors.lark.base.translator.SearchApiFilterTranslator;
 import com.amazonaws.athena.connectors.lark.base.translator.RegistererExtractor;
+import com.amazonaws.athena.connectors.lark.base.translator.SearchApiFilterTranslator;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.cache.CacheBuilder;
@@ -55,16 +55,37 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 
 import javax.annotation.Nonnull;
-import java.math.BigDecimal;
-import java.util.*;
 
-import static com.amazonaws.athena.connectors.lark.base.BaseConstants.*;
+import java.math.BigDecimal;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.BASE_ID_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.EXPECTED_ROW_COUNT_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.FILTER_EXPRESSION_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.IS_PARALLEL_SPLIT_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_TYPE_MAPPING_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RESERVED_BASE_ID;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RESERVED_RECORD_ID;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RESERVED_TABLE_ID;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.SORT_EXPRESSION_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.SOURCE_TYPE;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.SPLIT_END_INDEX_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.SPLIT_START_INDEX_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.TABLE_ID_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.throttling.BaseExceptionFilter.EXCEPTION_FILTER;
+import static java.util.Objects.requireNonNull;
 
 /**
  * Class for Lark Base that is used to read data from Lark Base and write it to BlockSpiller for Athena processing.
  */
-public class BaseRecordHandler extends RecordHandler {
+public class BaseRecordHandler extends RecordHandler
+{
     private static final Logger logger = LoggerFactory.getLogger(BaseRecordHandler.class);
 
     private final EnvVarService envVarService;
@@ -77,16 +98,19 @@ public class BaseRecordHandler extends RecordHandler {
      *
      * @param configOptions Connector configuration options
      */
-    public BaseRecordHandler(java.util.Map<String, String> configOptions) {
+    public BaseRecordHandler(java.util.Map<String, String> configOptions)
+    {
         super(SOURCE_TYPE, configOptions);
         ThrottlingInvoker invoker = ThrottlingInvoker.newDefaultBuilder(EXCEPTION_FILTER, configOptions).build();
         this.envVarService = new EnvVarService(configOptions, invoker);
         this.larkBaseService = new LarkBaseService(envVarService.getLarkAppId(), envVarService.getLarkAppSecret());
         this.invokerCache = CacheBuilder.newBuilder().build(
-                new CacheLoader<>() {
+                new CacheLoader<>()
+                {
                     @Override
                     @Nonnull
-                    public ThrottlingInvoker load(@Nonnull String tableId) {
+                    public ThrottlingInvoker load(@Nonnull String tableId)
+                    {
                         return invoker;
                     }
                 }
@@ -98,7 +122,8 @@ public class BaseRecordHandler extends RecordHandler {
      */
     @VisibleForTesting
     protected BaseRecordHandler(S3Client amazonS3, SecretsManagerClient secretsManager,
-                                AthenaClient amazonAthena, java.util.Map<String, String> configOptions, EnvVarService envVarService, LarkBaseService larkBaseService, LoadingCache<String, ThrottlingInvoker> invokerCache) {
+                                AthenaClient amazonAthena, java.util.Map<String, String> configOptions, EnvVarService envVarService, LarkBaseService larkBaseService, LoadingCache<String, ThrottlingInvoker> invokerCache)
+    {
         super(amazonS3, secretsManager, amazonAthena, SOURCE_TYPE, configOptions);
         this.envVarService = envVarService;
         this.larkBaseService = larkBaseService;
@@ -114,10 +139,11 @@ public class BaseRecordHandler extends RecordHandler {
      */
     @Override
     protected void readWithConstraint(BlockSpiller spiller, ReadRecordsRequest recordsRequest,
-                                      QueryStatusChecker queryStatusChecker) {
-        Objects.requireNonNull(spiller, "spiller cannot be null");
-        Objects.requireNonNull(recordsRequest, "recordsRequest cannot be null");
-        Objects.requireNonNull(queryStatusChecker, "queryStatusChecker cannot be null");
+                                      QueryStatusChecker queryStatusChecker)
+    {
+        requireNonNull(spiller, "spiller cannot be null");
+        requireNonNull(recordsRequest, "recordsRequest cannot be null");
+        requireNonNull(queryStatusChecker, "queryStatusChecker cannot be null");
 
         if (recordsRequest.getConstraints().isQueryPassThrough()) {
             logger.error("readWithConstraint for QueryPassthrough currently not supported");
@@ -131,8 +157,11 @@ public class BaseRecordHandler extends RecordHandler {
 
         if (larkFieldTypeMappingJson != null && !larkFieldTypeMappingJson.isEmpty()) {
             try {
-                larkFieldTypeMap = objectMapper.readValue(larkFieldTypeMappingJson, new TypeReference<>() {});
-            } catch (Exception e) {
+                larkFieldTypeMap = objectMapper.readValue(larkFieldTypeMappingJson, new TypeReference<>()
+                {
+                });
+            }
+            catch (Exception e) {
                 logger.warn("readWithConstraint: Failed to deserialize Lark field type mapping: {}. Proceeding without it.", e.getMessage(), e);
             }
         }
@@ -166,7 +195,8 @@ public class BaseRecordHandler extends RecordHandler {
                     originalSortExpression);
 
             writeItemsToBlock(spiller, recordsRequest, queryStatusChecker, recordIterator, localRegistererExtractor);
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             String errorMsg = String.format("Error reading records from table %s.%s: %s",
                     split.getProperty(BASE_ID_PROPERTY),
                     split.getProperty(TABLE_ID_PROPERTY),
@@ -179,18 +209,19 @@ public class BaseRecordHandler extends RecordHandler {
 
     /**
      * Write items to block using spiller.
-     * @param spiller BlockSpiller
-     * @param recordsRequest ReadRecordsRequest
+     *
+     * @param spiller            BlockSpiller
+     * @param recordsRequest     ReadRecordsRequest
      * @param queryStatusChecker QueryStatusChecker
-     * @param itemIterator Iterator of items
+     * @param itemIterator       Iterator of items
      */
     protected void writeItemsToBlock(
             BlockSpiller spiller,
             ReadRecordsRequest recordsRequest,
             QueryStatusChecker queryStatusChecker,
             Iterator<Map<String, Object>> itemIterator,
-            RegistererExtractor registererExtractor) {
-
+            RegistererExtractor registererExtractor)
+    {
         GeneratedRowWriter.RowWriterBuilder rowWriterBuilder = GeneratedRowWriter.newBuilder(recordsRequest.getConstraints());
         registererExtractor.registerExtractorsForSchema(rowWriterBuilder, recordsRequest.getSchema());
 
@@ -200,7 +231,8 @@ public class BaseRecordHandler extends RecordHandler {
             if (envVarService.isEnableDebugLogging()) {
                 logger.info("Completed writing items to block");
             }
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.error("Error building/using row writer: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to write items to block: " + e.getMessage(), e);
         }
@@ -220,8 +252,8 @@ public class BaseRecordHandler extends RecordHandler {
             ReadRecordsRequest recordsRequest,
             QueryStatusChecker queryStatusChecker,
             Iterator<Map<String, Object>> itemIterator,
-            GeneratedRowWriter rowWriter) {
-
+            GeneratedRowWriter rowWriter)
+    {
         int rowCount = 0;
         long successCount = 0;
         long errorCount = 0;
@@ -260,13 +292,15 @@ public class BaseRecordHandler extends RecordHandler {
                                 if (envVarService.isEnableDebugLogging()) {
                                     logger.info("Row #{}: Missing boolean field '{}'. Defaulting to false.", currentRowNum, fieldName);
                                 }
-                            } else {
+                            }
+                            else {
                                 item.put(fieldName, null);
                                 if (envVarService.isEnableDebugLogging()) {
                                     logger.info("Row #{}: Field '{}' is nullable and constraint allows null (or no constraint), putting null.", currentRowNum, fieldName);
                                 }
                             }
-                        } else {
+                        }
+                        else {
                             ArrowType fieldType = field.getType();
                             Object defaultValue = getDefaultValueForType(fieldType);
                             item.put(fieldName, defaultValue);
@@ -283,14 +317,16 @@ public class BaseRecordHandler extends RecordHandler {
                         if (success) {
                             writeResult[0] = 1;
                             return 1;
-                        } else {
+                        }
+                        else {
                             if (envVarService.isEnableDebugLogging()) {
                                 logger.info("rowWriter.writeRow returned false for row #{}. Data: {}", currentRowNum, dataToWrite);
                             }
                             writeResult[0] = 0;
                             return 0;
                         }
-                    } catch (Exception e) {
+                    }
+                    catch (Exception e) {
                         logger.error("Exception writing row #{}: {}. Data: {}", currentRowNum, e.getMessage(), dataToWrite, e);
                         writeResult[0] = 0;
                         return 0;
@@ -299,11 +335,12 @@ public class BaseRecordHandler extends RecordHandler {
 
                 if (writeResult[0] == 1) {
                     successCount++;
-                } else {
+                }
+                else {
                     errorCount++;
                 }
-
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 errorCount++;
                 logger.error("Unexpected error processing row #{}: {}", currentRowNum, e.getMessage(), e);
             }
@@ -324,7 +361,8 @@ public class BaseRecordHandler extends RecordHandler {
      * @param type The ArrowType of the field.
      * @return A default value (e.g., 0, "", false) or null if no suitable default is known.
      */
-    private Object getDefaultValueForType(ArrowType type) {
+    private Object getDefaultValueForType(ArrowType type)
+    {
         Types.MinorType minorType = Types.getMinorTypeForArrowType(type);
         if (envVarService.isEnableDebugLogging()) {
             logger.info("getDefaultValueForType: type={}, minorType={}", type, minorType);
@@ -376,13 +414,13 @@ public class BaseRecordHandler extends RecordHandler {
      * Handles pagination using page tokens and manages the current page's iterator.
      * Includes rate limiting via ThrottlingInvoker. Adds reserved fields to each record.
      *
-     * @param baseId           The Lark Base ID.
-     * @param tableId          The Lark Table ID.
-     * @param pageSizeForApi   The page size for the API.
+     * @param baseId                   The Lark Base ID.
+     * @param tableId                  The Lark Table ID.
+     * @param pageSizeForApi           The page size for the API.
      * @param expectedRowCountForSplit Expected row count for the split.
-     * @param isParallelSplit Indicates if the split is parallel.
-     * @param splitStartIndex The start index for the split.
-     * @param splitEndIndex   The end index for the split.
+     * @param isParallelSplit          Indicates if the split is parallel.
+     * @param splitStartIndex          The start index for the split.
+     * @param splitEndIndex            The end index for the split.
      * @param originalFilterExpression The filter expression string to pass to the API.
      * @param originalSortExpression   The sort expression string to pass to the API.
      * @return An Iterator over records (Map<String, Object>).
@@ -396,9 +434,10 @@ public class BaseRecordHandler extends RecordHandler {
             long splitStartIndex,
             long splitEndIndex,
             String originalFilterExpression,
-            String originalSortExpression) {
-
-        return new Iterator<>() {
+            String originalSortExpression)
+    {
+        return new Iterator<>()
+        {
             private Iterator<ListRecordsResponse.RecordItem> currentPageIterator = null;
             private String currentPageToken = null;
             private boolean hasMorePages = true;
@@ -406,14 +445,16 @@ public class BaseRecordHandler extends RecordHandler {
             private final String finalFilterExpression = buildFinalFilter();
             private final String finalSortExpression = isParallelSplit && envVarService.isActivateParallelSplit() ? "" : originalSortExpression;
 
-            private String buildFinalFilter() {
+            private String buildFinalFilter()
+            {
                 if (isParallelSplit && envVarService.isActivateParallelSplit()) {
                     return SearchApiFilterTranslator.toSplitFilterJson(
                             originalFilterExpression,
                             splitStartIndex,
                             splitEndIndex
                     );
-                } else {
+                }
+                else {
                     return originalFilterExpression != null ? originalFilterExpression : "";
                 }
             }
@@ -424,7 +465,8 @@ public class BaseRecordHandler extends RecordHandler {
              *
              * @return true if a new page was successfully fetched and has records, false otherwise.
              */
-            private boolean fetchNextPage() {
+            private boolean fetchNextPage()
+            {
                 if (!hasMorePages || (expectedRowCountForSplit > 0 && currentFetchDataCount >= expectedRowCountForSplit)) {
                     if (envVarService.isEnableDebugLogging()) {
                         logger.info("fetchNextPage: Stopping fetch. HasMorePages={}, FetchedCount={}, ExpectedForSplit={}",
@@ -455,7 +497,9 @@ public class BaseRecordHandler extends RecordHandler {
                     String nextPageToken = (response != null) ? response.getPageToken() : null;
                     boolean responseHasMore = (response != null) && response.hasMore();
                     List<ListRecordsResponse.RecordItem> records = (response != null) ? response.getItems() : Collections.emptyList();
-                    if (records == null) records = Collections.emptyList();
+                    if (records == null) {
+                        records = Collections.emptyList();
+                    }
 
                     if (envVarService.isEnableDebugLogging()) {
                         logger.info("API Response: Records={}, HasMore={}, NextToken={}", records.size(), responseHasMore, nextPageToken);
@@ -475,8 +519,8 @@ public class BaseRecordHandler extends RecordHandler {
                     }
 
                     return currentPageIterator.hasNext();
-
-                } catch (Exception e) {
+                }
+                catch (Exception e) {
                     logger.error("Error fetching next page from Lark API for table {}.{}: {}", baseId, tableId, e.getMessage(), e);
                     hasMorePages = false;
                     currentPageIterator = null;
@@ -485,7 +529,8 @@ public class BaseRecordHandler extends RecordHandler {
             }
 
             @Override
-            public boolean hasNext() {
+            public boolean hasNext()
+            {
                 if (currentPageIterator != null && currentPageIterator.hasNext()) {
                     return true;
                 }
@@ -496,7 +541,8 @@ public class BaseRecordHandler extends RecordHandler {
             }
 
             @Override
-            public Map<String, Object> next() {
+            public Map<String, Object> next()
+            {
                 if (!hasNext()) {
                     throw new NoSuchElementException("No more records available for this split");
                 }

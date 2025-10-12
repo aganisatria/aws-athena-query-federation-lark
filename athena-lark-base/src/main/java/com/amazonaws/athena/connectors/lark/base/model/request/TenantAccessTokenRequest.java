@@ -26,4 +26,6 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 public record TenantAccessTokenRequest(
         @JsonProperty("app_id") String appId,
         @JsonProperty("app_secret") String appSecret
-){}
+)
+{
+}

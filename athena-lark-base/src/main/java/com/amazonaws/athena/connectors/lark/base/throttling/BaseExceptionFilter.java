@@ -23,7 +23,15 @@ import com.amazonaws.athena.connector.lambda.ThrottlingInvoker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.athena.model.TooManyRequestsException;
-import software.amazon.awssdk.services.glue.model.*;
+import software.amazon.awssdk.services.glue.model.ConcurrentModificationException;
+import software.amazon.awssdk.services.glue.model.ConcurrentRunsExceededException;
+import software.amazon.awssdk.services.glue.model.ConflictException;
+import software.amazon.awssdk.services.glue.model.IntegrationConflictOperationException;
+import software.amazon.awssdk.services.glue.model.IntegrationQuotaExceededException;
+import software.amazon.awssdk.services.glue.model.OperationTimeoutException;
+import software.amazon.awssdk.services.glue.model.ResourceNotReadyException;
+import software.amazon.awssdk.services.glue.model.ResourceNumberLimitExceededException;
+import software.amazon.awssdk.services.glue.model.ThrottlingException;
 
 /**
  * Used by {@link ThrottlingInvoker} to determine which LarkBase exceptions are thrown for throttling.
@@ -35,10 +43,13 @@ public class BaseExceptionFilter
 
     public static final BaseExceptionFilter EXCEPTION_FILTER = new BaseExceptionFilter();
 
-    public BaseExceptionFilter() {}
+    public BaseExceptionFilter()
+    {
+    }
 
     @Override
-    public boolean isMatch(Exception ex) {
+    public boolean isMatch(Exception ex)
+    {
         String message = ex.getMessage();
         if (message == null) {
             return false;
@@ -82,8 +93,8 @@ public class BaseExceptionFilter
                 ex instanceof IntegrationQuotaExceededException ||
                 ex instanceof OperationTimeoutException ||
                 ex instanceof ResourceNotReadyException ||
-                ex instanceof  ResourceNumberLimitExceededException ||
-                ex instanceof ThrottlingException ) {
+                ex instanceof ResourceNumberLimitExceededException ||
+                ex instanceof ThrottlingException) {
             logger.info("Throttling detected: {}", ex.getClass().getSimpleName());
             return true;
         }

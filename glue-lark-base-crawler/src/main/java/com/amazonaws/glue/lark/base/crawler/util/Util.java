@@ -7,9 +7,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,7 +25,13 @@ import software.amazon.awssdk.services.glue.model.Column;
 import software.amazon.awssdk.services.glue.model.StorageDescriptor;
 import software.amazon.awssdk.services.glue.model.TableInput;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static com.amazonaws.glue.lark.base.crawler.LarkBaseCrawlerConstants.CRAWLING_METHOD;
@@ -34,90 +40,114 @@ import static com.amazonaws.glue.lark.base.crawler.LarkBaseCrawlerConstants.LARK
 /**
  * Utility class for Lark Base Crawler
  */
-public class Util {
+public final class Util
+{
+    /**
+     * Private constructor to prevent instantiation of this utility class.
+     */
+    private Util()
+    {
+        // This class is not meant to be instantiated.
+    }
 
     /**
      * Construct Lark Base Database Location URI Prefix
      * Format: lark-base-flag/CrawlingMethod=LarkBase/DataSource=<dataSourceId>
+     *
      * @param crawlingMethod The crawling method
      * @param crawlingSource The crawling source
      * @return The Lark Base Database Location URI Prefix
      */
-    public static String constructDatabaseLocationURIPrefix(String crawlingMethod, String crawlingSource) {
+    public static String constructDatabaseLocationURIPrefix(String crawlingMethod, String crawlingSource)
+    {
         return LARK_BASE_FLAG + "/" + constructCrawlingMethod(crawlingMethod) + "/" + constructLarkBaseDataSourceId(crawlingSource);
     }
 
     /**
      * Construct Lark Base Database Location URI
      * Format: lark-base-flag/CrawlingMethod=<crawlingMethod>/DataSource=<crawlingSource>/Base=<databaseId>
+     *
      * @param crawlingMethod The Crawling Method
      * @param crawlingSource The Crawling Source
      * @return The Lark Base Database Location URI
      */
-    public static String constructDatabaseLocationURI(String crawlingMethod, String crawlingSource, String larkBaseId) {
+    public static String constructDatabaseLocationURI(String crawlingMethod, String crawlingSource, String larkBaseId)
+    {
         return constructDatabaseLocationURIPrefix(crawlingMethod, crawlingSource) + "/" + constructLarkBaseBaseId(larkBaseId);
     }
 
     /**
      * Construct Lark Base Table Location URI
      * Format: lark-base-flag/CrawlingMethod=<crawlingMethod>/DataSource=<crawlingSource>/Base=<databaseId>/Table=<tableId>
+     *
      * @param crawlingMethod The Crawling Method
      * @param crawlingSource The Crawling Source
-     * @param larkBaseId The Lark Base ID
-     * @param larkTableId The Lark Table ID
+     * @param larkBaseId     The Lark Base ID
+     * @param larkTableId    The Lark Table ID
      * @return The Lark Base Table Location URI
      */
-    public static String constructTableLocationURI(String crawlingMethod, String crawlingSource, String larkBaseId, String larkTableId) {
+    public static String constructTableLocationURI(String crawlingMethod, String crawlingSource, String larkBaseId, String larkTableId)
+    {
         return constructDatabaseLocationURIPrefix(crawlingMethod, crawlingSource) + "/" + constructLarkBaseBaseId(larkBaseId) + "/" + constructLarkBaseTableId(larkTableId);
     }
 
     /**
      * Construct Crawling Method
      * Format: CrawlingMethod=<crawlingMethod>
+     *
      * @param crawlingMethod The crawling method
      * @return The crawling method
      */
-    public static String constructCrawlingMethod(String crawlingMethod) {
+    public static String constructCrawlingMethod(String crawlingMethod)
+    {
         return CRAWLING_METHOD + "=" + crawlingMethod;
     }
 
     /**
      * Construct Lark Base Data Source ID
      * Format: DataSource=<crawlingSource>
+     *
      * @param crawlingSource The crawling source
      * @return The Lark Base Data Source ID
      */
-    public static String constructLarkBaseDataSourceId(String crawlingSource) {
+    public static String constructLarkBaseDataSourceId(String crawlingSource)
+    {
         return "DataSource=" + crawlingSource;
     }
 
     /**
      * Construct Lark Base Base ID
      * Format: Base=<larkBaseId>
+     *
      * @param larkBaseId The Lark Base ID
      * @return The Lark Base Base ID
      */
-    public static String constructLarkBaseBaseId(String larkBaseId) {
+    public static String constructLarkBaseBaseId(String larkBaseId)
+    {
         return "Base=" + larkBaseId;
     }
 
     /**
      * Construct Lark Base Table ID
      * Format: Table=<larkTableId>
+     *
      * @param larkTableId The Lark Table ID
      * @return The Lark Base Table ID
      */
-    public static String constructLarkBaseTableId(String larkTableId) {
+    public static String constructLarkBaseTableId(String larkTableId)
+    {
         return "Table=" + larkTableId;
     }
 
     /**
      * Extract Database ID from Location URI
      * Format: DB:<databaseId>
+     *
      * @param locationURI The Location URI
      * @return The Database ID
      */
-    public static String extractDatabaseIdFromLocationURI(String locationURI) {
+    public static String extractDatabaseIdFromLocationURI(String locationURI)
+    {
         if (locationURI == null || locationURI.isEmpty()) {
             return null;
         }
@@ -127,7 +157,7 @@ public class Util {
             return null;
         }
 
-        String databaseId =  locationURI.substring(dbIndex + 5); // Skip "Base="
+        String databaseId = locationURI.substring(dbIndex + 5); // Skip "Base="
 
         if (databaseId.isEmpty()) {
             throw new RuntimeException("Could not extract database ID from locationURI: " + locationURI);
@@ -142,7 +172,7 @@ public class Util {
     // For larkBaseId, we can fill its lark base id
     // For larkBaseDataSourceId, we can fill its lark base data source id
     // For larkTableDataSourceId, we can fill its lark table data source id
-    
+
     // agani.satria@XXXXX ~ % aws glue get-table --database-name test2 --name testlarkbase
     // {
     //     "Table": {
@@ -189,7 +219,8 @@ public class Util {
 
     /**
      * Construct Lark Base Table Input
-     * @param params The Lark Base Table Input Parameters
+     *
+     * @param params  The Lark Base Table Input Parameters
      * @param columns The columns
      * @return The Lark Base Table Input
      */
@@ -198,8 +229,8 @@ public class Util {
             Collection<Column> columns,
             String crawlingMethod,
             String crawlingSource,
-            Map<String, String> additionalParameters) {
-
+            Map<String, String> additionalParameters)
+    {
         Map<String, String> paramsMap = new HashMap<>(Map.of(
                 "classification", "lark-base-flag",
                 "crawlingMethod", crawlingMethod,
@@ -229,10 +260,12 @@ public class Util {
 
     /**
      * Construct Columns
+     *
      * @param params The column parameters
      * @return The columns
      */
-    public static Collection<Column> constructColumns(ArrayList<ColumnParameters> params) {
+    public static Collection<Column> constructColumns(ArrayList<ColumnParameters> params)
+    {
         return params.stream()
                 .map(param -> Column.builder()
                         .name(param.getColumnName())
@@ -246,7 +279,8 @@ public class Util {
                 .collect(Collectors.toList());
     }
 
-    public static String generateColumnComment(ColumnParameters parameters) {
+    public static String generateColumnComment(ColumnParameters parameters)
+    {
         return "LarkBaseId=" + parameters.getLarkBaseId() + "/LarkBaseTableId=" + parameters.getLarkBaseTableId() +
                 "/LarkBaseFieldId=" + parameters.getLarkBaseRecordId() + "/LarkBaseFieldName=" + parameters.getOriginalColumnName() +
                 "/LarkBaseFieldType=" + parameters.getLarkBaseColumnType();
@@ -254,10 +288,12 @@ public class Util {
 
     /**
      * Check if the glue database name is valid
+     *
      * @param glueDatabaseNames The glue database names
      * @return True if the glue database name is valid, false otherwise
      */
-    public static boolean doesGlueDatabasesNameValid(List<String> glueDatabaseNames) {
+    public static boolean doesGlueDatabasesNameValid(List<String> glueDatabaseNames)
+    {
         // checking glue database name is only allowed to contain alphanumeric characters and underscores
         for (String glueDatabaseName : glueDatabaseNames) {
             if (!glueDatabaseName.matches("^[a-zA-Z0-9$_]+$")) {
@@ -270,7 +306,8 @@ public class Util {
         return glueDatabaseNameSet.size() != glueDatabaseNames.size();
     }
 
-    public static String sanitizeGlueRelatedName(String tableName) {
+    public static String sanitizeGlueRelatedName(String tableName)
+    {
         return tableName.toLowerCase().replaceAll("[^a-zA-Z0-9$]", "_");
     }
 }

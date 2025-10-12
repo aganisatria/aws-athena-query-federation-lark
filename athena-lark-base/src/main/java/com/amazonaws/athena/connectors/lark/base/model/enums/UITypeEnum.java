@@ -7,9 +7,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -22,7 +22,8 @@ package com.amazonaws.athena.connectors.lark.base.model.enums;
 /**
  * Enum for UI Type
  */
-public enum UITypeEnum {
+public enum UITypeEnum
+{
     TEXT("Text"),
     BARCODE("Barcode"),
     SINGLE_SELECT("SingleSelect"),
@@ -58,15 +59,18 @@ public enum UITypeEnum {
 
     private final String uiType;
 
-    UITypeEnum(String uiType) {
+    UITypeEnum(String uiType)
+    {
         this.uiType = uiType;
     }
 
-    public String getUiType() {
+    public String getUiType()
+    {
         return uiType;
     }
 
-    public static UITypeEnum fromString(String text) {
+    public static UITypeEnum fromString(String text)
+    {
         for (UITypeEnum uiType : UITypeEnum.values()) {
             if (uiType.getUiType().equalsIgnoreCase(text)) {
                 return uiType;

@@ -7,9 +7,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -37,23 +37,27 @@ import static com.amazonaws.glue.lark.base.crawler.util.Util.constructTableLocat
 /**
  * Lark Base Crawler Handler
  */
-public class LarkDriveCrawlerHandler extends BaseLarkBaseCrawlerHandler {
+public class LarkDriveCrawlerHandler extends BaseLarkBaseCrawlerHandler
+{
     // {
     //     "larkDriveFolderToken": "token123"
     // }
 
     private String larkDriveFolderToken;
 
-    public LarkDriveCrawlerHandler() {
+    public LarkDriveCrawlerHandler()
+    {
         super();
     }
 
     // Constructor for testing with mocks
-    LarkDriveCrawlerHandler(GlueCatalogService glueCatalogService, LarkBaseService larkBaseService, LarkDriveService larkDriveService, STSService stsService) {
+    LarkDriveCrawlerHandler(GlueCatalogService glueCatalogService, LarkBaseService larkBaseService, LarkDriveService larkDriveService, STSService stsService)
+    {
         super(glueCatalogService, larkBaseService, larkDriveService, stsService);
     }
 
-    public String handleRequest(Object input, Context context) {
+    public String handleRequest(Object input, Context context)
+    {
         LarkDrivePayload payload = OBJECT_MAPPER.convertValue(input, LarkDrivePayload.class);
 
         this.larkDriveFolderToken = payload.larkDriveFolderToken();
@@ -62,29 +66,34 @@ public class LarkDriveCrawlerHandler extends BaseLarkBaseCrawlerHandler {
     }
 
     @Override
-    String getCrawlingMethod() {
+    String getCrawlingMethod()
+    {
         return "LarkDrive";
     }
 
     @Override
-    String getCrawlingSource() {
+    String getCrawlingSource()
+    {
         return larkDriveFolderToken;
     }
 
     @Override
-    List<LarkDatabaseRecord> getLarkDatabases() {
+    List<LarkDatabaseRecord> getLarkDatabases()
+    {
         return super.larkDriveService.getLarkBases(larkDriveFolderToken);
     }
 
     @Override
-    Map<String, String> getAdditionalTableInputParameter() {
+    Map<String, String> getAdditionalTableInputParameter()
+    {
         return Map.of(
                 "larkDriveFolderToken", larkDriveFolderToken
         );
     }
 
     @Override
-    boolean additionalTableInputChanged(TableInput newTableInput, Table existingTable) {
+    boolean additionalTableInputChanged(TableInput newTableInput, Table existingTable)
+    {
         Map<String, String> newParams = newTableInput.parameters();
         Map<String, String> existingParams = existingTable.parameters();
 
@@ -101,4 +110,3 @@ public class LarkDriveCrawlerHandler extends BaseLarkBaseCrawlerHandler {
         return !expectedLocation.equals(existingTable.storageDescriptor().location());
     }
 }
-

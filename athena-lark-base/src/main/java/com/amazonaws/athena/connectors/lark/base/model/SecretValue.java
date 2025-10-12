@@ -25,11 +25,13 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 /**
  * Record for Secret Value, need add @JsonDeserialize to let Jackson deserialize this record
  *
- * @param larkAppId The Lark app ID
+ * @param larkAppId     The Lark app ID
  * @param larkAppSecret The Lark app secret
  */
 @JsonDeserialize
 public record SecretValue(
         @JsonProperty("lark_app_id") String larkAppId,
         @JsonProperty("lark_app_secret") String larkAppSecret
-) {}
+)
+{
+}

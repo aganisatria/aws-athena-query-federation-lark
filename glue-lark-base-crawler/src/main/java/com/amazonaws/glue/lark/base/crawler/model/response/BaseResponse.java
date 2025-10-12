@@ -30,63 +30,77 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
  * @param <T> The type of the data in the response.
  */
 @JsonDeserialize(builder = BaseResponse.Builder.class)
-public class BaseResponse<T> {
+public class BaseResponse<T>
+{
     private final int code;
     private final String msg;
     private final T data;
 
-    protected BaseResponse(Builder<T> builder) {
+    protected BaseResponse(Builder<T> builder)
+    {
         this.code = builder.code;
         this.msg = builder.msg;
         this.data = builder.data;
     }
 
     @JsonProperty("code")
-    public int getCode() {
+    public int getCode()
+    {
         return code;
     }
 
     @JsonProperty("msg")
-    public String getMsg() {
+    public String getMsg()
+    {
         return msg;
     }
 
     @JsonProperty("data")
-    public T getData() {
+    public T getData()
+    {
         return data;
     }
 
-    public static <T> Builder<T> builder() {
+    public static <T> Builder<T> builder()
+    {
         return new Builder<>();
     }
 
-    public static class Builder<T> {
+    public static class Builder<T>
+    {
         protected int code;
         protected String msg;
         protected T data;
 
-        protected Builder() { }
+        protected Builder()
+        {
+        }
 
         @SuppressWarnings("unused")
         @JsonProperty("code")
-        public Builder<T> code(int code) {
+        public Builder<T> code(int code)
+        {
             this.code = code;
             return this;
         }
 
         @SuppressWarnings("unused")
         @JsonProperty("msg")
-        public Builder<T> msg(String msg) {
+        public Builder<T> msg(String msg)
+        {
             this.msg = msg;
             return this;
         }
+
         @JsonProperty("data")
-        public Builder<T> data(T data) {
+        public Builder<T> data(T data)
+        {
             this.data = data;
             return this;
         }
 
-        public BaseResponse<T> build() {
+        public BaseResponse<T> build()
+        {
             return new BaseResponse<>(this);
         }
     }
