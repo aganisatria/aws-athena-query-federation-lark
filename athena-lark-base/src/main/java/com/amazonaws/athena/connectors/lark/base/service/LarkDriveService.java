@@ -43,6 +43,10 @@ public class LarkDriveService extends CommonLarkService{
         super(larkAppId, larkAppSecret);
     }
 
+    public LarkDriveService(String larkAppId, String larkAppSecret, HttpClientWrapper httpClient) {
+        super(larkAppId, larkAppSecret, httpClient);
+    }
+
     public List<LarkDatabaseRecord> getLarkBases(String folderToken) {
         try {
             refreshTenantAccessToken();

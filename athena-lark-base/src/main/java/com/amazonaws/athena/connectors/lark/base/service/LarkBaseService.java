@@ -81,6 +81,24 @@ public class LarkBaseService extends CommonLarkService {
                 });
     }
 
+    public LarkBaseService(String larkAppId, String larkAppSecret, HttpClientWrapper httpClient) {
+        super(larkAppId, larkAppSecret, httpClient);
+        this.tableFieldsCache = CacheBuilder.newBuilder()
+                .maximumSize(FIELD_CACHE_MAX_SIZE)
+                .expireAfterWrite(FIELD_CACHE_TTL_MINUTES, TimeUnit.MINUTES)
+                .build(new CacheLoader<String, List<ListFieldResponse.FieldItem>>() {
+                    @Override
+                    @Nonnull
+                    public List<ListFieldResponse.FieldItem> load(@Nonnull String tableKey) throws Exception {
+                        String[] parts = tableKey.split("\\|");
+                        if (parts.length != 2) {
+                            throw new IllegalArgumentException("Invalid table key format: " + tableKey);
+                        }
+                        return fetchTableFieldsUncached(parts[0], parts[1]);
+                    }
+                });
+    }
+
     /**
      * Get all records from a table
      * @param baseId base ID
