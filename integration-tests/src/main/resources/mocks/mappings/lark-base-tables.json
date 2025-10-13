@@ -1,0 +1,117 @@
+{
+  "mappings": [
+    {
+      "name": "Lark - List Tables",
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/open-apis/bitable/v1/apps/.*/tables"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "code": 0,
+          "msg": "success",
+          "data": {
+            "has_more": false,
+            "total": 2,
+            "items": [
+              {
+                "table_id": "tbl_test_001",
+                "name": "test_table_1",
+                "revision": 1
+              },
+              {
+                "table_id": "tbl_test_002",
+                "name": "test_table_2",
+                "revision": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Lark - Get Table Fields",
+      "request": {
+        "method": "GET",
+        "urlPathPattern": "/open-apis/bitable/v1/apps/.*/tables/.*/fields"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "code": 0,
+          "msg": "success",
+          "data": {
+            "has_more": false,
+            "total": 3,
+            "items": [
+              {
+                "field_id": "fld_text_001",
+                "field_name": "field_text",
+                "type": 1,
+                "description": "Text field"
+              },
+              {
+                "field_id": "fld_number_001",
+                "field_name": "field_number",
+                "type": 2,
+                "description": "Number field"
+              },
+              {
+                "field_id": "fld_checkbox_001",
+                "field_name": "field_checkbox",
+                "type": 7,
+                "description": "Checkbox field"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Lark - List Records",
+      "request": {
+        "method": "POST",
+        "urlPathPattern": "/open-apis/bitable/v1/apps/.*/tables/.*/records/search"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "code": 0,
+          "msg": "success",
+          "data": {
+            "has_more": false,
+            "total": 2,
+            "items": [
+              {
+                "record_id": "rec_001",
+                "fields": {
+                  "field_text": "Sample text 1",
+                  "field_number": 123.45,
+                  "field_checkbox": true
+                }
+              },
+              {
+                "record_id": "rec_002",
+                "fields": {
+                  "field_text": "Sample text 2",
+                  "field_number": 678.90,
+                  "field_checkbox": false
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "mappings": [
+    {
+      "name": "Lark - Get Tenant Access Token",
+      "request": {
+        "method": "POST",
+        "urlPath": "/open-apis/auth/v3/tenant_access_token/internal"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "code": 0,
+          "msg": "success",
+          "tenant_access_token": "mock-tenant-access-token-{{randomValue length=32 type='ALPHANUMERIC'}}",
+          "expire": 7200
+        }
+      }
+    }
+  ]
+}
