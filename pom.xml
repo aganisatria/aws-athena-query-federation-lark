@@ -118,6 +118,7 @@
     <modules>
         <module>athena-lark-base</module>
         <module>glue-lark-base-crawler</module>
+        <module>integration-tests</module>
     </modules>
     <dependencies>
         <dependency>
