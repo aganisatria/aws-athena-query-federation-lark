@@ -51,9 +51,9 @@ Parameters:
     Type: Number
     Default: 500
   AthenaCatalogName:
-    Description: 'The name for the Athena Data Catalog and the Lambda function. Must satisfy the pattern ^[a-z0-9-_]{1,64}$'
+    Description: 'The name for the Athena Data Catalog and the Lambda function. Must satisfy the pattern ^[a-zA-Z0-9-_]{1,64}$'
     Type: String
-    AllowedPattern: ^[a-z0-9-_]{1,64}$
+    AllowedPattern: ^[a-zA-Z0-9-_]{1,64}$
   SpillBucket:
     Description: 'The S3 bucket name where this function can spill data.'
     Type: String

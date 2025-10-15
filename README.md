@@ -225,6 +225,20 @@ See [ARCHITECTURE.md#Configuration](./ARCHITECTURE.md#configuration) for complet
 
 ## Deployment Options
 
+### Deployment with CloudFormation
+
+You can deploy the connector using the provided CloudFormation template.
+
+```bash
+aws cloudformation create-stack --stack-name lark-athena-connector --template-body file://athena-larkbase-console-standard.yaml --parameters ParameterKey=SpillBucket,ParameterValue=your-spill-bucket ParameterKey=ConnectorCodeS3Bucket,ParameterValue=your-connector-bucket ParameterKey=ConnectorCodeS3Key,ParameterValue=path/to/athena-lark-base.jar ParameterKey=CrawlerCodeS3Bucket,ParameterValue=your-crawler-bucket ParameterKey=CrawlerCodeS3Key,ParameterValue=path/to/glue-lark-base-crawler.jar --capabilities CAPABILITY_IAM
+```
+
+Alternatively, you can deploy the template using the [AWS CloudFormation console](https://console.aws.amazon.com/cloudformation/).
+
+### Deployment with Terraform
+
+A Terraform module is available to deploy the connector and all its resources. See the [Terraform module README](https://github.com/aganisatria/terraform-aws-lark-base-federation-query) for instructions.
+
 ### Module 1: Athena Connector (Required)
 
 The main connector that executes queries:

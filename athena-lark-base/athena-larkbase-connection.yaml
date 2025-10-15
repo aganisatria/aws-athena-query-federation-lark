@@ -3,9 +3,9 @@ Description: CloudFormation template to register an EXISTING Lark Base Lambda Co
 
 Parameters:
   AthenaCatalogName:
-    Description: 'The desired name for the Athena Data Catalog. Must satisfy the pattern ^[a-z0-9-_]{1,255}$'
+    Description: 'The desired name for the Athena Data Catalog. Must satisfy the pattern ^[a-zA-Z0-9-_]{1,127}$'
     Type: String
-    AllowedPattern: '^[a-z0-9-_]{1,255}$'
+    AllowedPattern: '^[a-zA-Z0-9-_]{1,127}$'
   LambdaConnectorArn:
     Description: 'The ARN of the existing Lark Base Athena Connector Lambda function to register.'
     Type: String
