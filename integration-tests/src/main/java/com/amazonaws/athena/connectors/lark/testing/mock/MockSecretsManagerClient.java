@@ -31,7 +31,6 @@ import software.amazon.awssdk.services.secretsmanager.model.PutSecretValueReques
 import software.amazon.awssdk.services.secretsmanager.model.PutSecretValueResponse;
 import software.amazon.awssdk.services.secretsmanager.model.ResourceNotFoundException;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
