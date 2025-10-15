@@ -20,6 +20,10 @@ Parameters:
   CrawlerCodeS3Key:
     Type: String
     Description: S3 key (path) to the Glue crawler JAR file.
+  AthenaCatalogName:
+    Type: String
+    Description: The name of the Athena data catalog.
+    Default: LarkBaseCatalog
   LarkPageSize:
     Type: Number
     Default: 500
@@ -96,7 +100,17 @@ Parameters:
     Description: (Optional) The Name of the Lark Application ID secret in Secrets Manager. If not provided, a new secret will be created.
     Type: String
     Default: ''
+  AthenaConnectorFunctionName:
+    Description: (Optional) The name of the Athena Connector Lambda function. If empty, a name will be generated based on the stack name.
+    Type: String
+    Default: ''
+  CrawlerFunctionName:
+    Description: (Optional) The name of the Glue Crawler Lambda function. If empty, a name will be generated based on the stack name.
+    Type: String
+    Default: ''
 Conditions:
+  HasAthenaConnectorFunctionName: !Not [!Equals [!Ref AthenaConnectorFunctionName, ""]]
+  HasCrawlerFunctionName: !Not [!Equals [!Ref CrawlerFunctionName, ""]]
   HasKMSKeyId: !Not
     - !Equals
       - !Ref KMSKeyId
@@ -241,7 +255,7 @@ Resources:
   LarkBaseAthenaFederationFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub ${AWS::StackName}-AthenaConnector
+      FunctionName: !If [HasAthenaConnectorFunctionName, !Ref AthenaConnectorFunctionName, !Sub '${AWS::StackName}-AthenaConnector']
       Handler: com.amazonaws.athena.connectors.lark.base.BaseCompositeHandler
       Description: Athena Connector for Lark Base
       Runtime: java17
@@ -278,7 +292,7 @@ Resources:
   LarkBaseCrawlerFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub ${AWS::StackName}-CrawlerFunction
+      FunctionName: !If [HasCrawlerFunctionName, !Ref CrawlerFunctionName, !Sub '${AWS::StackName}-CrawlerFunction']
       Handler: com.amazonaws.glue.lark.base.crawler.MainLarkBaseCrawlerHandler
       Description: Glue Crawler for Lark Base
       Runtime: java17
@@ -300,7 +314,7 @@ Resources:
   DataCatalog:
     Type: AWS::Athena::DataCatalog
     Properties:
-      Name: !Ref LarkBaseAthenaFederationFunction
+      Name: !Ref AthenaCatalogName
       Type: LAMBDA
       Description: Athena Data Catalog for Lark Base Connector
       Parameters:
@@ -343,8 +357,14 @@ Metadata:
         - FunctionKMSPolicy
 Outputs:
   AthenaCatalogName:
-    Description: Name of the Athena Data Catalog (same as Connector Lambda Function Name)
+    Description: Name of the Athena Data Catalog.
+    Value: !Ref AthenaCatalogName
+  AthenaConnectorFunctionName:
+    Description: Name of the Athena Connector Lambda function.
     Value: !Ref LarkBaseAthenaFederationFunction
+  CrawlerFunctionName:
+    Description: Name of the Glue Crawler Lambda function.
+    Value: !Ref LarkBaseCrawlerFunction
   ConnectorLambdaArn:
     Description: ARN of the Athena Connector Lambda function
     Value: !GetAtt LarkBaseAthenaFederationFunction.Arn

@@ -51,9 +51,14 @@ Parameters:
     Type: Number
     Default: 500
   AthenaCatalogName:
-    Description: 'The name for the Athena Data Catalog and the Lambda function. Must satisfy the pattern ^[a-zA-Z0-9-_]{1,64}$'
+    Description: 'The name for the Athena Data Catalog. Must satisfy the pattern ^[a-zA-Z0-9-_]{1,64}$'
     Type: String
     AllowedPattern: ^[a-zA-Z0-9-_]{1,64}$
+  LambdaFunctionName:
+    Description: '(Optional) The name of the Lambda function. If empty, the AthenaCatalogName is used. Must satisfy the pattern ^[a-zA-Z0-9-_]{1,64}$'
+    Type: String
+    Default: ''
+    AllowedPattern: '^[a-zA-Z0-9-_]{1,64}$'
   SpillBucket:
     Description: 'The S3 bucket name where this function can spill data.'
     Type: String
@@ -88,6 +93,7 @@ Parameters:
     Type: String
 
 Conditions:
+  HasLambdaFunctionName: !Not [!Equals [!Ref LambdaFunctionName, ""]]
   HasKMSKeyId: !Not [!Equals [!Ref KMSKeyId, ""]]
   NotHasLambdaRole: !Equals [!Ref LambdaRole, ""]
   HasPermissionsBoundary: !Not [ !Equals [ !Ref PermissionsBoundaryARN, "" ] ]
@@ -108,7 +114,7 @@ Resources:
   ConnectorConfig:
     Type: 'AWS::Serverless::Function'
     Properties:
-      FunctionName: !Ref AthenaCatalogName
+      FunctionName: !If [HasLambdaFunctionName, !Ref LambdaFunctionName, !Ref AthenaCatalogName]
       Description: !Sub "Enables Amazon Athena to communicate with Lark Base (${AthenaCatalogName})."
       Role: !If [NotHasLambdaRole, !GetAtt FunctionRole.Arn, !Ref LambdaRole]
       Environment:
@@ -216,11 +222,14 @@ Resources:
 
 Outputs:
   AthenaCatalogName:
-    Description: Name of the Athena Data Catalog and Connector Lambda Function created.
+    Description: Name of the Athena Data Catalog created.
     Value: !Ref AthenaCatalogName
   ConnectorLambdaArn:
     Description: ARN of the Athena Connector Lambda function.
     Value: !GetAtt ConnectorConfig.Arn
+  ConnectorLambdaFunctionName:
+    Description: Name of the Athena Connector Lambda function.
+    Value: !If [HasLambdaFunctionName, !Ref LambdaFunctionName, !Ref AthenaCatalogName]
   ConnectorRoleArn:
     Description: ARN of the IAM Role for the Athena Connector Lambda.
     Value: !If [NotHasLambdaRole, !GetAtt FunctionRole.Arn, !Ref LambdaRole]
