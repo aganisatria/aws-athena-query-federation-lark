@@ -1,4 +1,4 @@
-# Metadata Discovery Flows - AWS Athena Lark Base Connector
+    # Metadata Discovery Flows - AWS Athena Lark Base Connector
 
 ## Table of Contents
 1. [Overview](#overview)

@@ -1,6 +1,104 @@
 # Integration Tests
 
-Integration tests for AWS Athena Lark Base Connector with support for LocalStack Community Edition and mocking.
+This document provides a comprehensive guide to the testing framework. For a fast path to verify your setup, start with the quick verification steps below.
+
+---
+
+## Quick Verification (5 Minutes)
+
+This guide verifies your zero-cost testing infrastructure is working correctly.
+
+### Step 1: Verify Java Build (1 minute)
+
+```bash
+cd integration-tests
+
+# Compile Java tests
+JAVA_HOME="/Library/Java/JavaVirtualMachines/jdk-17.0.2.jdk/Contents/Home" \
+  mvn clean compile -Dcheckstyle.skip=true
+
+# Expected output:
+# [INFO] BUILD SUCCESS
+```
+
+✅ **Success:** Java framework compiled successfully
+
+### Step 2: Verify Python Setup (1 minute)
+
+```bash
+cd integration-tests/python
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Verify configuration
+python -c "import config; config.print_test_config()"
+
+# Expected output:
+# Environment: MOCK
+# AWS Region: us-east-1
+# Lark API Mock: http://localhost:8080
+```
+
+✅ **Success:** Python framework configured correctly
+
+### Step 3: Run Example Tests in MOCK Mode (1 minute)
+
+```bash
+cd integration-tests/python
+
+# Run example integration test
+export TEST_ENVIRONMENT=mock
+python tests/integration/test_glue_operations.py -v
+
+# Expected: All tests pass, < 5 seconds
+```
+
+✅ **Success:** MOCK mode tests pass instantly. **Cost so far: $0** ✅
+
+### Step 4: Run Regression Test in MOCK Mode (1 minute)
+
+```bash
+cd integration-tests/python
+
+# Run migrated regression test
+export TEST_ENVIRONMENT=mock
+python tests/regression/test_glue_crawler.py --verbose
+
+# Expected: All tests pass, < 5 seconds
+```
+
+✅ **Success:** Regression tests work in MOCK mode. **Cost so far: $0** ✅
+
+### Step 5: Start LocalStack Community (1 minute)
+
+```bash
+cd integration-tests/src/main/resources/localstack
+
+# Start LocalStack + WireMock
+docker-compose up -d
+
+# Wait for services to start
+sleep 10
+
+# Verify LocalStack is healthy
+curl http://localhost:4566/_localstack/health
+
+# Expected:
+# {"services": {"lambda": "running", "s3": "running", ...}}
+
+# Verify WireMock is healthy
+curl http://localhost:8080/__admin/health
+
+# Expected: 200 OK
+```
+
+✅ **Success:** LocalStack Community is running. **Cost so far: $0** ✅
+
+---
+*End of Quick Verification. See below for detailed documentation.*
+---
+
 
 ## Overview
 
@@ -11,6 +109,14 @@ This module provides a comprehensive testing framework that supports three test 
 | **MOCK** | All mocked in-memory | None | Fastest | $0 | Unit tests, CI/CD |
 | **HYBRID** | LocalStack (Lambda, S3) + Mocks (Glue, Secrets, SSM) | Docker | Fast | $0 | Integration tests |
 | **AWS** | Real AWS services | AWS Account | Slow | $ | E2E validation |
+
+## Detailed Guides
+
+For a deeper dive into specific topics, see the following guides:
+
+- **[ZERO_COST_TESTING.md](./ZERO_COST_TESTING.md)**: Explains the three-tier testing strategy (MOCK, HYBRID, AWS) to achieve $0 testing costs.
+- **[LARK_TEST_DATA_SETUP.md](./LARK_TEST_DATA_SETUP.md)**: A technical guide on how to automatically generate a comprehensive test data set in Lark Base.
+- **[MANUAL_FIELDS_GUIDE.md](./MANUAL_FIELDS_GUIDE.md)**: Instructions for manually adding the 5 field types that cannot be created via the Lark API.
 
 ## Prerequisites
 
@@ -29,23 +135,9 @@ This module provides a comprehensive testing framework that supports three test 
 - AWS account with appropriate permissions
 - AWS CLI configured
 
-## Quick Start
+## Running Tests
 
-### 1. Setup
-
-**Install dependencies:**
-
-```bash
-# Java dependencies
-cd integration-tests
-mvn clean install
-
-# Python dependencies
-cd python
-pip install -r requirements.txt
-```
-
-**Configure environment:**
+### Configure Environment
 
 ```bash
 # For MOCK mode (default)
@@ -59,9 +151,7 @@ export TEST_ENVIRONMENT=aws
 export AWS_REGION=us-east-1
 ```
 
-### 2. Run Tests
-
-**Java Tests:**
+### Java Tests
 
 ```bash
 # MOCK mode (default)
@@ -74,7 +164,7 @@ mvn clean verify -P test-hybrid
 mvn clean verify -P test-aws
 ```
 
-**Python Tests:**
+### Python Tests
 
 ```bash
 cd python
@@ -221,13 +311,13 @@ def test_glue_operations():
 
 ### MOCK Mode
 
-**What's mocked:**
+**What\'s mocked:**
 - ✅ Glue Data Catalog (in-memory)
 - ✅ Secrets Manager (in-memory)
 - ✅ SSM Parameter Store (in-memory)
 - ✅ Lark API (WireMock responses)
 
-**What's NOT available:**
+**What\'s NOT available:**
 - ❌ Lambda invocation
 - ❌ S3 operations
 - ❌ Athena queries
@@ -241,12 +331,12 @@ def test_glue_operations():
 
 ### HYBRID Mode
 
-**What's real (via LocalStack Community):**
+**What\'s real (via LocalStack Community):**
 - ✅ Lambda invocation
 - ✅ S3 operations
 - ✅ CloudWatch Logs
 
-**What's mocked:**
+**What\'s mocked:**
 - ✅ Glue (not in LocalStack Community)
 - ✅ Secrets Manager (not in LocalStack Community)
 - ✅ SSM (not in LocalStack Community)
@@ -260,7 +350,7 @@ def test_glue_operations():
 
 ### AWS Mode
 
-**What's real:**
+**What\'s real:**
 - ✅ All AWS services
 - ✅ Lark API (if configured)
 
@@ -268,161 +358,3 @@ def test_glue_operations():
 - Final E2E validation
 - Production smoke tests
 - Performance testing
-
-## Mocking Lark API
-
-WireMock is configured to mock Lark API responses. Mappings are in `src/main/resources/mocks/mappings/`.
-
-**Example: Add new Lark API mock**
-
-Create `src/main/resources/mocks/mappings/my-endpoint.json`:
-
-```json
-{
-  "mappings": [{
-    "name": "My Lark API Endpoint",
-    "request": {
-      "method": "GET",
-      "urlPath": "/open-apis/bitable/v1/my/endpoint"
-    },
-    "response": {
-      "status": 200,
-      "jsonBody": {
-        "code": 0,
-        "msg": "success",
-        "data": {}
-      }
-    }
-  }]
-}
-```
-
-## Troubleshooting
-
-### LocalStack not starting
-
-```bash
-# Check Docker
-docker ps
-
-# Check logs
-docker logs lark-connector-localstack
-
-# Reset
-docker-compose down -v
-docker-compose up -d
-```
-
-### Tests failing in HYBRID mode
-
-```bash
-# Verify LocalStack health
-curl http://localhost:4566/_localstack/health
-
-# Check WireMock
-curl http://localhost:8080/__admin/health
-
-# View LocalStack logs
-docker logs lark-connector-localstack -f
-```
-
-### Python import errors
-
-```bash
-# Install in editable mode
-cd integration-tests/python
-pip install -e .
-```
-
-## CI/CD Integration
-
-### GitHub Actions Example
-
-```yaml
-name: Integration Tests
-
-on: [push, pull_request]
-
-jobs:
-  test-mock:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-java@v3
-        with:
-          java-version: '17'
-      - name: Run MOCK tests
-        run: |
-          export TEST_ENVIRONMENT=mock
-          mvn clean verify -P test-mock
-
-  test-hybrid:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-java@v3
-        with:
-          java-version: '17'
-      - name: Start LocalStack
-        run: |
-          cd integration-tests/src/main/resources/localstack
-          docker-compose up -d
-      - name: Run HYBRID tests
-        run: |
-          export TEST_ENVIRONMENT=hybrid
-          mvn clean verify -P test-hybrid
-      - name: Stop LocalStack
-        if: always()
-        run: |
-          cd integration-tests/src/main/resources/localstack
-          docker-compose down
-```
-
-## Cost Analysis
-
-| Mode | Daily Dev | CI/CD (per build) | Monthly (intensive) |
-|------|-----------|-------------------|---------------------|
-| MOCK | $0 | $0 | $0 |
-| HYBRID | $0 | $0 | $0 |
-| AWS | ~$0.10 | ~$0.50 | ~$15-30 |
-
-## Next Steps
-
-1. **Run existing tests**: `mvn clean verify -P test-mock`
-2. **Start LocalStack**: See "Using LocalStack Community Edition"
-3. **Write your first test**: See "Writing Tests"
-4. **Migrate legacy tests**: See Python migration guide below
-
-## Migrating Legacy Python Tests
-
-Legacy tests from project root can be migrated:
-
-```bash
-# Old location
-./test-glue-crawler.py
-
-# New location
-integration-tests/python/tests/integration/test_glue_crawler.py
-```
-
-Update imports to use the new client factory:
-
-```python
-# Old
-import boto3
-glue = boto3.client('glue')
-
-# New
-from clients import AWSClientFactory
-factory = AWSClientFactory()
-glue = factory.create_glue_client()
-```
-
-## Support
-
-- **GitHub Issues**: [Report issues](https://github.com/aganisatria/aws-athena-query-federation-lark/issues)
-- **Documentation**: See main [README.md](../README.md)
-
-## License
-
-Apache License 2.0 - See [LICENSE](../LICENSE)
