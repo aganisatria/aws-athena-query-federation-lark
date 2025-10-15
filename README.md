@@ -95,17 +95,6 @@ LIMIT 100;
 - **[Architecture Guide](./ARCHITECTURE.md)** - Understand the system design
 - **[Visual Diagrams](./DIAGRAMS.md)** - Interactive Mermaid diagrams
 
-### Core Documentation
-
-| Document | Purpose | Time |
-|----------|---------|------|
-| [README_DOCUMENTATION.md](./README_DOCUMENTATION.md) | Complete documentation index | 10 min |
-| [METADATA_DISCOVERY_FLOWS.md](./METADATA_DISCOVERY_FLOWS.md) | Choose deployment approach | 15 min |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | System architecture | 30 min |
-| [CLASS_DIAGRAMS.md](./CLASS_DIAGRAMS.md) | Code structure | 20 min |
-| [SEQUENCE_DIAGRAMS.md](./SEQUENCE_DIAGRAMS.md) | Execution flows | 25 min |
-| [DOCUMENTATION_SUMMARY.md](./DOCUMENTATION_SUMMARY.md) | Quick reference | 10 min |
-
 ### Visual Documentation
 
 - **[DIAGRAMS.md](./DIAGRAMS.md)** - All system diagrams in Mermaid format (GitHub-rendered)
@@ -256,57 +245,244 @@ Discovers and registers Lark Base tables in AWS Glue:
 
 See [METADATA_DISCOVERY_FLOWS.md](./METADATA_DISCOVERY_FLOWS.md) to choose.
 
-## Performance
+## Performance Tuning
 
-### Benchmarks
+### 1. Enable Parallel Splits
 
-- **Small queries (<1000 rows)**: ~2-5 seconds
-- **Large queries (>10,000 rows)**: 10-30 seconds with parallel splits
-- **Filter pushdown**: 5-10x faster than post-filtering
-- **TOP-N queries**: Returns immediately (no full scan)
-
-### Tuning Tips
-
-1. **Enable parallel splits** for tables >10,000 rows
-2. **Use filter pushdown** with supported field types
-3. **Apply LIMIT** to reduce data transfer
-4. **Increase Lambda memory** to 3008 MB for better network performance
-
-See [ARCHITECTURE.md#Performance-Considerations](./ARCHITECTURE.md#performance-considerations).
-
-## Testing
-
+**Configuration**:
 ```bash
-# Unit tests
-JAVA_HOME="/path/to/jdk-17" mvn test -Dcheckstyle.skip=true
-
-# Coverage report
-JAVA_HOME="/path/to/jdk-17" mvn clean test jacoco:report -Dcheckstyle.skip=true
-
-# View coverage
-open athena-lark-base/target/site/jacoco/index.html
+ACTIVATE_PARALLEL_SPLIT=true
 ```
 
-Current coverage: **90%+**
+**Requirements**:
+- Table must have `$reserved_split_key` field
 
-## Troubleshooting
+**Impact**: 5-10x faster for tables >10,000 rows
 
-### Common Issues
+**Reference**: [ARCHITECTURE.md#Parallel-Split-Execution](./ARCHITECTURE.md#query-optimizations)
 
-**"Unable to retrieve table schema"**
-- Check if crawler has run or Lark source is enabled
-- Verify table exists in Glue or Lark Base mapping
+### 2. Optimize Filter Pushdown
 
-**Query returns no results**
-- Check CloudWatch logs for filter translation
-- Verify field names match (case-sensitive in Lark API)
+**Best practices**:
+- Use equality filters on indexed fields
+- Combine multiple filters (AND conjunction)
+- Use supported field types (TEXT, NUMBER, SELECT, DATE_TIME)
 
-**Timeout errors**
-- Increase Lambda timeout to 900 seconds
-- Enable parallel splits for large tables
-- Check Lambda memory (should be 3008 MB)
+**Avoid**:
+- LIKE patterns (not pushed down)
+- Filters on ATTACHMENT, FORMULA fields
 
-See [DOCUMENTATION_SUMMARY.md#Troubleshooting](./DOCUMENTATION_SUMMARY.md#troubleshooting-guide).
+**Reference**: [ARCHITECTURE.md#Filter-Pushdown](./ARCHITECTURE.md#query-optimizations)
+
+### 3. Use TOP-N Optimization
+
+**Pattern**:
+```sql
+SELECT * FROM table ORDER BY date DESC LIMIT N
+```
+
+**Impact**: Returns results immediately, no full table scan
+
+**Reference**: [ARCHITECTURE.md#TOP-N-Pushdown](./ARCHITECTURE.md#query-optimizations)
+
+### 4. Adjust Page Size
+
+**Trade-off**:
+- Larger page size: Fewer API calls, more memory
+- Smaller page size: More API calls, less memory
+
+**Default**: 500 records
+
+**Location**: `BaseConstants.PAGE_SIZE`
+
+### 5. Increase Lambda Resources
+
+**Recommendations**:
+- Memory: 3008 MB (maximum network bandwidth)
+- Timeout: 900 seconds
+- Ephemeral storage: 10 GB (for spill)
+
+## Testing Guide
+
+### Unit Testing
+
+**Key test classes**:
+- `BaseMetadataHandlerTest`: Metadata operations
+- `BaseRecordHandlerTest`: Record reading
+- `SearchApiFilterTranslatorTest`: Filter translation
+- `LarkBaseServiceTest`: API client
+
+**Testing patterns**:
+```java
+// Mock dependencies
+@Mock
+private LarkBaseService mockLarkBaseService;
+
+@Mock
+private GlueCatalogService mockGlueCatalogService;
+
+// Inject mocks
+@InjectMocks
+private BaseMetadataHandler handler;
+
+// Test specific behavior
+@Test
+public void testFilterTranslation() {
+    // Arrange
+    Map<String, ValueSet> constraints = ...;
+
+    // Act
+    String result = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+    // Assert
+    assertThat(result).contains("\"operator\":\"is\"");
+}
+```
+
+### Integration Testing
+
+**Setup**:
+1. Set up test Lark Base with known data
+2. Configure test environment variables
+3. Run end-to-end tests
+
+**Test scenarios**:
+- List schemas from Glue
+- Get table schema
+- Execute query with filters
+- Verify data correctness
+
+### Manual Testing
+
+**Using Athena Console**:
+```sql
+-- Test schema discovery
+SHOW DATABASES IN lark_base;
+
+-- Test table discovery
+SHOW TABLES IN lark_base.test_db;
+
+-- Test schema retrieval
+DESCRIBE lark_base.test_db.test_table;
+
+-- Test data reading
+SELECT * FROM lark_base.test_db.test_table LIMIT 10;
+
+-- Test filter pushdown (check CloudWatch logs for filter JSON)
+SELECT * FROM lark_base.test_db.test_table
+WHERE status = 'active';
+
+-- Test TOP-N pushdown
+SELECT * FROM lark_base.test_db.test_table
+ORDER BY created_date DESC LIMIT 100;
+```
+
+## Troubleshooting Guide
+
+### Issue: "Unable to retrieve table schema"
+
+**Check**:
+1. Does table exist in Glue? Run `aws glue get-table --database-name X --name Y`
+2. Is Lark source enabled? Check `ACTIVATE_LARK_BASE_SOURCE` environment variable
+3. Are Lark credentials correct? Check Secrets Manager
+
+**Reference**: [SEQUENCE_DIAGRAMS.md#Schema-Retrieval-Flow](./SEQUENCE_DIAGRAMS.md#schema-retrieval-flow)
+
+### Issue: "No mapping found for column"
+
+**Check**:
+1. Column parameters in Glue table metadata
+2. Field name sanitization (lowercase, special characters)
+3. Re-run crawler to update metadata
+
+**Reference**: [ARCHITECTURE.md#Glue-Column-Parameters](./ARCHITECTURE.md#configuration)
+
+### Issue: Query returns no results but data exists
+
+**Check**:
+1. CloudWatch logs for filter translation
+2. Verify filter pushdown is working correctly
+3. Check if field types support pushdown
+4. Test without WHERE clause
+
+**Reference**: [SEQUENCE_DIAGRAMS.md#Filter-Pushdown-Flow](./SEQUENCE_DIAGRAMS.md#filter-pushdown-flow)
+
+### Issue: Query timeout
+
+**Check**:
+1. Lambda timeout configuration (should be 900s)
+2. Lambda memory configuration (should be 3008 MB)
+3. Enable parallel splits for large tables
+4. Check Lark API rate limits
+
+**Reference**: [ARCHITECTURE.md#Performance-Considerations](./ARCHITECTURE.md#performance-considerations)
+
+### Issue: Type conversion errors
+
+**Check**:
+1. Field type mapping in Glue column parameters
+2. Null handling for non-nullable fields
+3. RegistererExtractor implementation for the field type
+
+**Reference**: [CLASS_DIAGRAMS.md#RegistererExtractor](./CLASS_DIAGRAMS.md#translator-components)
+
+## Common Development Scenarios
+
+### 1. Adding a New Lark Field Type
+
+**Files to modify**:
+- `UITypeEnum.java`: Add enum value
+- `LarkBaseFieldResolver.java`: Add Arrow type mapping
+- `LarkBaseTypeUtils.java`: Add type utility methods
+- `RegistererExtractor.java`: Add extractor implementation
+
+**Reference**:
+- [CLASS_DIAGRAMS.md#Type-System](./CLASS_DIAGRAMS.md#type-system)
+- [ARCHITECTURE.md#Type-System](./ARCHITECTURE.md#type-system)
+
+### 2. Adding Support for New SQL Operators
+
+**Files to modify**:
+- `SearchApiFilterTranslator.java`: Add translation logic
+- `BaseMetadataHandler.java`: Update capabilities (if needed)
+
+**Reference**:
+- [SEQUENCE_DIAGRAMS.md#Filter-Pushdown-Flow](./SEQUENCE_DIAGRAMS.md#filter-pushdown-flow)
+- [CLASS_DIAGRAMS.md#Translator-Components](./CLASS_DIAGRAMS.md#translator-components)
+
+### 3. Implementing New Metadata Discovery Method
+
+**Files to create**:
+- New class implementing metadata provider interface
+- Add to `BaseMetadataHandler` initialization
+
+**Reference**:
+- [CLASS_DIAGRAMS.md#Metadata-Provider-Pattern](./CLASS_DIAGRAMS.md#metadata-provider-pattern)
+- [SEQUENCE_DIAGRAMS.md#Schema-Retrieval-Flow](./SEQUENCE_DIAGRAMS.md#schema-retrieval-flow)
+
+### 4. Adding New Crawler Source
+
+**Files to modify**:
+- Create new handler extending `BaseLarkBaseCrawlerHandler`
+- Update `MainLarkBaseCrawlerHandler` routing
+
+**Reference**:
+- [CLASS_DIAGRAMS.md#Crawler-Components](./CLASS_DIAGRAMS.md#crawler-components)
+- [SEQUENCE_DIAGRAMS.md#Crawler-Execution-Flow](./SEQUENCE_DIAGRAMS.md#crawler-execution-flow)
+
+### 5. Optimizing Query Performance
+
+**Areas to investigate**:
+- Partition strategy (`BaseMetadataHandler.getPartitions`)
+- Caching (`LarkBaseService` field cache)
+- Pagination (`BaseRecordHandler.getIterator`)
+- Filter translation (`SearchApiFilterTranslator`)
+
+**Reference**:
+- [ARCHITECTURE.md#Query-Optimizations](./ARCHITECTURE.md#query-optimizations)
+- [ARCHITECTURE.md#Performance-Considerations](./ARCHITECTURE.md#performance-considerations)
+
+---
 
 ## Contributing
 
@@ -364,4 +540,4 @@ Built with:
 
 **Ready to get started?** See [METADATA_DISCOVERY_FLOWS.md](./METADATA_DISCOVERY_FLOWS.md) to choose your deployment approach.
 
-**Questions?** Check the [complete documentation](./README_DOCUMENTATION.md) or [troubleshooting guide](./DOCUMENTATION_SUMMARY.md#troubleshooting-guide).
+**Questions?** Check the [complete documentation](./ARCHITECTURE.md) or [troubleshooting guide](./README.md#troubleshooting-guide).

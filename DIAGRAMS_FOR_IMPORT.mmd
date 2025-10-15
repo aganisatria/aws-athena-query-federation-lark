@@ -1,48 +1,11 @@
-# Visual Diagrams - AWS Athena Lark Base Connector
+### HOW TO USE ###
+# 1. Copy a mermaid code block below.
+# 2. Go to https://app.diagrams.io/
+# 3. Arrange > Insert > Advanced > Mermaid
+# 4. Paste and click Insert.
 
-This document contains all diagrams in **Mermaid** format.
 
----
-
-## 📊 How to Use These Diagrams
-
-This guide explains how to use the diagrams from `DIAGRAMS.md` in various tools.
-
-### Option 1: View in GitHub/GitLab (Easiest)
-
-- These diagrams render automatically in GitHub and GitLab
-- Just view this file in your repository
-
-### Option 2: Import to Diagrams.io (Most Flexible)
-
-1.  Copy a Mermaid code block from the desired diagram below.
-2.  Go to https://app.diagrams.io/
-3.  Click "Arrange" → "Insert" → "Advanced" → "Mermaid"
-4.  Paste the code.
-5.  Edit and export as needed.
-
-### Option 3: Export to PNG/SVG
-
-1.  Use Mermaid Live Editor: https://mermaid.live/
-2.  Paste the code.
-3.  Download as PNG/SVG.
-
----
-
-## Table of Contents
-
-1.  [System Architecture Overview](#1-system-architecture-overview)
-2.  [Metadata Discovery Flows](#2-metadata-discovery-flows)
-3.  [Query Execution Flow](#3-query-execution-flow)
-4.  [Class Hierarchy](#4-class-hierarchy)
-5.  [Sequence Diagrams](#5-sequence-diagrams)
-6.  [Component Interaction](#6-component-interaction)
-
----
-
-## 1. System Architecture Overview
-
-### High-Level Architecture
+#--- From: DIAGRAMS.md ---#
 
 ```mermaid
 graph TB
@@ -110,12 +73,6 @@ graph TB
     style Record fill:#4CAF50
 ```
 
----
-
-## 2. Metadata Discovery Flows
-
-### Flow Comparison Decision Tree
-
 ```mermaid
 graph TD
     Start[Start: Choose Metadata Discovery Flow]
@@ -149,8 +106,6 @@ graph TD
     style End fill:#4CAF50
 ```
 
-### Flow 1: Glue Catalog + Crawler
-
 ```mermaid
 sequenceDiagram
     participant Admin
@@ -181,8 +136,6 @@ sequenceDiagram
 
     Note over Admin,Connector: ✅ Fast queries (cached)<br/>❌ Manual schema updates
 ```
-
-### Flow 2: Lark Base Source (Direct)
 
 ```mermaid
 sequenceDiagram
@@ -220,8 +173,6 @@ sequenceDiagram
 
     Note over Admin,LarkAPI: ✅ Auto-updates (on restart)<br/>❌ Cold start penalty
 ```
-
-### Flow 3: Lark Drive Source
 
 ```mermaid
 graph TB
@@ -274,8 +225,6 @@ graph TB
     style Cache fill:#4CAF50
 ```
 
-### Flow 4: Experimental Provider
-
 ```mermaid
 sequenceDiagram
     participant Athena as Athena Query
@@ -303,12 +252,6 @@ sequenceDiagram
     Note over Athena,LarkAPI: ✅ Real-time schema<br/>❌ Higher latency
 ```
 
----
-
-## 3. Query Execution Flow
-
-### Complete Query Lifecycle
-
 ```mermaid
 graph TB
     Start[User: SELECT * FROM table<br/>WHERE status='active'<br/>ORDER BY date DESC<br/>LIMIT 100]
@@ -316,7 +259,7 @@ graph TB
     subgraph "Phase 1: Metadata"
         GetLayout[GetTableLayout]
         GetSchema[Get Table Schema]
-        GetPartitions[getPartitions]
+        GetPart[Get Partitions]
         TranslateFilter[Translate WHERE<br/>to Lark filter JSON]
         TranslateSort[Translate ORDER BY<br/>to Lark sort JSON]
         EstimateRows[Estimate Row Count<br/>via Lark API]
@@ -339,8 +282,8 @@ graph TB
 
     Start --> GetLayout
     GetLayout --> GetSchema
-    GetSchema --> GetPartitions
-    GetPartitions --> TranslateFilter
+    GetSchema --> GetPart
+    GetPart --> TranslateFilter
     TranslateFilter --> TranslateSort
     TranslateSort --> EstimateRows
     EstimateRows --> CreatePartitions
@@ -367,8 +310,6 @@ graph TB
     style Result fill:#4CAF50
 ```
 
-### Filter Pushdown Translation
-
 ```mermaid
 graph LR
     subgraph "Athena SQL"
@@ -388,7 +329,23 @@ graph LR
     end
 
     subgraph "Lark API Filter JSON"
-        JSON["{\n  'conjunction': 'and',\n  'conditions': [\n    {field_name: 'Status',\n     operator: 'is',\n     value: ['active']},\n    {field_name: 'Age',\n     operator: 'isGreater',\n     value: ['18']},\n    {field_name: 'Category',\n     operator: 'is',\n     value: ['A']},\n    {field_name: 'Category',\n     operator: 'is',\n     value: ['B']}\n  ]\n}"]
+        JSON["{
+  'conjunction': 'and',
+  'conditions': [
+    {field_name: 'Status',
+     operator: 'is',
+     value: ['active']},
+    {field_name: 'Age',
+     operator: 'isGreater',
+     value: ['18']},
+    {field_name: 'Category',
+     operator: 'is',
+     value: ['A']},
+    {field_name: 'Category',
+     operator: 'is',
+     value: ['B']}
+  ]
+}"]
     end
 
     SQL --> C1
@@ -406,12 +363,6 @@ graph LR
     style SQL fill:#e1f5ff
     style JSON fill:#d4edda
 ```
-
----
-
-## 4. Class Hierarchy
-
-### Handler Classes
 
 ```mermaid
 classDiagram
@@ -469,8 +420,6 @@ classDiagram
     GlueMetadataHandler <|-- BaseMetadataHandler
     RecordHandler <|-- BaseRecordHandler
 ```
-
-### Service Layer
 
 ```mermaid
 classDiagram
@@ -531,8 +480,6 @@ classDiagram
     BaseRecordHandler --> LarkBaseService
 ```
 
-### Metadata Provider Pattern
-
 ```mermaid
 classDiagram
     class MetadataProvider {
@@ -569,14 +516,11 @@ classDiagram
     BaseMetadataHandler --> LarkSourceMetadataProvider
     BaseMetadataHandler --> ExperimentalMetadataProvider
 
-    note for BaseMetadataHandler "Strategy Pattern:\n1. Try LarkSourceMetadataProvider\n2. Try ExperimentalMetadataProvider\n3. Fallback to Glue"
+    note for BaseMetadataHandler "Strategy Pattern:
+1. Try LarkSourceMetadataProvider
+2. Try ExperimentalMetadataProvider
+3. Fallback to Glue"
 ```
-
----
-
-## 5. Sequence Diagrams
-
-### Query Execution Overview
 
 ```mermaid
 sequenceDiagram
@@ -617,8 +561,6 @@ sequenceDiagram
 
     Athena-->>User: Result set
 ```
-
-### Metadata Discovery (Strategy Pattern)
 
 ```mermaid
 sequenceDiagram
@@ -668,8 +610,6 @@ sequenceDiagram
     end
 ```
 
-### Data Reading with Pagination
-
 ```mermaid
 sequenceDiagram
     participant Athena
@@ -684,7 +624,7 @@ sequenceDiagram
     Handler->>Iterator: Create iterator
     Iterator->>Iterator: Initialize:<br/>pageToken = null<br/>hasMore = true
 
-    loop While hasNext()
+    loop While hasNext() 
         Handler->>Iterator: hasNext()?
 
         alt Current page exhausted
@@ -707,12 +647,6 @@ sequenceDiagram
 
     Handler-->>Athena: Arrow blocks (all data)
 ```
-
----
-
-## 6. Component Interaction
-
-### Complete System Interaction
 
 ```mermaid
 graph TB
@@ -818,8 +752,6 @@ graph TB
     style LarkBitable fill:#00d4aa
     style Glue fill:#ff9900
 ```
-
-### Parallel Split Execution
 
 ```mermaid
 graph TB
