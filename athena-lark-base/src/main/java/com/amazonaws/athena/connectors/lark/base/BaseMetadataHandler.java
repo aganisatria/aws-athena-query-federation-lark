@@ -695,7 +695,9 @@ public class BaseMetadataHandler
             return total;
         }
         catch (Exception e) {
-            throw new RuntimeException("Failed to estimate row count for partition planning.", e);
+            logger.warn("getPartitions: Failed to estimate row count for partition planning with filter '{}'. Assuming no matching rows: {}",
+                    filterExpression, e.getMessage());
+            return 0; // Return 0 instead of throwing exception when filter doesn't match any records
         }
     }
 

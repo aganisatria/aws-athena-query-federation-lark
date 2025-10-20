@@ -7,12 +7,12 @@
 ```bash
 # 1. Daily development: MOCK mode (instant, free)
 export TEST_ENVIRONMENT=mock
-python run_regression_tests.py
+python comprehensive_test_runner.py --providers all
 
 # 2. Integration testing: HYBRID mode (LocalStack Community, free)
-cd src/main/resources/localstack && docker-compose up -d
+cd localstack && docker-compose up -d
 export TEST_ENVIRONMENT=hybrid
-python run_regression_tests.py
+python comprehensive_test_runner.py --providers all
 
 # 3. Production validation: AWS Free Tier (essentially free)
 #    - Once per week on Sunday
@@ -46,7 +46,7 @@ Traditional approach:
 
 ```bash
 export TEST_ENVIRONMENT=mock
-python run_regression_tests.py
+python comprehensive_test_runner.py --providers all
 ```
 
 **What's mocked:**
@@ -66,12 +66,12 @@ python run_regression_tests.py
 
 ```bash
 # Start LocalStack (once)
-cd integration-tests/src/main/resources/localstack
+cd integration-tests/localstack
 docker-compose up -d
 
 # Run tests
 export TEST_ENVIRONMENT=hybrid
-python run_regression_tests.py
+python comprehensive_test_runner.py --providers all
 ```
 
 **What's real (via LocalStack Community - FREE):**
@@ -97,7 +97,7 @@ python run_regression_tests.py
 
 ```bash
 export TEST_ENVIRONMENT=aws
-python run_regression_tests.py
+python comprehensive_test_runner.py --providers all
 ```
 
 **Frequency:** Once per week (Sunday night)
@@ -133,7 +133,7 @@ python run_regression_tests.py
 ```bash
 # Every code change
 export TEST_ENVIRONMENT=mock
-python run_regression_tests.py
+python comprehensive_test_runner.py --providers all
 ```
 
 **Time:** 5 seconds
@@ -145,7 +145,7 @@ python run_regression_tests.py
 ```bash
 # Before git commit
 export TEST_ENVIRONMENT=hybrid
-python run_regression_tests.py
+python comprehensive_test_runner.py --providers all
 ```
 
 **Time:** 30 seconds
@@ -157,7 +157,7 @@ python run_regression_tests.py
 ```bash
 # Sunday night, automated
 export TEST_ENVIRONMENT=aws
-python run_regression_tests.py
+python comprehensive_test_runner.py --providers all
 ```
 
 **Time:** 5 minutes
@@ -192,7 +192,7 @@ jobs:
         run: |
           cd integration-tests/python
           export TEST_ENVIRONMENT=mock
-          python run_regression_tests.py
+          python comprehensive_test_runner.py --providers all
 
   # Integration: HYBRID mode with LocalStack
   test-hybrid:
@@ -204,7 +204,7 @@ jobs:
           python-version: '3.9'
       - name: Start LocalStack
         run: |
-          cd integration-tests/src/main/resources/localstack
+          cd integration-tests/localstack
           docker-compose up -d
           sleep 10  # Wait for LocalStack
       - name: Install dependencies
@@ -215,11 +215,11 @@ jobs:
         run: |
           cd integration-tests/python
           export TEST_ENVIRONMENT=hybrid
-          python run_regression_tests.py
+          python comprehensive_test_runner.py --providers all
       - name: Stop LocalStack
         if: always()
         run: |
-          cd integration-tests/src/main/resources/localstack
+          cd integration-tests/localstack
           docker-compose down
 
   # Weekly: AWS mode (scheduled, uses secrets)
@@ -246,7 +246,7 @@ jobs:
         run: |
           cd integration-tests/python
           export TEST_ENVIRONMENT=aws
-          python run_regression_tests.py
+          python comprehensive_test_runner.py --providers all
 
 # Schedule AWS tests weekly (Sunday 2 AM)
 on:
@@ -296,7 +296,7 @@ on:
 ```bash
 # Instead of testing against AWS every time
 export TEST_ENVIRONMENT=mock
-python run_regression_tests.py
+python comprehensive_test_runner.py --providers all
 ```
 
 **Impact:** Saves $150/month
@@ -306,7 +306,7 @@ python run_regression_tests.py
 ```bash
 # Instead of AWS integration tests
 export TEST_ENVIRONMENT=hybrid
-python run_regression_tests.py
+python comprehensive_test_runner.py --providers all
 ```
 
 **Impact:** Saves $60/month
@@ -354,7 +354,7 @@ docker ps
 docker logs lark-connector-localstack
 
 # Reset and restart
-cd integration-tests/src/main/resources/localstack
+cd integration-tests/localstack
 docker-compose down -v
 docker-compose up -d
 ```
@@ -384,7 +384,7 @@ Common causes:
 
 ```bash
 # .bashrc or .zshrc
-export TEST_ENVIRONMENT=mock
+export TEST_ENVIRONMENT=mock  # Set default test mode to MOCK
 ```
 
 ### 2. Use HYBRID Before Commits
@@ -394,14 +394,14 @@ export TEST_ENVIRONMENT=mock
 #!/bin/bash
 export TEST_ENVIRONMENT=hybrid
 cd integration-tests/python
-python run_regression_tests.py || exit 1
+python comprehensive_test_runner.py --providers all || exit 1
 ```
 
 ### 3. Automate Weekly AWS Validation
 
 ```bash
 # crontab entry (runs Sunday 2 AM)
-0 2 * * 0 cd /path/to/project/integration-tests/python && TEST_ENVIRONMENT=aws python run_regression_tests.py
+0 2 * * 0 cd /path/to/project/integration-tests/python && TEST_ENVIRONMENT=aws python comprehensive_test_runner.py --providers all
 ```
 
 ### 4. Clean Up AWS Resources

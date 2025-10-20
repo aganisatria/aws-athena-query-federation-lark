@@ -49,7 +49,7 @@ cd integration-tests/python
 
 # Run example integration test
 export TEST_ENVIRONMENT=mock
-python tests/integration/test_glue_operations.py -v
+python tests/examples/test_glue_operations.py -v
 
 # Expected: All tests pass, < 5 seconds
 ```
@@ -61,9 +61,9 @@ python tests/integration/test_glue_operations.py -v
 ```bash
 cd integration-tests/python
 
-# Run migrated regression test
+# Run comprehensive tests
 export TEST_ENVIRONMENT=mock
-python tests/regression/test_glue_crawler.py --verbose
+python comprehensive_test_runner.py --providers all --verbose
 
 # Expected: All tests pass, < 5 seconds
 ```
@@ -73,7 +73,7 @@ python tests/regression/test_glue_crawler.py --verbose
 ### Step 5: Start LocalStack Community (1 minute)
 
 ```bash
-cd integration-tests/src/main/resources/localstack
+cd integration-tests/localstack
 
 # Start LocalStack + WireMock
 docker-compose up -d
@@ -106,9 +106,35 @@ This module provides a comprehensive testing framework that supports three test 
 
 | Mode | AWS Services | Infrastructure | Speed | Cost | Use Case |
 |------|-------------|----------------|-------|------|----------|
-| **MOCK** | All mocked in-memory | None | Fastest | $0 | Unit tests, CI/CD |
-| **HYBRID** | LocalStack (Lambda, S3) + Mocks (Glue, Secrets, SSM) | Docker | Fast | $0 | Integration tests |
-| **AWS** | Real AWS services | AWS Account | Slow | $ | E2E validation |
+| **MOCK** | All mocked in-memory | None | Fastest | $0 | Unit tests, CI/CD, framework validation |
+| **HYBRID** | LocalStack (Lambda, S3) + Mocks (Glue, Secrets, SSM) | Docker | Fast | $0 | Integration tests, pre-deployment |
+| **AWS** | Real AWS services | AWS Account | Slow | $ | E2E validation, comprehensive testing |
+
+### Test Coverage by Mode
+
+| Test Type | MOCK | HYBRID | AWS | What's Tested |
+|-----------|------|--------|-----|---------------|
+| **Framework Tests** | ✅ | ✅ | ✅ | Client factory, environment config, Glue metadata mocks |
+| **Glue Metadata** | ✅ | ✅ | ✅ | Database/table operations, schema management |
+| **Athena Queries** | ❌ | ❌ | ✅ | SELECT, WHERE, ORDER BY, LIMIT |
+| **Field Types** | ❌ | ❌ | ✅ | All 26+ Lark field types (TEXT, USER, URL, LINK, etc.) |
+| **Filter Pushdown** | ❌ | ❌ | ✅ | WHERE filters, comparisons, NULL checks |
+| **Complex Queries** | ❌ | ❌ | ✅ | JOIN, aggregations, pagination |
+
+**Why Athena tests need AWS**: Mocking Athena's SQL execution engine is impractical. Comprehensive query tests require real AWS Athena infrastructure.
+
+### Testing Framework
+
+This module uses a **Python-based testing framework** for all integration and end-to-end testing:
+
+| Aspect | Details |
+|--------|---------|
+| **Language** | Python (pytest-style) |
+| **Focus** | Athena queries, Lark integration, Glue crawlers, metadata providers |
+| **Test Modes** | MOCK (in-memory), HYBRID (LocalStack), AWS (real services) |
+| **Infrastructure** | LocalStack Community + WireMock for Lark API |
+| **Run With** | `python comprehensive_test_runner.py` or `./run_comprehensive_tests.sh` |
+| **Test Coverage** | - 4 metadata providers<br>- Glue crawler validation<br>- Comprehensive query regression<br>- Filter pushdown<br>- All field types |
 
 ## Detailed Guides
 
@@ -169,60 +195,82 @@ mvn clean verify -P test-aws
 ```bash
 cd python
 
-# MOCK mode
+# MOCK mode - Framework tests only
 export TEST_ENVIRONMENT=mock
-python -m pytest tests/ -v
+python -m pytest tests/examples/ -v  # Fast: 4 tests in ~0.1s
 
-# HYBRID mode (requires Docker)
+# HYBRID mode - Framework + LocalStack (requires Docker)
 export TEST_ENVIRONMENT=hybrid
-python -m pytest tests/ -v
+python -m pytest tests/examples/ -v  # Fast: 4 tests in ~0.2s
 
-# AWS mode
+# AWS mode - Comprehensive tests (requires AWS credentials + deployed connector)
 export TEST_ENVIRONMENT=aws
-python -m pytest tests/ -v
+
+# Framework tests (quick validation)
+python -m pytest tests/examples/ -v
+
+# Comprehensive tests (all field types, filters, queries)
+python tests/regression/test_comprehensive_queries.py
 ```
+
+**Note**: Comprehensive regression tests in `tests/regression/` require:
+- AWS credentials configured
+- Lark Base test data set up (see [LARK_TEST_DATA_SETUP.md](./LARK_TEST_DATA_SETUP.md))
+- Lambda connector deployed
+- Glue catalog populated
 
 ## Directory Structure
 
 ```
 integration-tests/
-├── pom.xml                                    # Maven configuration
+├── pom.xml                                    # Maven module descriptor (no Java code)
 ├── README.md                                  # This file
-├── src/
-│   ├── main/java/
-│   │   └── com/amazonaws/athena/connectors/lark/testing/
-│   │       ├── config/
-│   │       │   └── TestEnvironment.java       # Test environment enum
-│   │       ├── client/
-│   │       │   └── TestClientFactory.java     # AWS client factory
-│   │       ├── mock/
-│   │       │   ├── MockGlueClient.java        # Mock Glue Data Catalog
-│   │       │   ├── MockSecretsManagerClient.java
-│   │       │   └── MockSSMClient.java
-│   │       ├── container/                     # Testcontainers (future)
-│   │       └── fixtures/                      # Test data fixtures
-│   ├── test/java/
-│   │   └── com/amazonaws/athena/connectors/lark/integration/
-│   │       ├── lambda/                        # Lambda handler tests
-│   │       ├── business/                      # Business logic tests
-│   │       └── e2e/                           # End-to-end tests
-│   └── main/resources/
-│       ├── localstack/
-│       │   ├── docker-compose.yml             # LocalStack + WireMock
-│       │   └── init-scripts.sh                # LocalStack setup
-│       └── mocks/
-│           └── mappings/                      # WireMock Lark API mocks
+├── LARK_TEST_DATA_SETUP.md                    # Test data setup guide
+├── MANUAL_FIELDS_GUIDE.md                     # Manual field creation guide
+├── ZERO_COST_TESTING.md                       # Zero-cost testing strategy
+├── COMPREHENSIVE_TESTING_GUIDE.md             # Comprehensive testing guide
+├── STRUCTURE_GUIDE.md                         # Structure documentation
+├── CLEANUP_SUMMARY.md                         # Cleanup summary
+├── localstack/
+│   ├── docker-compose.yml                     # LocalStack + WireMock
+│   └── init-scripts.sh                        # LocalStack setup
+├── mocks/
+│   ├── __files/                               # WireMock response bodies
+│   └── mappings/                              # WireMock Lark API mocks
 └── python/
     ├── requirements.txt
     ├── config.py                              # Test configuration
+    ├── comprehensive_test_runner.py           # Main test runner
+    ├── run_comprehensive_tests.sh             # Shell wrapper for tests
+    ├── run_all_tests.py                       # Legacy test runner
+    ├── scripts/
+    │   ├── setup/                             # Setup scripts for test data
+    │   │   ├── setup_lark_test_data.py                    # Lark Base Source
+    │   │   ├── setup_lark_drive_source_test_data.py      # Lark Drive Source
+    │   │   ├── setup_experimental_provider_test_data.py  # Experimental
+    │   │   └── setup_base_metadata_handler_test_data.py  # Base Handler
+    │   ├── validation/                        # Validation scripts
+    │   │   └── test_glue_crawler.py           # Glue crawler validation
+    │   └── archive/                           # Archived debugging scripts
     ├── clients/
     │   ├── aws_client.py                      # AWS client factory
     │   ├── mock_glue.py
     │   ├── mock_secrets.py
     │   └── mock_ssm.py
     └── tests/
-        ├── integration/                       # Integration tests
-        └── e2e/                               # End-to-end tests
+        ├── base_test.py                       # Base test utilities
+        ├── crawlers/                          # Glue crawler tests
+        │   ├── test_glue_crawler.py           # Lark Base crawler
+        │   └── test_lark_drive_crawler.py     # Lark Drive crawler
+        ├── providers/                         # Metadata provider tests
+        │   ├── test_lark_base_source.py       # Lark Base provider
+        │   ├── test_lark_drive_source.py      # Lark Drive provider
+        │   └── test_experimental_provider.py  # Experimental provider
+        ├── examples/                          # Example tests
+        │   └── test_glue_operations.py        # Example integration test
+        └── regression/                        # Regression tests
+            ├── test_comprehensive_queries.py  # Comprehensive queries
+            └── ...                            # Other regression tests
 ```
 
 ## Using LocalStack Community Edition
@@ -230,7 +278,7 @@ integration-tests/
 ### Start LocalStack
 
 ```bash
-cd integration-tests/src/main/resources/localstack
+cd integration-tests/localstack
 docker-compose up -d
 ```
 
@@ -250,61 +298,29 @@ curl http://localhost:8080/__admin/health
 ### Stop LocalStack
 
 ```bash
-cd integration-tests/src/main/resources/localstack
+cd integration-tests/localstack
 docker-compose down
 ```
 
 ## Writing Tests
 
-### Java Example
-
-```java
-@Test
-public void testMetadataHandler_withMockedGlue() {
-    // Create client factory
-    TestClientFactory factory = new TestClientFactory(TestEnvironment.MOCK);
-
-    // Pre-populate test data
-    MockGlueClient glue = factory.getMockGlueClient();
-    glue.createDatabase(CreateDatabaseRequest.builder()
-            .databaseInput(DatabaseInput.builder()
-                    .name("test_db")
-                    .build())
-            .build());
-
-    // Test your handler
-    GlueClient glueClient = factory.createGlueClient();
-    Database db = glueClient.getDatabase(GetDatabaseRequest.builder()
-            .name("test_db")
-            .build()).database();
-
-    assertThat(db.name()).isEqualTo("test_db");
-}
-```
-
 ### Python Example
 
 ```python
-from clients import AWSClientFactory
+# File: tests/examples/test_glue_operations.py
+from tests.base_test import BaseIntegrationTest
 
-def test_glue_operations():
-    # Create client factory
-    factory = AWSClientFactory()
+class TestGlueOperations(BaseIntegrationTest):
+    def test_glue_database_operations(self):
+        # Get Glue client (auto-mocked in MOCK/HYBRID mode)
+        glue = self.get_glue_client()
 
-    # Get Glue client (auto-mocked in MOCK/HYBRID mode)
-    glue = factory.create_glue_client()
+        # Pre-populate test data (automatically handled by base class)
+        # Test operations
+        response = glue.get_database(Name="test_database")
+        assert response["Database"]["Name"] == "test_database"
 
-    # Pre-populate test data
-    if factory.environment != TestEnvironment.AWS:
-        mock_glue = factory.get_mock_glue_client()
-        mock_glue.create_database(DatabaseInput={"Name": "test_db"})
-
-    # Test operations
-    response = glue.get_database(Name="test_db")
-    assert response["Database"]["Name"] == "test_db"
-
-    # Cleanup
-    factory.cleanup()
+# Run with: python tests/examples/test_glue_operations.py -v
 ```
 
 ## Test Modes in Detail

@@ -98,7 +98,6 @@ LIMIT 100;
 ### Visual Documentation
 
 - **[DIAGRAMS.md](./DIAGRAMS.md)** - All system diagrams in Mermaid format (GitHub-rendered)
-- **[DIAGRAMS_IMPORT_GUIDE.md](./DIAGRAMS_IMPORT_GUIDE.md)** - How to import diagrams to Diagrams.io
 
 ## Features
 
@@ -386,7 +385,7 @@ ORDER BY created_date DESC LIMIT 100;
 2. Is Lark source enabled? Check `ACTIVATE_LARK_BASE_SOURCE` environment variable
 3. Are Lark credentials correct? Check Secrets Manager
 
-**Reference**: [SEQUENCE_DIAGRAMS.md#Schema-Retrieval-Flow](./SEQUENCE_DIAGRAMS.md#schema-retrieval-flow)
+**Reference**: [DIAGRAMS.md#Metadata-Discovery-Strategy-Pattern](./DIAGRAMS.md#metadata-discovery-strategy-pattern)
 
 ### Issue: "No mapping found for column"
 
@@ -405,7 +404,7 @@ ORDER BY created_date DESC LIMIT 100;
 3. Check if field types support pushdown
 4. Test without WHERE clause
 
-**Reference**: [SEQUENCE_DIAGRAMS.md#Filter-Pushdown-Flow](./SEQUENCE_DIAGRAMS.md#filter-pushdown-flow)
+**Reference**: [DIAGRAMS.md#Filter-Pushdown-Translation](./DIAGRAMS.md#filter-pushdown-translation)
 
 ### Issue: Query timeout
 
@@ -424,7 +423,7 @@ ORDER BY created_date DESC LIMIT 100;
 2. Null handling for non-nullable fields
 3. RegistererExtractor implementation for the field type
 
-**Reference**: [CLASS_DIAGRAMS.md#RegistererExtractor](./CLASS_DIAGRAMS.md#translator-components)
+**Reference**: [DIAGRAMS.md#Class-Hierarchy](./DIAGRAMS.md#class-hierarchy)
 
 ## Common Development Scenarios
 
@@ -447,8 +446,8 @@ ORDER BY created_date DESC LIMIT 100;
 - `BaseMetadataHandler.java`: Update capabilities (if needed)
 
 **Reference**:
-- [SEQUENCE_DIAGRAMS.md#Filter-Pushdown-Flow](./SEQUENCE_DIAGRAMS.md#filter-pushdown-flow)
-- [CLASS_DIAGRAMS.md#Translator-Components](./CLASS_DIAGRAMS.md#translator-components)
+- [DIAGRAMS.md#Filter-Pushdown-Translation](./DIAGRAMS.md#filter-pushdown-translation)
+- [DIAGRAMS.md#Class-Hierarchy](./DIAGRAMS.md#class-hierarchy)
 
 ### 3. Implementing New Metadata Discovery Method
 
@@ -457,8 +456,8 @@ ORDER BY created_date DESC LIMIT 100;
 - Add to `BaseMetadataHandler` initialization
 
 **Reference**:
-- [CLASS_DIAGRAMS.md#Metadata-Provider-Pattern](./CLASS_DIAGRAMS.md#metadata-provider-pattern)
-- [SEQUENCE_DIAGRAMS.md#Schema-Retrieval-Flow](./SEQUENCE_DIAGRAMS.md#schema-retrieval-flow)
+- [DIAGRAMS.md#Metadata-Provider-Pattern](./DIAGRAMS.md#metadata-provider-pattern)
+- [DIAGRAMS.md#Metadata-Discovery-Strategy-Pattern](./DIAGRAMS.md#metadata-discovery-strategy-pattern)
 
 ### 4. Adding New Crawler Source
 
@@ -467,8 +466,7 @@ ORDER BY created_date DESC LIMIT 100;
 - Update `MainLarkBaseCrawlerHandler` routing
 
 **Reference**:
-- [CLASS_DIAGRAMS.md#Crawler-Components](./CLASS_DIAGRAMS.md#crawler-components)
-- [SEQUENCE_DIAGRAMS.md#Crawler-Execution-Flow](./SEQUENCE_DIAGRAMS.md#crawler-execution-flow)
+- [DIAGRAMS.md#Component-Interaction](./DIAGRAMS.md#component-interaction)
 
 ### 5. Optimizing Query Performance
 
@@ -490,8 +488,8 @@ Contributions are welcome! This connector is designed for upstream contribution 
 
 ### Before Contributing
 
-1. Read [CLASS_DIAGRAMS.md](./CLASS_DIAGRAMS.md) to understand structure
-2. Review [SEQUENCE_DIAGRAMS.md](./SEQUENCE_DIAGRAMS.md) for execution flows
+1. Read [DIAGRAMS.md#Class-Hierarchy](./DIAGRAMS.md#class-hierarchy) to understand structure
+2. Review [DIAGRAMS.md#Query-Execution-Overview](./DIAGRAMS.md#query-execution-overview) for execution flows
 3. Follow existing patterns (Strategy, Provider, Resolver)
 4. Write tests (maintain 90%+ coverage)
 5. Update documentation

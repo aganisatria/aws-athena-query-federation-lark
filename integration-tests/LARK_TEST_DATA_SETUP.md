@@ -156,13 +156,11 @@ LARK_BASE_TABLE_NAME=data_type_test_table
 ### Step 2: Create Lark Base Test Data
 
 ```bash
-# Make scripts executable
-chmod +x setup-lark-test-data.py
-chmod +x test-glue-crawler.py
-chmod +x regression-test-plan.sh
+# Navigate to python directory
+cd integration-tests/python
 
 # Run setup
-./setup-lark-test-data.py --verbose
+python scripts/setup/setup_lark_test_data.py --verbose
 ```
 
 **Output**:
@@ -223,7 +221,7 @@ export LARK_BASE_TABLE_NAME="data_type_test_table"
 ### Step 4: Run Glue Crawler Test
 
 ```bash
-./test-glue-crawler.py --verbose
+python scripts/validation/test_glue_crawler.py --verbose
 ```
 
 **Output**:
@@ -268,52 +266,101 @@ export TEST_DATABASE="athena_lark_base_regression_test"
 export TEST_TABLE="data_type_test_table"
 export OUTPUT_LOCATION="s3://your-athena-results-bucket/"
 
-./regression-test-plan.sh
+./run_comprehensive_tests.sh
 ```
 
 ---
 
 ## Setup Scripts
 
-### 1. setup-lark-test-data.py
+### 1. Metadata Provider Setup Scripts
 
-**Purpose**: Creates Lark Base with test data
+#### setup-lark-test-data.py (Lark Base Source - Original)
+**Purpose**: Creates Lark Base test data for Lark Base Source and Glue Crawler testing
 
 **Features**:
 - Creates a new Lark Base (bitable) file
 - Creates lookup target table for LOOKUP field testing
 - Creates main test table with all 26 field types
 - Populates 10 test records with edge cases
+- Creates metadata base with mapping tables
 - Returns environment variables for next steps
 
 **Usage**:
 ```bash
-# Basic usage
-./setup-lark-test-data.py
-
-# Verbose output
-./setup-lark-test-data.py --verbose
-
-# Cleanup (manual - opens browser)
-./setup-lark-test-data.py --cleanup
+cd integration-tests/python/scripts
+python scripts/setup/setup_lark_test_data.py [--verbose] [--cleanup]
 ```
 
 **What it Creates**:
+- **Base Name**: `athena_lark_base_regression_test`
+- **Tables**: `data_type_test_table`, `lookup_target_table`
 
-**Base Name**: `athena_lark_base_regression_test`
+#### setup_lark_drive_source_test_data.py (Lark Drive Source)
+**Purpose**: Sets up folder structure for Lark Drive Source metadata provider
 
-**Tables**:
-1. `data_type_test_table` (main test table)
-   - 26 fields covering all Lark types
-   - 10 test records with edge cases
+**Features**:
+- Creates folder hierarchy in Lark Drive (folders = databases)
+- Creates Lark Base files within folders (bases = tables)
+- Sets up folder-to-database mapping for runtime discovery
+- Creates comprehensive test data with all field types
+- Configures environment variables for Drive source testing
 
-2. `lookup_target_table` (for LOOKUP testing)
-   - 2 fields: target_text_field, target_number_field
-   - 2 sample records
+**Usage**:
+```bash
+cd integration-tests/python/scripts
+export LARK_DRIVE_FOLDER_TOKEN="your_parent_folder_token"
+python scripts/setup/setup_lark_drive_source_test_data.py [--verbose]
+```
 
-### 2. test-glue-crawler.py
+**What it Creates**:
+- **Database Folders**: `lark_drive_source_db`, `catalog_db`
+- **Tables**: `products`, `inventory` with comprehensive field coverage
 
-**Purpose**: Tests Glue Crawler and validates Glue catalog metadata
+#### setup_experimental_provider_test_data.py (Experimental Provider)
+**Purpose**: Sets up test data for Experimental Metadata Provider using Athena catalog
+
+**Features**:
+- Creates Lark Base test data (reuses existing setup or creates new)
+- Creates Athena catalog table for metadata mappings
+- Populates metadata table with database/table mappings
+- Sets up multiple test scenarios for runtime discovery
+- **Reuses existing Glue database** (doesn't create new one)
+
+**Usage**:
+```bash
+cd integration-tests/python/scripts
+python scripts/setup/setup_experimental_provider_test_data.py [--verbose] [--skip-lark-setup]
+```
+
+**What it Creates**:
+- **Metadata Table**: `lark_metadata_mappings` in existing database
+- **Test Mappings**: Multiple database/table combinations for testing
+
+#### setup_base_metadata_handler_test_data.py (Base Metadata Handler)
+**Purpose**: Sets up comprehensive test data for Base Metadata Handler testing
+
+**Features**:
+- Creates multiple Glue databases for different test scenarios
+- Creates Lark Base with edge case and performance test data
+- Sets up Glue table definitions manually
+- Tests various database/table combinations
+- Optional crawler invocation to populate catalog
+
+**Usage**:
+```bash
+cd integration-tests/python/scripts
+python scripts/setup/setup_base_metadata_handler_test_data.py [--verbose] [--skip-lark-setup] [--invoke-crawlers]
+```
+
+**What it Creates**:
+- **Glue Databases**: `base_handler_regression_db`, `base_handler_edge_cases_db`, `base_handler_performance_db`
+- **Tables**: Multiple test tables with different scenarios
+
+### 2. Test Scripts
+
+#### test-glue-crawler.py (Lark Base Crawler Test)
+**Purpose**: Tests Glue Crawler for Lark Base source (LARK_BASE handler)
 
 **Features**:
 - Invokes Glue Crawler Lambda function
@@ -321,32 +368,219 @@ export OUTPUT_LOCATION="s3://your-athena-results-bucket/"
 - Validates table schema
 - Checks field type mappings
 - Validates reserved system fields
-- Checks table parameters
 
 **Usage**:
 ```bash
-# Run full test (invoke crawler + validate)
-./test-glue-crawler.py
-
-# Validate existing metadata only
-./test-glue-crawler.py --validate-only
-
-# Verbose output
-./test-glue-crawler.py --verbose
+cd integration-tests/python/tests/regression
+python tests/crawlers/test_glue_crawler.py [--validate-only] [--verbose]
 ```
 
-**Test Coverage**:
-- ✅ Database existence
-- ✅ Table existence
-- ✅ Field type mappings (26 fields)
-- ✅ Reserved fields ($reserved_record_id, $reserved_table_id, $reserved_base_id)
-- ✅ Table parameters (lark_base_app_token, lark_table_id, lark_field_type_mapping)
+#### test_lark_drive_crawler.py (Lark Drive Crawler Test)
+**Purpose**: Tests Glue Crawler for Lark Drive source (LARK_DRIVE handler)
 
-### 3. regression-test-plan.sh
+**Features**:
+- Tests LARK_DRIVE handler type
+- Validates Drive-specific metadata
+- Checks folder token parameters
+- Validates source type identification
+- Comprehensive field type validation
 
-**Purpose**: Runs comprehensive Athena query tests
+**Usage**:
+```bash
+cd integration-tests/python/tests/regression
+python tests/crawlers/test_lark_drive_crawler.py [--validate-only] [--verbose]
+```
 
-(See [REGRESSION_TESTING_GUIDE.md](./REGRESSION_TESTING_GUIDE.md) for details)
+#### test_lark_base_source.py (Lark Base Source Provider Test)
+**Purpose**: Tests Lark Base Source metadata provider
+
+**Features**:
+- Tests runtime metadata discovery from Lark Base
+- Validates schema caching
+- Tests database/table name mapping
+- Works with real Lark Base data
+
+**Usage**:
+```bash
+cd integration-tests/python/tests/regression
+export default_does_activate_lark_base_source=true
+python tests/providers/test_lark_base_source.py
+```
+
+#### test_lark_drive_source.py (Lark Drive Source Provider Test)
+**Purpose**: Tests Lark Drive Source metadata provider
+
+**Features**:
+- Tests runtime metadata discovery from Lark Drive folders
+- Validates folder-to-database mapping
+- Tests dynamic schema discovery
+- Works with folder structure
+
+**Usage**:
+```bash
+cd integration-tests/python/tests/regression
+export default_does_activate_lark_drive_source=true
+python tests/providers/test_lark_drive_source.py
+```
+
+### 3. Comprehensive Test Runners
+
+#### comprehensive_test_runner.py
+**Purpose**: Main test runner supporting all metadata providers
+
+**Features**:
+- Supports MOCK, HYBRID, AWS test environments
+- Can run specific provider tests or all
+- Generates comprehensive test reports
+- Handles environment variable setup
+- Parallel test execution support
+
+**Usage**:
+```bash
+cd integration-tests/python
+python comprehensive_test_runner.py [--provider all|lark_base|lark_drive|experimental|base_handler]
+python comprehensive_test_runner.py [--environment mock|hybrid|aws]
+```
+
+---
+
+## Testing Workflows
+
+### Complete End-to-End Workflow for All Providers
+
+```bash
+# 1. Setup test data for your specific provider
+cd integration-tests/python/scripts
+
+# For Lark Base Source
+python scripts/setup/setup_lark_test_data.py --verbose
+
+# For Lark Drive Source
+export LARK_DRIVE_FOLDER_TOKEN="your_folder_token"
+python scripts/setup/setup_lark_drive_source_test_data.py --verbose
+
+# For Experimental Provider
+python scripts/setup/setup_experimental_provider_test_data.py --verbose
+
+# For Base Metadata Handler
+python scripts/setup/setup_base_metadata_handler_test_data.py --verbose
+
+# 2. Copy environment variables from script output
+# (Each script prints the required environment variables)
+
+# 3. Run provider-specific tests
+cd ../tests/regression
+
+# Test Glue Crawlers
+python tests/crawlers/test_glue_crawler.py --verbose          # Lark Base crawler
+python tests/crawlers/test_lark_drive_crawler.py --verbose    # Lark Drive crawler
+
+# Test Metadata Providers
+python tests/providers/test_lark_base_source.py                # Lark Base provider
+python tests/providers/test_lark_drive_source.py               # Lark Drive provider
+
+# 4. Run comprehensive tests
+cd ../..
+python comprehensive_test_runner.py --provider all
+```
+
+### Provider-Specific Workflows
+
+#### Lark Base Source (Glue Crawler + Metadata Provider)
+```bash
+# Setup
+python scripts/setup/setup_lark_test_data.py --verbose
+
+# Test crawler
+python tests/crawlers/test_glue_crawler.py --verbose
+
+# Test metadata provider
+export default_does_activate_lark_base_source=true
+python tests/providers/test_lark_base_source.py
+```
+
+#### Lark Drive Source (Both Crawler and Metadata Provider)
+```bash
+# Setup
+export LARK_DRIVE_FOLDER_TOKEN="your_folder_token"
+python scripts/setup/setup_lark_drive_source_test_data.py --verbose
+
+# Test crawler (LARK_DRIVE handler)
+python tests/crawlers/test_lark_drive_crawler.py --verbose
+
+# Test metadata provider
+export default_does_activate_lark_drive_source=true
+python tests/providers/test_lark_drive_source.py
+```
+
+#### Experimental Provider (Athena Catalog)
+```bash
+# Setup
+python scripts/setup/setup_experimental_provider_test_data.py --verbose
+
+# Test with comprehensive runner
+python comprehensive_test_runner.py --provider experimental
+```
+
+#### Base Metadata Handler (Default Glue Catalog)
+```bash
+# Setup
+python scripts/setup/setup_base_metadata_handler_test_data.py --invoke-crawlers --verbose
+
+# Test with comprehensive runner
+python comprehensive_test_runner.py --provider base_handler
+```
+
+### Environment Variables Required
+
+**Common Variables:**
+```bash
+LARK_APP_ID=cli_xxxxxxxxx
+LARK_APP_SECRET=xxxxxxxxxxxxxx
+AWS_REGION=us-east-1
+```
+
+**Provider-Specific Variables:**
+```bash
+# Lark Base Source
+LARK_BASE_APP_TOKEN=bascnxxxxxxxxxxxx
+LARK_BASE_TABLE_ID=tblxxxxxxxxxxxx
+
+# Lark Drive Source
+LARK_DRIVE_FOLDER_TOKEN=folder_token
+default_does_activate_lark_drive_source=true
+
+# Experimental Provider
+EXPERIMENTAL_GLUE_DATABASE=athena_lark_base_regression_test
+EXPERIMENTAL_METADATA_TABLE=lark_metadata_mappings
+EXPERIMENTAL_BASE_TOKEN=bascnxxxxxxxxxxxx
+
+# Base Metadata Handler
+BASE_HANDLER_GLUE_DATABASE_1=base_handler_regression_db
+BASE_HANDLER_GLUE_TABLE_1=regression_test_table
+```
+
+### Workflow for Code Changes
+
+```
+1. Make Code Changes to Connector
+   ↓
+2. Run Unit Tests: make test
+   ↓
+3. If Tests Pass → Deploy to AWS
+   ↓
+4. Ask Permission from User
+   ↓
+5. Re-run Relevant Tests:
+   - For Lark Base: ./test_glue_crawler.py && python tests/providers/test_lark_base_source.py
+   - For Lark Drive: python tests/crawlers/test_lark_drive_crawler.py && python tests/providers/test_lark_drive_source.py
+   - For Experimental: python comprehensive_test_runner.py --provider experimental
+   - For Base Handler: python comprehensive_test_runner.py --provider base_handler
+   ↓
+6. Validate All Tests Pass
+   ↓
+7. Report Findings
+```
 
 ---
 
@@ -356,20 +590,20 @@ export OUTPUT_LOCATION="s3://your-athena-results-bucket/"
 
 ```bash
 # 1. Setup Lark Base test data
-./setup-lark-test-data.py --verbose
+python scripts/setup/setup_lark_test_data.py --verbose
 
 # 2. Copy environment variables from output
 export LARK_BASE_APP_TOKEN="..."
 export LARK_BASE_TABLE_ID="..."
 
 # 3. Test Glue crawler
-./test-glue-crawler.py --verbose
+python scripts/validation/test_glue_crawler.py --verbose
 
 # 4. Run Athena regression tests
 export TEST_DATABASE="athena_lark_base_regression_test"
 export TEST_TABLE="data_type_test_table"
 export OUTPUT_LOCATION="s3://your-bucket/"
-./regression-test-plan.sh
+./run_comprehensive_tests.sh
 ```
 
 ### Workflow for Code Changes
@@ -386,10 +620,10 @@ Following the documented testing workflow:
 4. Ask Permission from User
    ↓
 5. Re-run Glue Crawler Test
-   ./test-glue-crawler.py
+   python scripts/validation/test_glue_crawler.py
    ↓
 6. Run Athena Regression Tests
-   ./regression-test-plan.sh
+   ./run_comprehensive_tests.sh
    ↓
 7. Validate All Tests Pass
    ↓
@@ -528,7 +762,7 @@ aws glue get-tables --database-name athena_lark_base_regression_test
 aws logs tail /aws/lambda/lark-base-glue-crawler --follow
 
 # Re-run crawler test
-./test-glue-crawler.py --verbose
+python scripts/validation/test_glue_crawler.py --verbose
 ```
 
 ---
@@ -582,19 +816,19 @@ run_test_query \
 
 ```bash
 # 1. Create new test data
-./setup-lark-test-data.py --verbose
+python scripts/setup/setup_lark_test_data.py --verbose
 
 # 2. Test Glue crawler (should detect new field)
-./test-glue-crawler.py --verbose
+python scripts/validation/test_glue_crawler.py --verbose
 
 # 3. Run Athena tests (should include new field test)
-./regression-test-plan.sh
+./run_comprehensive_tests.sh
 ```
 
 ### Step 5: Document
 
 Update documentation:
-- `REGRESSION_TESTING_GUIDE.md` - Add to type mapping table
+- Update test files in tests/regression/ directory
 - `LARK_TEST_DATA_SETUP.md` - This file, update field count
 - Code comments in connector classes
 
@@ -630,16 +864,16 @@ ATHENA_WORKGROUP=         # Default: primary
 
 ```bash
 # Setup test data in Lark Base
-./setup-lark-test-data.py [--verbose] [--cleanup]
+python scripts/setup/setup_lark_test_data.py [--verbose] [--cleanup]
 
 # Test Glue crawler
-./test-glue-crawler.py [--validate-only] [--verbose]
+python scripts/validation/test_glue_crawler.py [--validate-only] [--verbose]
 
-# Run Athena regression tests
-./regression-test-plan.sh [--setup]
+# Run comprehensive tests
+./run_comprehensive_tests.sh [--env mock|hybrid|aws] [--providers all] [--verbose]
 
-# Show regression test setup instructions
-./regression-test-plan.sh --setup
+# Or use Python runner directly
+python comprehensive_test_runner.py --providers all --verbose
 ```
 
 ### API References
@@ -654,17 +888,26 @@ ATHENA_WORKGROUP=         # Default: primary
 ## Files Structure
 
 ```
-.
-├── setup-lark-test-data.py          # Creates Lark Base test data
-├── test-glue-crawler.py              # Tests Glue crawler Lambda
-├── regression-test-plan.sh           # Runs Athena regression tests
-├── requirements.txt                  # Python dependencies
-├── .env                              # Environment variables (gitignored)
-├── LARK_TEST_DATA_SETUP.md          # This file
-├── REGRESSION_TESTING_GUIDE.md       # Athena regression testing guide
-├── athena-lark-base/                 # Connector source code
-├── glue-lark-base-crawler/          # Glue crawler Lambda source
-└── Makefile                          # Build commands
+integration-tests/python/
+├── scripts/
+│   ├── setup/
+│   │   ├── setup_lark_test_data.py              # Creates Lark Base test data
+│   │   ├── setup_lark_drive_source_test_data.py # Creates Lark Drive test data
+│   │   ├── setup_experimental_provider_test_data.py
+│   │   └── setup_base_metadata_handler_test_data.py
+│   ├── validation/
+│   │   └── test_glue_crawler.py                 # Validates Glue crawler
+│   └── archive/                                 # Archived debugging scripts
+├── tests/
+│   ├── crawlers/                                # Glue crawler tests
+│   ├── providers/                               # Metadata provider tests
+│   ├── examples/                                # Example tests
+│   └── regression/                              # Regression tests
+├── comprehensive_test_runner.py                 # Main test runner
+├── run_comprehensive_tests.sh                   # Shell test wrapper
+├── requirements.txt                             # Python dependencies
+├── config.py                                    # Test configuration
+└── .env                                         # Environment variables (gitignored)
 ```
 
 ---

@@ -68,10 +68,10 @@ public final class LarkBaseTypeUtils
             case CHECKBOX -> Types.MinorType.BIT;
 
             // Glue: array<...> -> Arrow: LIST
-            case MULTI_SELECT, USER, GROUP_CHAT, ATTACHMENT, SINGLE_LINK, DUPLEX_LINK, LOOKUP -> Types.MinorType.LIST;
+            case MULTI_SELECT, USER, GROUP_CHAT, ATTACHMENT, CREATED_USER, MODIFIED_USER -> Types.MinorType.LIST;
 
             // Glue: struct<...> -> Arrow: STRUCT
-            case URL, LOCATION, CREATED_USER, MODIFIED_USER -> Types.MinorType.STRUCT;
+            case URL, LOCATION, SINGLE_LINK, DUPLEX_LINK -> Types.MinorType.STRUCT;
 
             // Glue: depends on formulaType -> Arrow: depends on resolved type
             case FORMULA -> {
@@ -100,9 +100,10 @@ public final class LarkBaseTypeUtils
             // Glue: array<string> -> Arrow Child: VARCHAR
             case MULTI_SELECT -> Field.nullable("item", ArrowType.Utf8.INSTANCE);
 
-            // Glue: array<struct<email:string,en_name:string,id:string,name:string>>
-            // Arrow Child: Struct<email:VARCHAR, en_name:VARCHAR, id:VARCHAR, name:VARCHAR>
+            // Glue: array<struct<avatar_url:string,email:string,en_name:string,id:string,name:string>>
+            // Arrow Child: Struct<avatar_url:VARCHAR, email:VARCHAR, en_name:VARCHAR, id:VARCHAR, name:VARCHAR>
             case USER -> new Field("user_info", FieldType.nullable(ArrowType.Struct.INSTANCE), List.of(
+                    Field.nullable("avatar_url", ArrowType.Utf8.INSTANCE),
                     Field.nullable("email", ArrowType.Utf8.INSTANCE),
                     Field.nullable("en_name", ArrowType.Utf8.INSTANCE),
                     Field.nullable("id", ArrowType.Utf8.INSTANCE),
@@ -128,32 +129,17 @@ public final class LarkBaseTypeUtils
                     Field.nullable("url", ArrowType.Utf8.INSTANCE)
             ));
 
-            // Glue: array<struct<record_ids:array<string>,table_id:string,text:string,text_arr:array<string>,type:string>>
-            // Arrow Child: Struct<record_ids:LIST, table_id:VARCHAR, text:VARCHAR, text_arr:LIST, type:VARCHAR>
-            case SINGLE_LINK, DUPLEX_LINK ->
-                    new Field("linked_record", FieldType.nullable(ArrowType.Struct.INSTANCE), List.of(
-                            new Field("record_ids",
-                                    new FieldType(true, ArrowType.List.INSTANCE, null),
-                                    Collections.singletonList(Field.nullable("item", ArrowType.Utf8.INSTANCE))),
+            // Glue: array<struct<avatar_url:string,email:string,en_name:string,id:string,name:string>>
+            // Arrow Child: Struct<avatar_url:VARCHAR, email:VARCHAR, en_name:VARCHAR, id:VARCHAR, name:VARCHAR>
+            case CREATED_USER, MODIFIED_USER -> new Field("user_info", FieldType.nullable(ArrowType.Struct.INSTANCE), List.of(
+                    Field.nullable("avatar_url", ArrowType.Utf8.INSTANCE),
+                    Field.nullable("email", ArrowType.Utf8.INSTANCE),
+                    Field.nullable("en_name", ArrowType.Utf8.INSTANCE),
+                    Field.nullable("id", ArrowType.Utf8.INSTANCE),
+                    Field.nullable("name", ArrowType.Utf8.INSTANCE)
+            ));
 
-                            Field.nullable("table_id", ArrowType.Utf8.INSTANCE),
-                            Field.nullable("text", ArrowType.Utf8.INSTANCE),
-
-                            new Field("text_arr",
-                                    new FieldType(true, ArrowType.List.INSTANCE, null),
-                                    Collections.singletonList(Field.nullable("item", ArrowType.Utf8.INSTANCE))),
-
-                            Field.nullable("type", ArrowType.Utf8.INSTANCE)
-                    ));
-
-            // Glue: depends on lookupType -> Arrow: depends on resolved type
-            case LOOKUP -> {
-                NestedUIType newNestedUIType = new NestedUIType(larkField.nestedUIType().childType(), UITypeEnum.UNKNOWN);
-                AthenaFieldLarkBaseMapping newLarkBaseMapping = new AthenaFieldLarkBaseMapping(larkField.athenaName(), larkField.larkBaseFieldName(), newNestedUIType);
-                Field completeChildFieldDefinition = larkFieldToArrowField(newLarkBaseMapping);
-                yield new Field("item", completeChildFieldDefinition.getFieldType(), completeChildFieldDefinition.getChildren());
-            }
-
+  
             default -> Field.nullable("item", ArrowType.Utf8.INSTANCE);
         };
     }
@@ -170,11 +156,12 @@ public final class LarkBaseTypeUtils
         UITypeEnum uiType = larkField.nestedUIType().uiType();
 
         return switch (uiType) {
-            // Glue: struct<link:string,text:string>
-            // Arrow Children: link:VARCHAR, text:VARCHAR
+            // Glue: struct<link:string,text:string,type:string>
+            // Arrow Children: link:VARCHAR, text:VARCHAR, type:VARCHAR
             case URL -> List.of(
                     Field.nullable("link", ArrowType.Utf8.INSTANCE),
-                    Field.nullable("text", ArrowType.Utf8.INSTANCE)
+                    Field.nullable("text", ArrowType.Utf8.INSTANCE),
+                    Field.nullable("type", ArrowType.Utf8.INSTANCE)
             );
 
             // Glue: struct<address:string,adname:string,cityname:string,full_address:string,location:string,name:string,pname:string>
@@ -189,13 +176,13 @@ public final class LarkBaseTypeUtils
                     Field.nullable("pname", ArrowType.Utf8.INSTANCE)
             );
 
-            // Glue: struct<id:string,name:string,en_name:string,email:string>
-            // Arrow Children: Corresponding VARCHAR fields
-            case CREATED_USER, MODIFIED_USER -> List.of(
-                    Field.nullable("id", ArrowType.Utf8.INSTANCE),
-                    Field.nullable("name", ArrowType.Utf8.INSTANCE),
-                    Field.nullable("en_name", ArrowType.Utf8.INSTANCE),
-                    Field.nullable("email", ArrowType.Utf8.INSTANCE)
+            // Glue: struct<link_record_ids:array<string>>
+            // Arrow Children: link_record_ids:LIST
+            // Search API format (returns as Map, not Array): { "link_record_ids": ["rec_xxx", "rec_yyy"] }
+            case SINGLE_LINK, DUPLEX_LINK -> List.of(
+                    new Field("link_record_ids",
+                            new FieldType(true, ArrowType.List.INSTANCE, null),
+                            Collections.singletonList(Field.nullable("item", ArrowType.Utf8.INSTANCE)))
             );
 
             default -> Collections.emptyList();

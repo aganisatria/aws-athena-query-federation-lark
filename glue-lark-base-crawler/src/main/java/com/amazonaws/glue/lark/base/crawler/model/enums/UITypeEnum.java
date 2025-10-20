@@ -84,11 +84,12 @@ public enum UITypeEnum
             case RATING -> "tinyint";
             // ["ab", "12", "cd", "@"] -> array of string
             case MULTI_SELECT -> "array<string>";
-            // [{ "email": "test@company.com", ->
+            // [{ "avatar_url": "https://...", -> array of struct
+            //    "email": "test@company.com",
             //    "en_name": "Agani Satria",
             //    "id": "ou_12345",
             //    "name": "Agani Satria" }],
-            case USER -> "array<struct<email:string,en_name:string,id:string,name:string>>";
+            case USER -> "array<struct<avatar_url:string,email:string,en_name:string,id:string,name:string>>";
             // [{ "avatar_url": "https://example.com/avatar.webp", -> array of struct
             //    "id": "oc_12345",
             //    "name": "Agani Satria" }]
@@ -103,17 +104,16 @@ public enum UITypeEnum
                     "array<struct<file_token:string,name:string,size:int,tmp_url:string,type:string,url:string>>";
             case FORMULA -> customType != null ? customType : "string";
             case LOOKUP -> customType != null ? "array<" + customType + ">" : "array<string>";
-            // or showed as table name
-            // [{ "table_id": "test", -> array of struct
-            //    "text_arr": [],
-            //    "type": "text" }]
+            // Search API format for LINK fields (returns as Map, not Array)
+            // { "link_record_ids": ["rec_xxx", "rec_yyy"] }
             case SINGLE_LINK, DUPLEX_LINK ->
-                    "array<struct<record_ids:array<string>,table_id:string,text:string,text_arr:array<string>,type:string>>";
+                    "struct<link_record_ids:array<string>>";
             case DATE_TIME, CREATED_TIME, MODIFIED_TIME -> "timestamp";
             case CHECKBOX -> "boolean";
             // {"link": "https://aganisatria.vercel.app",
-            //  "text": "test"}
-            case URL -> "struct<link:string,text:string>";
+            //  "text": "test",
+            //  "type": "url"}
+            case URL -> "struct<link:string,text:string,type:string>";
             // { "address": "dummy",
             //   "adname": "",
             //   "cityname": "",
@@ -123,8 +123,13 @@ public enum UITypeEnum
             //   "pname": "" }
             case LOCATION ->
                     "struct<address:string,adname:string,cityname:string,full_address:string,location:string,name:string,pname:string>";
-            // TODO: We don't know specific type for CreatedUser and ModifiedUser, but we assume its like person but only have 1 element
-            case CREATED_USER, MODIFIED_USER -> "struct<id:string,name:string,en_name:string,email:string>";
+            // CREATED_USER and MODIFIED_USER return as array with single element
+            // [{ "avatar_url": "https://...",
+            //    "email": "test@example.com",
+            //    "en_name": "John Doe",
+            //    "id": "ou_12345",
+            //    "name": "John Doe" }]
+            case CREATED_USER, MODIFIED_USER -> "array<struct<avatar_url:string,email:string,en_name:string,id:string,name:string>>";
             default -> "string";
         };
     }

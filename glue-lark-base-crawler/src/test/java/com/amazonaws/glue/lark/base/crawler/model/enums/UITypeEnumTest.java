@@ -91,7 +91,7 @@ public class UITypeEnumTest {
 
     @Test
     public void getGlueCatalogType_user_shouldReturnUserStruct() {
-        String expected = "array<struct<email:string,en_name:string,id:string,name:string>>";
+        String expected = "array<struct<avatar_url:string,email:string,en_name:string,id:string,name:string>>";
         assertEquals(expected, UITypeEnum.USER.getGlueCatalogType(null));
     }
 
@@ -129,7 +129,7 @@ public class UITypeEnumTest {
 
     @Test
     public void getGlueCatalogType_linkTypes_shouldReturnLinkStruct() {
-        String expected = "array<struct<record_ids:array<string>,table_id:string,text:string,text_arr:array<string>,type:string>>";
+        String expected = "struct<link_record_ids:array<string>>";
         assertEquals(expected, UITypeEnum.SINGLE_LINK.getGlueCatalogType(null));
         assertEquals(expected, UITypeEnum.DUPLEX_LINK.getGlueCatalogType(null));
     }
@@ -148,7 +148,7 @@ public class UITypeEnumTest {
 
     @Test
     public void getGlueCatalogType_url_shouldReturnUrlStruct() {
-        assertEquals("struct<link:string,text:string>", UITypeEnum.URL.getGlueCatalogType(null));
+        assertEquals("struct<link:string,text:string,type:string>", UITypeEnum.URL.getGlueCatalogType(null));
     }
 
     @Test
@@ -159,7 +159,7 @@ public class UITypeEnumTest {
 
     @Test
     public void getGlueCatalogType_createdModifiedUser_shouldReturnUserStructSingle() {
-        String expected = "struct<id:string,name:string,en_name:string,email:string>";
+        String expected = "array<struct<avatar_url:string,email:string,en_name:string,id:string,name:string>>";
         assertEquals(expected, UITypeEnum.CREATED_USER.getGlueCatalogType(null));
         assertEquals(expected, UITypeEnum.MODIFIED_USER.getGlueCatalogType(null));
     }

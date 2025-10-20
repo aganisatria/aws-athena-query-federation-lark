@@ -91,10 +91,46 @@ def get_lark_api_base_url() -> str:
         return os.getenv("WIREMOCK_URL", "http://localhost:8080")
 
 
+def get_metadata_provider() -> str:
+    """
+    Get metadata provider from METADATA_PROVIDER environment variable.
+
+    Returns:
+        Metadata provider string (defaults to "glue")
+    """
+    return os.getenv("METADATA_PROVIDER", "glue").lower()
+
+
+def get_sam_template_path() -> str:
+    """
+    Get SAM template path based on metadata provider.
+
+    Returns:
+        Path to the SAM template file
+    """
+    provider = get_metadata_provider()
+    if provider == "source":
+        return "../../../athena-lark-base/athena-larkbase-source-provider.yaml"
+    elif provider == "experimental":
+        return "../../../athena-lark-base/athena-larkbase-experimental-provider.yaml"
+    else:  # glue
+        return "../../../athena-lark-base/athena-larkbase-package.yaml"
+
+
+def get_athena_catalog_name(provider: str) -> str:
+    """
+    Get Athena catalog name based on metadata provider.
+
+    Returns:
+        Unique Athena catalog name
+    """
+    base_catalog = os.getenv("ATHENA_CATALOG", "athena-lark-base-test")
+    return f"{base_catalog}-{provider}"
+
+
 # Test data configuration
-TEST_DATABASE = os.getenv("TEST_DATABASE", "test_database")
-TEST_TABLE = os.getenv("TEST_TABLE", "test_table")
-TEST_CATALOG = os.getenv("ATHENA_CATALOG", "test_catalog")
+TEST_DATABASE = os.getenv("TEST_DATABASE", "athena_lark_base_regression_test")
+TEST_TABLE = os.getenv("TEST_TABLE", "data_type_test_table")
 
 # Lark test configuration
 LARK_APP_ID = os.getenv("LARK_APP_ID", "test_app_id")
@@ -114,11 +150,14 @@ S3_RESULTS_BUCKET = os.getenv("S3_RESULTS_BUCKET", "test-athena-results")
 def print_test_config():
     """Print current test configuration."""
     env = get_environment()
+    provider = get_metadata_provider()
+    catalog_name = get_athena_catalog_name(provider)
 
     print("=" * 80)
     print("Test Configuration")
     print("=" * 80)
     print(f"Environment: {env.value.upper()}")
+    print(f"Metadata Provider: {provider.upper()}")
     print(f"AWS Region: {os.getenv('AWS_REGION', 'us-east-1')}")
 
     if env == TestEnvironment.HYBRID:
@@ -130,7 +169,7 @@ def print_test_config():
     print(f"\nTest Data:")
     print(f"  Database: {TEST_DATABASE}")
     print(f"  Table: {TEST_TABLE}")
-    print(f"  Catalog: {TEST_CATALOG}")
+    print(f"  Catalog: {catalog_name}")
     print("=" * 80)
 
 
