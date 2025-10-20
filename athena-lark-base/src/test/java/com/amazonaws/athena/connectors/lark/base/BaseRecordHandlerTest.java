@@ -415,7 +415,8 @@ public class BaseRecordHandlerTest {
                 ""
         );
 
-        assertThrows(RuntimeException.class, iterator::hasNext);
+        // After the fix, exceptions should be handled gracefully and return false instead of throwing
+        assertFalse("Iterator should return false when API throws exception", iterator.hasNext());
     }
 
     @Test

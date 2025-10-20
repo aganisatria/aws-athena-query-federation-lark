@@ -1097,7 +1097,7 @@ public class RegistererExtractorTest {
     }
 
     @Test
-    public void testListFieldWriterFactory_withNonListValue() throws Exception {
+    public void testListFieldWriterFactory_withStringValue() throws Exception {
         ArgumentCaptor<FieldWriterFactory> factoryCaptor = ArgumentCaptor.forClass(FieldWriterFactory.class);
         Field listField = new Field("list_field", FieldType.nullable(new ArrowType.List()),
                 Collections.singletonList(new Field("item", FieldType.nullable(new ArrowType.Utf8()), null)));
@@ -1114,11 +1114,74 @@ public class RegistererExtractorTest {
             FieldWriter writer = factory.create(mockVector, mockExtractor, null);
 
             Map<String, Object> context = new HashMap<>();
-            context.put("list_field", "not a list"); // Wrong type
+            context.put("list_field", "single string value"); // String value (wrapped in List for LOOKUP fields)
 
             boolean result = writer.write(context, 0);
 
-            assertFalse(result);
+            // Should wrap String in List and return true
+            assertTrue(result);
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), argThat(arg ->
+                    arg instanceof List && ((List<?>) arg).size() == 1 && "single string value".equals(((List<?>) arg).get(0))
+            )));
+        }
+    }
+
+    @Test
+    public void testListFieldWriterFactory_withMapValue() throws Exception {
+        ArgumentCaptor<FieldWriterFactory> factoryCaptor = ArgumentCaptor.forClass(FieldWriterFactory.class);
+        Field listField = new Field("list_field", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(new Field("item", FieldType.nullable(new ArrowType.Utf8()), null)));
+        Schema schema = new Schema(Collections.singletonList(listField));
+
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, schema);
+        verify(mockRowWriterBuilder).withFieldWriterFactory(eq("list_field"), factoryCaptor.capture());
+
+        FieldWriterFactory factory = factoryCaptor.getValue();
+        FieldVector mockVector = mock(FieldVector.class);
+        Extractor mockExtractor = mock(Extractor.class);
+
+        try (MockedStatic<BlockUtils> blockUtilsMock = mockStatic(BlockUtils.class)) {
+            FieldWriter writer = factory.create(mockVector, mockExtractor, null);
+
+            Map<String, Object> mapValue = new HashMap<>();
+            mapValue.put("key", "value");
+            Map<String, Object> context = new HashMap<>();
+            context.put("list_field", mapValue); // Map value (wrapped in List for LINK fields)
+
+            boolean result = writer.write(context, 0);
+
+            // Should wrap Map in List and return true
+            assertTrue(result);
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), argThat(arg ->
+                    arg instanceof List && ((List<?>) arg).size() == 1 && ((List<?>) arg).get(0) instanceof Map
+            )));
+        }
+    }
+
+    @Test
+    public void testListFieldWriterFactory_withInvalidValue() throws Exception {
+        ArgumentCaptor<FieldWriterFactory> factoryCaptor = ArgumentCaptor.forClass(FieldWriterFactory.class);
+        Field listField = new Field("list_field", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(new Field("item", FieldType.nullable(new ArrowType.Utf8()), null)));
+        Schema schema = new Schema(Collections.singletonList(listField));
+
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, schema);
+        verify(mockRowWriterBuilder).withFieldWriterFactory(eq("list_field"), factoryCaptor.capture());
+
+        FieldWriterFactory factory = factoryCaptor.getValue();
+        FieldVector mockVector = mock(FieldVector.class);
+        Extractor mockExtractor = mock(Extractor.class);
+
+        try (MockedStatic<BlockUtils> blockUtilsMock = mockStatic(BlockUtils.class)) {
+            FieldWriter writer = factory.create(mockVector, mockExtractor, null);
+
+            Map<String, Object> context = new HashMap<>();
+            context.put("list_field", 12345); // Invalid type (Number)
+
+            boolean result = writer.write(context, 0);
+
+            // Should write null but return true to not skip the row
+            assertTrue(result);
             blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(null)));
         }
     }

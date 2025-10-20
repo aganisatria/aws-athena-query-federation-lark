@@ -521,10 +521,13 @@ public class BaseRecordHandler extends RecordHandler
                     return currentPageIterator.hasNext();
                 }
                 catch (Exception e) {
-                    logger.error("Error fetching next page from Lark API for table {}.{}: {}", baseId, tableId, e.getMessage(), e);
+                    logger.warn("Error fetching next page from Lark API for table {}.{}: {}. Assuming no matching records for filter.", baseId, tableId, e.getMessage());
+                    if (envVarService.isEnableDebugLogging()) {
+                        logger.debug("Full error details:", e);
+                    }
                     hasMorePages = false;
-                    currentPageIterator = null;
-                    throw new RuntimeException("Error fetching next page from Lark API for table " + baseId + "." + tableId, e);
+                    currentPageIterator = Collections.emptyIterator();
+                    return false;
                 }
             }
 

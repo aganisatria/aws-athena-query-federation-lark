@@ -170,6 +170,26 @@ class LarkBaseTypeUtilsTest {
         assertThat(result).isEqualTo(Types.MinorType.STRUCT);
     }
 
+    @Test
+    void testLarkFieldToArrowMinorType_SingleLink() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "linked", "Linked", new NestedUIType(UITypeEnum.SINGLE_LINK, UITypeEnum.UNKNOWN));
+
+        Types.MinorType result = LarkBaseTypeUtils.larkFieldToArrowMinorType(field);
+
+        assertThat(result).isEqualTo(Types.MinorType.STRUCT);
+    }
+
+    @Test
+    void testLarkFieldToArrowMinorType_DuplexLink() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "duplex", "Duplex", new NestedUIType(UITypeEnum.DUPLEX_LINK, UITypeEnum.UNKNOWN));
+
+        Types.MinorType result = LarkBaseTypeUtils.larkFieldToArrowMinorType(field);
+
+        assertThat(result).isEqualTo(Types.MinorType.STRUCT);
+    }
+
     // Test larkFieldToArrowMinorType for FORMULA type
     @Test
     void testLarkFieldToArrowMinorType_FormulaWithNumber() {
@@ -224,9 +244,9 @@ class LarkBaseTypeUtilsTest {
 
         assertThat(result.getName()).isEqualTo("user_info");
         assertThat(result.getType()).isInstanceOf(ArrowType.Struct.class);
-        assertThat(result.getChildren()).hasSize(4);
+        assertThat(result.getChildren()).hasSize(5);
         assertThat(result.getChildren()).extracting(Field::getName)
-                .containsExactly("email", "en_name", "id", "name");
+                .containsExactly("avatar_url", "email", "en_name", "id", "name");
     }
 
     // Test getLarkListChildField for GROUP_CHAT
@@ -259,19 +279,34 @@ class LarkBaseTypeUtilsTest {
                 .containsExactly("file_token", "name", "size", "tmp_url", "type", "url");
     }
 
-    // Test getLarkListChildField for SINGLE_LINK
+    // Test getLarkListChildField for CREATED_USER
     @Test
-    void testGetLarkListChildField_SingleLink() {
+    void testGetLarkListChildField_CreatedUser() {
         AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
-                "linked", "Linked", new NestedUIType(UITypeEnum.SINGLE_LINK, UITypeEnum.UNKNOWN));
+                "creator", "Creator", new NestedUIType(UITypeEnum.CREATED_USER, UITypeEnum.UNKNOWN));
 
         Field result = LarkBaseTypeUtils.getLarkListChildField(field);
 
-        assertThat(result.getName()).isEqualTo("linked_record");
+        assertThat(result.getName()).isEqualTo("user_info");
         assertThat(result.getType()).isInstanceOf(ArrowType.Struct.class);
         assertThat(result.getChildren()).hasSize(5);
         assertThat(result.getChildren()).extracting(Field::getName)
-                .containsExactly("record_ids", "table_id", "text", "text_arr", "type");
+                .containsExactly("avatar_url", "email", "en_name", "id", "name");
+    }
+
+    // Test getLarkListChildField for MODIFIED_USER
+    @Test
+    void testGetLarkListChildField_ModifiedUser() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "modifier", "Modifier", new NestedUIType(UITypeEnum.MODIFIED_USER, UITypeEnum.UNKNOWN));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getName()).isEqualTo("user_info");
+        assertThat(result.getType()).isInstanceOf(ArrowType.Struct.class);
+        assertThat(result.getChildren()).hasSize(5);
+        assertThat(result.getChildren()).extracting(Field::getName)
+                .containsExactly("avatar_url", "email", "en_name", "id", "name");
     }
 
     // Test getLarkListChildField for LOOKUP
@@ -294,8 +329,8 @@ class LarkBaseTypeUtilsTest {
 
         List<Field> result = LarkBaseTypeUtils.getLarkStructChildFields(field);
 
-        assertThat(result).hasSize(2);
-        assertThat(result).extracting(Field::getName).containsExactly("link", "text");
+        assertThat(result).hasSize(3);
+        assertThat(result).extracting(Field::getName).containsExactly("link", "text", "type");
         assertThat(result).allMatch(f -> f.getType().equals(ArrowType.Utf8.INSTANCE));
     }
 
@@ -312,30 +347,40 @@ class LarkBaseTypeUtilsTest {
                 .containsExactly("address", "adname", "cityname", "full_address", "location", "name", "pname");
     }
 
-    // Test getLarkStructChildFields for CREATED_USER
+    // Test getLarkStructChildFields for SINGLE_LINK
     @Test
-    void testGetLarkStructChildFields_CreatedUser() {
+    void testGetLarkStructChildFields_SingleLink() {
         AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
-                "creator", "Creator", new NestedUIType(UITypeEnum.CREATED_USER, UITypeEnum.UNKNOWN));
+                "linked", "Linked", new NestedUIType(UITypeEnum.SINGLE_LINK, UITypeEnum.UNKNOWN));
 
         List<Field> result = LarkBaseTypeUtils.getLarkStructChildFields(field);
 
-        assertThat(result).hasSize(4);
+        assertThat(result).hasSize(1);
         assertThat(result).extracting(Field::getName)
-                .containsExactly("id", "name", "en_name", "email");
+                .containsExactly("link_record_ids");
+        // Verify that link_record_ids is a LIST
+        Field linkRecordIdsField = result.get(0);
+        assertThat(linkRecordIdsField.getType()).isEqualTo(ArrowType.List.INSTANCE);
+        assertThat(linkRecordIdsField.getChildren()).hasSize(1);
+        assertThat(linkRecordIdsField.getChildren().get(0).getName()).isEqualTo("item");
     }
 
-    // Test getLarkStructChildFields for MODIFIED_USER
+    // Test getLarkStructChildFields for DUPLEX_LINK
     @Test
-    void testGetLarkStructChildFields_ModifiedUser() {
+    void testGetLarkStructChildFields_DuplexLink() {
         AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
-                "modifier", "Modifier", new NestedUIType(UITypeEnum.MODIFIED_USER, UITypeEnum.UNKNOWN));
+                "duplex", "Duplex", new NestedUIType(UITypeEnum.DUPLEX_LINK, UITypeEnum.UNKNOWN));
 
         List<Field> result = LarkBaseTypeUtils.getLarkStructChildFields(field);
 
-        assertThat(result).hasSize(4);
+        assertThat(result).hasSize(1);
         assertThat(result).extracting(Field::getName)
-                .containsExactly("id", "name", "en_name", "email");
+                .containsExactly("link_record_ids");
+        // Verify that link_record_ids is a LIST
+        Field linkRecordIdsField = result.get(0);
+        assertThat(linkRecordIdsField.getType()).isEqualTo(ArrowType.List.INSTANCE);
+        assertThat(linkRecordIdsField.getChildren()).hasSize(1);
+        assertThat(linkRecordIdsField.getChildren().get(0).getName()).isEqualTo("item");
     }
 
     // Test getLarkStructChildFields for default case
@@ -414,7 +459,7 @@ class LarkBaseTypeUtilsTest {
 
         assertThat(result.getName()).isEqualTo("Website");
         assertThat(result.getType()).isEqualTo(ArrowType.Struct.INSTANCE);
-        assertThat(result.getChildren()).hasSize(2);
+        assertThat(result.getChildren()).hasSize(3);
     }
 
     // Test larkFieldToArrowField for TINYINT field

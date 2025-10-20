@@ -151,6 +151,45 @@ public class RegistererExtractor
     }
 
     /**
+     * Unwraps FORMULA field values from {type, value} wrapper structure.
+     * FORMULA fields in Lark API return data wrapped in: {type: N, value: [...]}
+     * This method extracts the actual value based on the childType.
+     *
+     * @param rawValue The raw value from API response
+     * @param larkTypeInfo The field type information from schema
+     * @return Unwrapped value, or original rawValue if not a FORMULA field
+     */
+    private Object unwrapFormula(Object rawValue, NestedUIType larkTypeInfo)
+    {
+        // Check if this is a FORMULA field
+        if (larkTypeInfo != null && larkTypeInfo.uiType() == UITypeEnum.FORMULA) {
+            // Check if has {type, value} structure
+            if (rawValue instanceof Map<?, ?> map && map.containsKey("value")) {
+                Object valueObj = map.get("value");
+                if (valueObj instanceof List<?> valueList && !valueList.isEmpty()) {
+                    UITypeEnum childType = larkTypeInfo.childType();
+
+                    // Use LarkBaseTypeUtils to determine if childType is a LIST type
+                    NestedUIType childTypeInfo = new NestedUIType(childType, UITypeEnum.UNKNOWN);
+                    com.amazonaws.athena.connectors.lark.base.model.AthenaFieldLarkBaseMapping tempMapping =
+                            new com.amazonaws.athena.connectors.lark.base.model.AthenaFieldLarkBaseMapping("temp", "temp", childTypeInfo);
+                    Types.MinorType minorType = com.amazonaws.athena.connectors.lark.base.util.LarkBaseTypeUtils.larkFieldToArrowMinorType(tempMapping);
+
+                    // If childType is LIST or TEXT, return whole array
+                    if (minorType == Types.MinorType.LIST || childType == UITypeEnum.TEXT) {
+                        return valueList;
+                    }
+                    // Otherwise return first element for scalar types
+                    else {
+                        return valueList.get(0);
+                    }
+                }
+            }
+        }
+        return rawValue;
+    }
+
+    /**
      * Registers an extractor for Arrow TinyInt type.
      * Handles conversion from Boolean, Number, or String ("true"/"false"/numeric) to byte (0 or 1).
      * Sets value to 0 and isSet to 1 if input is null or conversion fails.
@@ -246,30 +285,32 @@ public class RegistererExtractor
             NestedUIType larkTypeInfo = this.larkFieldTypeMapping.get(athenaFieldName);
 
             try {
-                if (rawValue instanceof String) {
-                    outputValue = (String) rawValue;
-                }
-                else if (larkTypeInfo != null) {
-                    UITypeEnum uiType = larkTypeInfo.uiType();
-                    UITypeEnum childType = larkTypeInfo.childType();
+                // Unwrap FORMULA fields first
+                Object unwrappedValue = unwrapFormula(rawValue, larkTypeInfo);
 
-                    if (uiType == UITypeEnum.FORMULA && childType == UITypeEnum.TEXT) {
-                        if (rawValue instanceof List<?> listVal && !listVal.isEmpty()) {
-                            Object firstElement = listVal.get(0);
-                            if (firstElement instanceof Map<?, ?> mapElement && mapElement.containsKey("text")) {
-                                Object textVal = mapElement.get("text");
-                                outputValue = (textVal != null) ? String.valueOf(textVal) : null;
-                            }
-                        }
-                    }
-                    else if (uiType == UITypeEnum.TEXT && rawValue instanceof Map<?, ?> mapVal && mapVal.containsKey("text")) {
-                        Object textVal = mapVal.get("text");
+                if (unwrappedValue instanceof String) {
+                    outputValue = (String) unwrappedValue;
+                }
+                // Handle TEXT fields: {text: "...", type: "text"} (single map)
+                else if (unwrappedValue instanceof Map<?, ?> mapElement && mapElement.containsKey("text")) {
+                    Object textVal = mapElement.get("text");
+                    outputValue = (textVal != null) ? String.valueOf(textVal) : null;
+                }
+                // Handle TEXT fields: [{text: "...", type: "text"}] (list of maps)
+                else if (unwrappedValue instanceof List<?> listVal && !listVal.isEmpty()) {
+                    Object firstElement = listVal.get(0);
+                    if (firstElement instanceof Map<?, ?> mapElement && mapElement.containsKey("text")) {
+                        Object textVal = mapElement.get("text");
                         outputValue = (textVal != null) ? String.valueOf(textVal) : null;
+                    }
+                    else {
+                        // Fallback to first element as string
+                        outputValue = String.valueOf(firstElement);
                     }
                 }
 
                 if (outputValue == null) {
-                    outputValue = String.valueOf(rawValue);
+                    outputValue = String.valueOf(unwrappedValue);
                 }
 
                 if (outputValue != null) {
@@ -301,13 +342,17 @@ public class RegistererExtractor
             dst.isSet = 1;
             String fieldName = field.getName();
             Map<String, Object> item = getContextMap(context);
-            Object value = item.get(fieldName);
+            Object rawValue = item.get(fieldName);
 
-            if (value == null) {
+            if (rawValue == null) {
                 return;
             }
 
             try {
+                // Unwrap FORMULA fields first
+                NestedUIType larkTypeInfo = this.larkFieldTypeMapping.get(fieldName);
+                Object value = unwrapFormula(rawValue, larkTypeInfo);
+
                 if (value instanceof BigDecimal) {
                     dst.value = (BigDecimal) value;
                 }
@@ -385,12 +430,16 @@ public class RegistererExtractor
             dst.isSet = 0;
             String fieldName = field.getName();
             Map<String, Object> item = getContextMap(context);
-            Object value = item.get(fieldName);
+            Object rawValue = item.get(fieldName);
 
-            if (value == null) {
+            if (rawValue == null) {
                 return;
             }
             try {
+                // Unwrap FORMULA fields first
+                NestedUIType larkTypeInfo = this.larkFieldTypeMapping.get(fieldName);
+                Object value = unwrapFormula(rawValue, larkTypeInfo);
+
                 if (value instanceof Number numValue) {
                     Long timestamp = convertToTimestampMillis(numValue, fieldName, "DateMilliExtractor");
                     if (timestamp != null) {
@@ -420,12 +469,16 @@ public class RegistererExtractor
             dst.isSet = 0;
             String fieldName = field.getName();
             Map<String, Object> item = getContextMap(context);
-            Object value = item.get(fieldName);
+            Object rawValue = item.get(fieldName);
 
-            if (value == null) {
+            if (rawValue == null) {
                 return;
             }
             try {
+                // Unwrap FORMULA fields first
+                NestedUIType larkTypeInfo = this.larkFieldTypeMapping.get(fieldName);
+                Object value = unwrapFormula(rawValue, larkTypeInfo);
+
                 if (value instanceof Number numValue) {
                     Long timestamp = convertToTimestampMillis(numValue, fieldName, "TimestampMilliExtractor");
                     if (timestamp != null) {
@@ -457,11 +510,33 @@ public class RegistererExtractor
                         return true;
                     }
 
-                    if (!(rawListValue instanceof List<?> listValue)) {
-                        logger.error("FieldWriterFactory for List field '{}': Expected List, got {}. Writing null.",
-                                fieldName, rawListValue.getClass().getName());
+                    // Unwrap FORMULA fields first
+                    Object unwrappedValue = unwrapFormula(rawListValue, larkTypeInfo);
+
+                    // Handle case where Lark API returns Map or String instead of List for LINK/LOOKUP fields
+                    List<?> listValue;
+                    if (unwrappedValue instanceof List<?>) {
+                        listValue = (List<?>) unwrappedValue;
+                    }
+                    else if (unwrappedValue instanceof Map) {
+                        // LINK fields (SINGLE_LINK, DUPLEX_LINK) may return as Map instead of List
+                        // Wrap it in a List to match the expected array schema
+                        logger.debug("FieldWriterFactory for List field '{}': Got Map instead of List (likely LINK field). Wrapping in List.",
+                                fieldName);
+                        listValue = List.of(unwrappedValue);
+                    }
+                    else if (unwrappedValue instanceof String) {
+                        // LOOKUP fields may return as String instead of List
+                        // Wrap it in a List to match the expected array schema
+                        logger.debug("FieldWriterFactory for List field '{}': Got String instead of List (likely LOOKUP field). Wrapping in List.",
+                                fieldName);
+                        listValue = List.of(unwrappedValue);
+                    }
+                    else {
+                        logger.error("FieldWriterFactory for List field '{}': Expected List, Map, or String, got {}. Writing null.",
+                                fieldName, unwrappedValue.getClass().getName());
                         BlockUtils.setComplexValue(vector, rowNum, resolver, null);
-                        return false;
+                        return true; // Changed from false to true to not skip the entire row
                     }
 
                     Object processedList = listValue;
@@ -497,6 +572,7 @@ public class RegistererExtractor
     {
         LarkBaseFieldResolver resolver = new LarkBaseFieldResolver();
         String fieldName = field.getName();
+        NestedUIType larkTypeInfo = this.larkFieldTypeMapping.get(fieldName);
 
         rowWriterBuilder.withFieldWriterFactory(fieldName, (vector, extractor, constraint) ->
                 (Object context, int rowNum) -> {
@@ -508,20 +584,23 @@ public class RegistererExtractor
                         return true;
                     }
 
-                    if (!(rawStructValue instanceof Map)) {
+                    // Unwrap FORMULA fields first
+                    Object unwrappedValue = unwrapFormula(rawStructValue, larkTypeInfo);
+
+                    if (!(unwrappedValue instanceof Map)) {
                         logger.error("FieldWriterFactory for Struct field '{}': Expected Map, got {}. Writing null.",
-                                fieldName, rawStructValue.getClass().getName());
+                                fieldName, unwrappedValue.getClass().getName());
                         BlockUtils.setComplexValue(vector, rowNum, resolver, null);
                         return false;
                     }
 
                     try {
-                        BlockUtils.setComplexValue(vector, rowNum, resolver, rawStructValue);
+                        BlockUtils.setComplexValue(vector, rowNum, resolver, unwrappedValue);
                         return true;
                     }
                     catch (Exception e) {
                         logger.error("FieldWriterFactory for Struct field '{}': Error writing struct. Value type: {}. Exception: {}",
-                                fieldName, rawStructValue.getClass().getName(), e.getMessage(), e);
+                                fieldName, unwrappedValue.getClass().getName(), e.getMessage(), e);
                         BlockUtils.setComplexValue(vector, rowNum, resolver, null);
                         return false;
                     }

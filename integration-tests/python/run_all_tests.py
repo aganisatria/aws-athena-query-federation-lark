@@ -40,11 +40,29 @@ ALL_TESTS = {
         "migrated": True,
         "modes": ["mock", "hybrid", "aws"]
     },
-    "pushdown": {
-        "name": "Pushdown Predicates Test",
-        "script": "integration-tests/python/tests/regression/test_pushdown.py",
+    "glue_regression": {
+        "name": "Glue Provider Regression Test",
+        "script": "integration-tests/python/tests/regression/test_glue_regression.py",
         "migrated": True,
-        "modes": ["mock", "aws"]  # Athena not in LocalStack Community
+        "modes": ["mock", "aws"]
+    },
+    "lark_base_source_regression": {
+        "name": "Lark Base Source Regression Test",
+        "script": "integration-tests/python/tests/regression/test_lark_base_source.py",
+        "migrated": True,
+        "modes": ["mock", "aws"]
+    },
+    "lark_drive_source_regression": {
+        "name": "Lark Drive Source Regression Test",
+        "script": "integration-tests/python/tests/regression/test_lark_drive_source_regression.py",
+        "migrated": True,
+        "modes": ["mock", "aws"]
+    },
+    "experimental_provider_regression": {
+        "name": "Experimental Provider Regression Test",
+        "script": "integration-tests/python/tests/regression/test_experimental_provider.py",
+        "migrated": True,
+        "modes": ["mock", "aws"]
     },
     "search_api_filters": {
         "name": "Search API Filters Test",
