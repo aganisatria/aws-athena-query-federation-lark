@@ -26,6 +26,7 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Response for List Records
@@ -72,7 +73,16 @@ public final class ListRecordsResponse extends BaseResponse<ListRecordsResponse.
         private RecordItem(Builder builder)
         {
             this.recordId = builder.recordId;
-            this.fields = builder.fields != null ? Map.copyOf(builder.fields) : Collections.emptyMap();
+            // Ensure immutable map, filter out null values (Lark now returns null for empty cells)
+            if (builder.fields != null) {
+                Map<String, Object> nonNullFields = builder.fields.entrySet().stream()
+                        .filter(e -> e.getValue() != null)
+                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+                this.fields = Map.copyOf(nonNullFields);
+            }
+            else {
+                this.fields = Collections.emptyMap();
+            }
         }
 
         @JsonProperty("record_id")

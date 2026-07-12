@@ -22,6 +22,7 @@ package com.amazonaws.glue.lark.base.crawler.model.response;
 import org.junit.Test;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -41,6 +42,24 @@ public class ListRecordsResponseTest {
 
         assertEquals(recordId, item.getRecordId());
         assertEquals(fields, item.getFields());
+    }
+
+    @Test
+    public void recordItem_fields_whenValuesAreNull_shouldFilterThemOut() {
+        Map<String, Object> fieldsWithNull = new HashMap<>();
+        fieldsWithNull.put("name", "Alice");
+        fieldsWithNull.put("email", null);
+        fieldsWithNull.put("age", 25);
+
+        ListRecordsResponse.RecordItem item = ListRecordsResponse.RecordItem.builder()
+                .recordId("rec_with_null")
+                .fields(fieldsWithNull)
+                .build();
+
+        assertEquals(2, item.getFields().size());
+        assertTrue(item.getFields().containsKey("name"));
+        assertTrue(item.getFields().containsKey("age"));
+        assertFalse(item.getFields().containsKey("email"));
     }
 
     @Test
