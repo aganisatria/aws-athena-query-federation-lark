@@ -121,6 +121,61 @@ public class BaseMetadataHandlerTest {
     }
 
     @Test
+    public void testDoGetTable_BlacklistedTable_ThrowsAthenaConnectorException() {
+        when(mockEnvVarService.getWhitelistTables()).thenReturn("");
+        when(mockEnvVarService.getBlacklistTables()).thenReturn("schemaa:table1");
+
+        com.amazonaws.athena.connector.lambda.security.FederatedIdentity identity =
+                new com.amazonaws.athena.connector.lambda.security.FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(identity, "queryId", "catalog",
+                new com.amazonaws.athena.connector.lambda.domain.TableName("schemaA", "table1"), Collections.emptyMap());
+
+        assertThrows(com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException.class,
+                () -> handler.doGetTable(allocator, request));
+    }
+
+    @Test
+    public void testDoGetTable_TableNotInWhitelistedSchema_ThrowsAthenaConnectorException() {
+        when(mockEnvVarService.getWhitelistTables()).thenReturn("schemaa:table1,schemaa:table2");
+        when(mockEnvVarService.getBlacklistTables()).thenReturn("");
+
+        com.amazonaws.athena.connector.lambda.security.FederatedIdentity identity =
+                new com.amazonaws.athena.connector.lambda.security.FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(identity, "queryId", "catalog",
+                new com.amazonaws.athena.connector.lambda.domain.TableName("schemaA", "table3"), Collections.emptyMap());
+
+        assertThrows(com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException.class,
+                () -> handler.doGetTable(allocator, request));
+    }
+
+    @Test
+    public void testDoGetTable_TableInWhitelistedSchema_DoesNotThrowFromAccessControlGuard() {
+        when(mockEnvVarService.getWhitelistTables()).thenReturn("schemaa:table1");
+        when(mockEnvVarService.getBlacklistTables()).thenReturn("");
+        when(mockEnvVarService.isActivateLarkBaseSource()).thenReturn(false);
+        when(mockEnvVarService.isActivateLarkDriveSource()).thenReturn(false);
+        when(mockEnvVarService.isActivateExperimentalFeatures()).thenReturn(false);
+
+        com.amazonaws.athena.connector.lambda.security.FederatedIdentity identity =
+                new com.amazonaws.athena.connector.lambda.security.FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(identity, "queryId", "catalog",
+                new com.amazonaws.athena.connector.lambda.domain.TableName("schemaA", "table1"), Collections.emptyMap());
+
+        // The access-control guard must not be what blocks this table (it's allowed); whatever the handler
+        // does next (Glue fallback failing since nothing is mocked further) is out of scope for this test.
+        try {
+            handler.doGetTable(allocator, request);
+        }
+        catch (com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException e) {
+            assertFalse("Access-control guard should not be the cause of failure for an allowed table",
+                    e.getMessage() != null && e.getMessage().contains("Table not found"));
+        }
+        catch (Exception e) {
+            // Any other failure downstream (e.g. Glue fallback) is unrelated to the access-control guard.
+        }
+    }
+
+    @Test
     public void testDoGetDataSourceCapabilities() {
         GetDataSourceCapabilitiesRequest request = mock(GetDataSourceCapabilitiesRequest.class);
         when(request.getCatalogName()).thenReturn("test-catalog");

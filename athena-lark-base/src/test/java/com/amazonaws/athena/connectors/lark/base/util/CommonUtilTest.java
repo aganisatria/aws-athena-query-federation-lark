@@ -373,6 +373,111 @@ class CommonUtilTest {
     }
 
     @Test
+    void testParseSchemaTableGrouping_Valid() {
+        String envVar = "schemaA:table1,schemaA:table2,schemaB:table3";
+
+        Map<String, Set<String>> result = CommonUtil.parseSchemaTableGrouping(envVar);
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get("schemaa")).containsExactlyInAnyOrder("table1", "table2");
+        assertThat(result.get("schemab")).containsExactlyInAnyOrder("table3");
+    }
+
+    @Test
+    void testParseSchemaTableGrouping_LowercasesForCaseInsensitiveMatching() {
+        String envVar = "SchemaA:TableOne";
+
+        Map<String, Set<String>> result = CommonUtil.parseSchemaTableGrouping(envVar);
+
+        assertThat(result).containsKey("schemaa");
+        assertThat(result.get("schemaa")).containsExactly("tableone");
+    }
+
+    @Test
+    void testParseSchemaTableGrouping_Null() {
+        assertThat(CommonUtil.parseSchemaTableGrouping(null)).isEmpty();
+    }
+
+    @Test
+    void testParseSchemaTableGrouping_Empty() {
+        assertThat(CommonUtil.parseSchemaTableGrouping("")).isEmpty();
+    }
+
+    @Test
+    void testParseSchemaTableGrouping_InvalidEntriesSkipped() {
+        String envVar = "schemaA:table1,invalid_entry,:table2,schemaB:";
+
+        Map<String, Set<String>> result = CommonUtil.parseSchemaTableGrouping(envVar);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get("schemaa")).containsExactly("table1");
+    }
+
+    @Test
+    void testIsTableAccessAllowed_NoWhitelistOrBlacklist_Allowed() {
+        boolean result = CommonUtil.isTableAccessAllowed("schemaa", "table1", Collections.emptyMap(), Collections.emptyMap());
+
+        assertThat(result).isTrue();
+    }
+
+    @Test
+    void testIsTableAccessAllowed_SchemaNotInWhitelist_Unrestricted() {
+        // Only schemaB is whitelisted; schemaA has no entries, so it's unrestricted by the whitelist.
+        Map<String, Set<String>> whitelist = Map.of("schemab", Set.of("table9"));
+
+        boolean result = CommonUtil.isTableAccessAllowed("schemaa", "table1", whitelist, Collections.emptyMap());
+
+        assertThat(result).isTrue();
+    }
+
+    @Test
+    void testIsTableAccessAllowed_TableInWhitelistedSchemaAndInList_Allowed() {
+        Map<String, Set<String>> whitelist = Map.of("schemaa", Set.of("table1", "table2"));
+
+        boolean result = CommonUtil.isTableAccessAllowed("schemaa", "table1", whitelist, Collections.emptyMap());
+
+        assertThat(result).isTrue();
+    }
+
+    @Test
+    void testIsTableAccessAllowed_TableInWhitelistedSchemaButNotInList_Blocked() {
+        Map<String, Set<String>> whitelist = Map.of("schemaa", Set.of("table1", "table2"));
+
+        boolean result = CommonUtil.isTableAccessAllowed("schemaa", "table3", whitelist, Collections.emptyMap());
+
+        assertThat(result).isFalse();
+    }
+
+    @Test
+    void testIsTableAccessAllowed_TableBlacklisted_Blocked() {
+        Map<String, Set<String>> blacklist = Map.of("schemaa", Set.of("table1"));
+
+        boolean result = CommonUtil.isTableAccessAllowed("schemaa", "table1", Collections.emptyMap(), blacklist);
+
+        assertThat(result).isFalse();
+    }
+
+    @Test
+    void testIsTableAccessAllowed_BlacklistWinsOverWhitelist() {
+        // A table that's both whitelisted and blacklisted must be blocked - deny wins.
+        Map<String, Set<String>> whitelist = Map.of("schemaa", Set.of("table1"));
+        Map<String, Set<String>> blacklist = Map.of("schemaa", Set.of("table1"));
+
+        boolean result = CommonUtil.isTableAccessAllowed("schemaa", "table1", whitelist, blacklist);
+
+        assertThat(result).isFalse();
+    }
+
+    @Test
+    void testIsTableAccessAllowed_CaseInsensitiveMatching() {
+        Map<String, Set<String>> whitelist = Map.of("schemaa", Set.of("table1"));
+
+        boolean result = CommonUtil.isTableAccessAllowed("SchemaA", "Table1", whitelist, Collections.emptyMap());
+
+        assertThat(result).isTrue();
+    }
+
+    @Test
     void testAddReservedFields_NoExisting() {
         // Arrange
         Schema originalSchema = new Schema(Collections.emptyList());

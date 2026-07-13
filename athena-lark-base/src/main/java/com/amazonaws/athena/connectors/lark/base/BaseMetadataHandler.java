@@ -28,6 +28,7 @@ import com.amazonaws.athena.connector.lambda.data.BlockWriter;
 import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.domain.Split;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
+import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException;
 import com.amazonaws.athena.connector.lambda.handlers.GlueMetadataHandler;
 import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesRequest;
 import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesResponse;
@@ -73,6 +74,8 @@ import software.amazon.awssdk.services.athena.AthenaClient;
 import software.amazon.awssdk.services.glue.GlueClient;
 import software.amazon.awssdk.services.glue.model.Database;
 import software.amazon.awssdk.services.glue.model.EntityNotFoundException;
+import software.amazon.awssdk.services.glue.model.ErrorDetails;
+import software.amazon.awssdk.services.glue.model.FederationSourceErrorCode;
 import software.amazon.awssdk.services.glue.model.Table;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.utils.Pair;
@@ -358,12 +361,29 @@ public class BaseMetadataHandler
             }
         }
 
+        combinedTables.removeIf(tableName -> !isTableAccessAllowed(tableName.getSchemaName(), tableName.getTableName()));
+
         if (envVarService.isEnableDebugLogging()) {
             logger.info("doListTables: exit - returning {} tables for schema {}",
                     combinedTables.size(), requestedSchema);
         }
 
         return new ListTablesResponse(request.getCatalogName(), new ArrayList<>(combinedTables), null);
+    }
+
+    /**
+     * Checks whether a table should be visible/queryable given the connector's configured
+     * WHITELIST_TABLES_ENV_VAR / BLACKLIST_TABLES_ENV_VAR settings.
+     *
+     * @param schemaName The schema (database) name.
+     * @param tableName The table name.
+     * @return true if the table should be visible/queryable.
+     */
+    private boolean isTableAccessAllowed(String schemaName, String tableName)
+    {
+        Map<String, Set<String>> whitelistTables = CommonUtil.parseSchemaTableGrouping(envVarService.getWhitelistTables());
+        Map<String, Set<String>> blacklistTables = CommonUtil.parseSchemaTableGrouping(envVarService.getBlacklistTables());
+        return CommonUtil.isTableAccessAllowed(schemaName, tableName, whitelistTables, blacklistTables);
     }
 
     /**
@@ -385,6 +405,13 @@ public class BaseMetadataHandler
     {
         if (envVarService.isEnableDebugLogging()) {
             logger.info("doGetTable: Using Strategy Pattern for table {}", request.getTableName());
+        }
+
+        TableName tableName = request.getTableName();
+        if (!isTableAccessAllowed(tableName.getSchemaName(), tableName.getTableName())) {
+            logger.warn("doGetTable: Table {} is blocked by WHITELIST_TABLES_ENV_VAR/BLACKLIST_TABLES_ENV_VAR configuration.", tableName);
+            throw new AthenaConnectorException("Table not found: " + tableName,
+                    ErrorDetails.builder().errorCode(FederationSourceErrorCode.ENTITY_NOT_FOUND_EXCEPTION.toString()).build());
         }
 
         if (envVarService.isActivateLarkBaseSource() || envVarService.isActivateLarkDriveSource()) {

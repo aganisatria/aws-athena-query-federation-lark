@@ -90,6 +90,22 @@ public final class BaseConstants
     public static final String LARK_DRIVE_SOURCES_ENV_VAR = "default_lark_drive_sources";
 
     /**
+     * The environment variable which restricts, per schema, which tables the connector will expose.
+     * When a schema has at least one entry here, only those tables are visible/queryable for that schema;
+     * schemas with no entry are unrestricted by this setting. Evaluated independently of
+     * {@link #BLACKLIST_TABLES_ENV_VAR} (blacklist always wins if a table appears in both).
+     * format: [schemaName:tableName,schemaName:tableName2,...]
+     */
+    public static final String WHITELIST_TABLES_ENV_VAR = "default_whitelist_tables";
+
+    /**
+     * The environment variable which excludes, per schema, specific tables from the connector regardless of
+     * {@link #WHITELIST_TABLES_ENV_VAR}. A table listed here is never visible or queryable.
+     * format: [schemaName:tableName,schemaName:tableName2,...]
+     */
+    public static final String BLACKLIST_TABLES_ENV_VAR = "default_blacklist_tables";
+
+    /**
      * The lark base flag which is used to identify the custom flag on glue catalog.
      */
     public static final String LARK_BASE_FLAG = "lark-base-flag";
