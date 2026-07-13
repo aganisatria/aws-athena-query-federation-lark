@@ -210,12 +210,13 @@ public class LarkBaseTableResolver
     private List<AthenaFieldLarkBaseMapping> discoverTableFields(String larkBaseId, String larkTableId) throws TimeoutException
     {
         List<AthenaFieldLarkBaseMapping> fieldMappings = new ArrayList<>();
+        Set<String> seenFieldNames = new HashSet<>();
         try {
             List<ListFieldResponse.FieldItem> fields = invoker.invoke(() -> larkBaseService.getTableFields(larkBaseId, larkTableId));
             for (ListFieldResponse.FieldItem field : fields) {
                 String larkFieldName = field.getFieldName();
                 if (isValidIdentifier(larkFieldName)) {
-                    String prestoFieldName = CommonUtil.sanitizeGlueRelatedName(larkFieldName);
+                    String prestoFieldName = CommonUtil.sanitizeGlueRelatedNameWithDedup(larkFieldName, field.getFieldId(), seenFieldNames);
                     // NOTE: getFormulaGlueCatalogUITypeEnum() only returns a meaningful (non-UNKNOWN) value when
                     // the field's own UI type is FORMULA, while getTargetFieldAndTableForLookup() only returns a
                     // usable target when the field's own UI type is LOOKUP. A field cannot be both at once, so

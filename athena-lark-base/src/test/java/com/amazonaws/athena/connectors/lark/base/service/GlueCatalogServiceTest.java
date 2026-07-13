@@ -75,4 +75,29 @@ public class GlueCatalogServiceTest {
         assertEquals("field2", result.get(1).larkBaseFieldName());
         assertEquals(new NestedUIType(UITypeEnum.NUMBER, UITypeEnum.UNKNOWN), result.get(1).nestedUIType());
     }
+
+    @Test
+    public void getFieldNameMappings_collidingOriginalNames_usesActualGlueColumnNameNotResanitized() {
+        // Reproduces a real production case: the crawler disambiguates two Lark fields whose sanitized
+        // names collide ("segment 5" and "Segment 5" both -> "segment_5") by suffixing the field ID onto
+        // the physical Glue column name of the second one. athenaName() must reflect that real column
+        // name (column.name()); re-deriving it from the comment's original field name would recreate the
+        // exact same collision and desync the mapping from the schema Athena actually sees.
+        GlueClient glueClient = Mockito.mock(GlueClient.class);
+        Column column1 = Column.builder().name("segment_5")
+                .comment("LarkBaseId=base1/LarkBaseTableId=table1/LarkBaseFieldId=fldxdVXbHa/LarkBaseFieldName=segment 5/LarkBaseFieldType=Text").build();
+        Column column2 = Column.builder().name("segment_5_fldzrayo2s")
+                .comment("LarkBaseId=base1/LarkBaseTableId=table1/LarkBaseFieldId=fldZrayo2s/LarkBaseFieldName=Segment 5/LarkBaseFieldType=Text").build();
+        StorageDescriptor storageDescriptor = StorageDescriptor.builder().columns(column1, column2).build();
+        Table table = Table.builder().storageDescriptor(storageDescriptor).build();
+        GetTableResponse getTableResponse = GetTableResponse.builder().table(table).build();
+        when(glueClient.getTable(any(GetTableRequest.class))).thenReturn(getTableResponse);
+
+        GlueCatalogService glueCatalogService = new GlueCatalogService(glueClient);
+        List<AthenaFieldLarkBaseMapping> result = glueCatalogService.getFieldNameMappings("database", "table");
+
+        assertEquals(2, result.size());
+        assertEquals("segment_5", result.get(0).athenaName());
+        assertEquals("segment_5_fldzrayo2s", result.get(1).athenaName());
+    }
 }

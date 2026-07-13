@@ -112,6 +112,31 @@ public class LarkBaseTableResolverTest {
     }
 
     @Test
+    public void testResolveTables_CollidingSanitizedFieldNames_disambiguatesWithFieldId() throws Exception {
+        // Reproduces a real production case: two distinct Lark fields named "segment 5" and "Segment 5"
+        // both sanitize to the same Athena column name "segment_5". Without disambiguation, one field
+        // would silently vanish from the discovered schema (SchemaBuilder.addField overwrites by name).
+        when(mockEnvVarService.isActivateLarkBaseSource()).thenReturn(true);
+        when(mockEnvVarService.getLarkBaseSources()).thenReturn("base1:table1");
+        when(mockLarkBaseService.getDatabaseRecords(anyString(), anyString())).thenReturn(Collections.singletonList(new LarkDatabaseRecord("db1", "base1")));
+        when(mockLarkBaseService.listTables(anyString())).thenReturn(Collections.singletonList(ListAllTableResponse.BaseItem.builder().name("table1").tableId("tableId1").build()));
+        when(mockLarkBaseService.getTableFields(anyString(), anyString())).thenReturn(List.of(
+                ListFieldResponse.FieldItem.builder().fieldName("segment 5").fieldId("fldxdVXbHa").uiType("TEXT").build(),
+                ListFieldResponse.FieldItem.builder().fieldName("Segment 5").fieldId("fldZrayo2s").uiType("TEXT").build()));
+
+        List<TableDirectInitialized> tables = resolver.resolveTables();
+
+        assertEquals(1, tables.size());
+        List<String> athenaNames = tables.get(0).columns().stream()
+                .map(com.amazonaws.athena.connectors.lark.base.model.AthenaFieldLarkBaseMapping::athenaName)
+                .toList();
+        assertEquals(2, athenaNames.size());
+        assertEquals(2, new java.util.HashSet<>(athenaNames).size());
+        assertEquals("segment_5", athenaNames.get(0));
+        assertEquals("segment_5_fldzrayo2s", athenaNames.get(1));
+    }
+
+    @Test
     public void testResolveFromLarkBaseSource_Exception() throws Exception {
         when(mockEnvVarService.isActivateLarkBaseSource()).thenReturn(true);
         when(mockEnvVarService.getLarkBaseSources()).thenReturn("base1:table1");

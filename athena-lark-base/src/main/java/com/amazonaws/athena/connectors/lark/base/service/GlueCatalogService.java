@@ -76,12 +76,16 @@ public class GlueCatalogService
         response.table().storageDescriptor().columns().forEach(column -> {
             String comment = column.comment();
             String columnName = CommonUtil.extractFieldNameFromComment(comment);
-            String sanitizedColumnName = CommonUtil.sanitizeGlueRelatedName(columnName);
             NestedUIType fieldType = CommonUtil.extractFieldTypeFromComment(comment);
 
             logger.info("Field name: {}, UI Type: {}, Child Type: {}", columnName, fieldType.uiType(), fieldType.childType());
 
-            fieldNameMappings.add(new AthenaFieldLarkBaseMapping(sanitizedColumnName, columnName, fieldType));
+            // Use the actual Glue column name (column.name()) rather than re-sanitizing the original
+            // field name from the comment. The crawler already disambiguates colliding sanitized names
+            // (e.g. "Segment 5" and "segment 5" both -> "segment_5") by suffixing the field ID onto one
+            // of them; re-deriving the name here from the comment would reintroduce that same collision
+            // and desync this mapping's athenaName from the real physical column name.
+            fieldNameMappings.add(new AthenaFieldLarkBaseMapping(column.name(), columnName, fieldType));
         });
 
         return fieldNameMappings;

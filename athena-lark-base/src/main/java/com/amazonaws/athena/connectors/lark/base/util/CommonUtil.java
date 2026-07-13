@@ -60,6 +60,28 @@ public final class CommonUtil
         return tableName.toLowerCase().replaceAll("[^a-zA-Z0-9$]", "_");
     }
 
+    /**
+     * Sanitizes a Lark field name like {@link #sanitizeGlueRelatedName}, but disambiguates the
+     * result against names already seen in the current table. Two distinct Lark field names can
+     * sanitize down to the same name (e.g. "Segment 5" and "segment 5" both become "segment_5"),
+     * which would otherwise make two fields collapse into a single Athena column. Collisions are
+     * disambiguated with the Lark field ID, which is always unique.
+     *
+     * @param fieldName Original Lark field name.
+     * @param fieldId Lark field ID, used to disambiguate a name collision.
+     * @param seenNames Names already assigned so far for the current table; updated with the result.
+     * @return A sanitized name guaranteed unique among everything already added to {@code seenNames}.
+     */
+    public static String sanitizeGlueRelatedNameWithDedup(String fieldName, String fieldId, Set<String> seenNames)
+    {
+        String sanitized = sanitizeGlueRelatedName(fieldName);
+        if (!seenNames.add(sanitized)) {
+            sanitized = sanitized + "_" + sanitizeGlueRelatedName(fieldId);
+            seenNames.add(sanitized);
+        }
+        return sanitized;
+    }
+
     // Comment: LarkBaseId=<larkBaseId>/LarkBaseTableId=<larkTableId>/
     // LarkBaseFieldId=<larkBaseFieldId>/LarkBaseFieldName=<originalFieldName>/
     // LarkBaseFieldType=<larkBaseFieldType>
@@ -180,12 +202,12 @@ public final class CommonUtil
         for (AthenaFieldLarkBaseMapping field : larkFields) {
             Field arrowField = LarkBaseTypeUtils.larkFieldToArrowField(field);
 
-            // Sanitize field name for Arrow/Athena compatibility AFTER getting the type
-            // (Type mapping might depend on original name/properties)
-            String sanitizedName = CommonUtil.sanitizeGlueRelatedName(arrowField.getName());
-            if (!sanitizedName.equals(arrowField.getName())) {
-                // Create a new field with the sanitized name but same type/children
-                arrowField = new Field(sanitizedName, arrowField.getFieldType(), arrowField.getChildren());
+            // field.athenaName() is already sanitized (and deduplicated against name collisions) at
+            // discovery time; use it as-is instead of re-sanitizing the raw Lark field name here, which
+            // would throw away that deduplication and reintroduce collisions between fields whose names
+            // only differ by case/punctuation (e.g. "Segment 5" and "segment 5").
+            if (!field.athenaName().equals(arrowField.getName())) {
+                arrowField = new Field(field.athenaName(), arrowField.getFieldType(), arrowField.getChildren());
             }
 
             schemaBuilder.addField(arrowField);
