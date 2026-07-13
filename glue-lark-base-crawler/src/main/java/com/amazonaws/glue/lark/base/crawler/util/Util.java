@@ -32,7 +32,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static com.amazonaws.glue.lark.base.crawler.LarkBaseCrawlerConstants.CRAWLING_METHOD;
 import static com.amazonaws.glue.lark.base.crawler.LarkBaseCrawlerConstants.LARK_BASE_FLAG;
@@ -266,17 +265,31 @@ public final class Util
      */
     public static Collection<Column> constructColumns(ArrayList<ColumnParameters> params)
     {
-        return params.stream()
-                .map(param -> Column.builder()
-                        .name(param.getColumnName())
-                        .type(param.getColumnType())
-                        // Comment: LarkBaseId=<larkBaseId>/LarkBaseTableId=<larkTableId>/
-                        // LarkBaseFieldId=<larkBaseFieldId>/LarkBaseFieldName=<originalFieldName>/
-                        // LarkBaseFieldType=<larkBaseFieldType>
-                        // for larkBaseFieldType "Formula", we fill with "Formula<formula-type>"
-                        .comment(generateColumnComment(param))
-                        .build())
-                .collect(Collectors.toList());
+        // Two distinct Lark field names can sanitize down to the same Glue column name
+        // (e.g. "Segment 5" and "segment 5" both become "segment_5"). Glue allows writing
+        // duplicate column names into a table's StorageDescriptor, but the federation SDK's
+        // GlueMetadataHandler.doGetTable then throws (ImmutableMap.Builder rejects duplicate
+        // keys when building schema metadata from column names), breaking the whole table's
+        // schema resolution. Disambiguate collisions with the Lark field ID, which is unique.
+        Set<String> seenColumnNames = new HashSet<>();
+        List<Column> columns = new ArrayList<>();
+        for (ColumnParameters param : params) {
+            String columnName = param.getColumnName();
+            if (!seenColumnNames.add(columnName)) {
+                columnName = columnName + "_" + sanitizeGlueRelatedName(param.getLarkBaseRecordId());
+                seenColumnNames.add(columnName);
+            }
+            columns.add(Column.builder()
+                    .name(columnName)
+                    .type(param.getColumnType())
+                    // Comment: LarkBaseId=<larkBaseId>/LarkBaseTableId=<larkTableId>/
+                    // LarkBaseFieldId=<larkBaseFieldId>/LarkBaseFieldName=<originalFieldName>/
+                    // LarkBaseFieldType=<larkBaseFieldType>
+                    // for larkBaseFieldType "Formula", we fill with "Formula<formula-type>"
+                    .comment(generateColumnComment(param))
+                    .build());
+        }
+        return columns;
     }
 
     public static String generateColumnComment(ColumnParameters parameters)
