@@ -32,7 +32,7 @@ import com.amazonaws.athena.connector.lambda.domain.spill.S3SpillLocation;
 import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException;
 import com.amazonaws.athena.connector.lambda.records.ReadRecordsRequest;
 import com.amazonaws.athena.connector.lambda.security.EncryptionKey;
-import com.amazonaws.athena.connectors.lark.base.model.response.ListRecordsResponse;
+import com.amazonaws.athena.connectors.lark.base.model.response.SearchRecordsResponse;
 import com.amazonaws.athena.connectors.lark.base.service.EnvVarService;
 import com.amazonaws.athena.connectors.lark.base.service.LarkBaseService;
 import com.amazonaws.athena.connectors.lark.base.translator.RegistererExtractor;
@@ -235,13 +235,13 @@ public class BaseRecordHandlerTest {
     @Test
     public void testGetIteratorBasicScenario() throws Exception {
         // Mock response with one page
-        ListRecordsResponse.RecordItem item1 = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item1 = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("field1", "value1"))
                 .build();
 
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(List.of(item1))
                         .hasMore(false)
                         .pageToken(null)
@@ -261,7 +261,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -276,13 +277,13 @@ public class BaseRecordHandlerTest {
     @Test
     public void testGetIteratorMultiplePages() throws Exception {
         // First page
-        ListRecordsResponse.RecordItem item1 = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item1 = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("field1", "value1"))
                 .build();
 
-        ListRecordsResponse response1 = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response1 = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(List.of(item1))
                         .hasMore(true)
                         .pageToken("token1")
@@ -291,13 +292,13 @@ public class BaseRecordHandlerTest {
                 .build();
 
         // Second page
-        ListRecordsResponse.RecordItem item2 = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item2 = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec2")
                 .fields(Map.of("field1", "value2"))
                 .build();
 
-        ListRecordsResponse response2 = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response2 = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(List.of(item2))
                         .hasMore(false)
                         .pageToken(null)
@@ -317,7 +318,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -333,13 +335,13 @@ public class BaseRecordHandlerTest {
 
     @Test
     public void testGetIteratorWithExpectedRowCount() throws Exception {
-        ListRecordsResponse.RecordItem item1 = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item1 = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("field1", "value1"))
                 .build();
 
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(List.of(item1))
                         .hasMore(true)
                         .pageToken("token1")
@@ -359,7 +361,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -371,8 +374,8 @@ public class BaseRecordHandlerTest {
 
     @Test
     public void testGetIteratorEmptyResponse() throws Exception {
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(Collections.emptyList())
                         .hasMore(false)
                         .pageToken(null)
@@ -392,7 +395,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertFalse(iterator.hasNext());
@@ -412,7 +416,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         // After the fix, exceptions should be handled gracefully and return false instead of throwing
@@ -421,8 +426,8 @@ public class BaseRecordHandlerTest {
 
     @Test
     public void testGetIteratorNoSuchElement() throws Exception {
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(Collections.emptyList())
                         .hasMore(false)
                         .pageToken(null)
@@ -442,7 +447,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertThrows(NoSuchElementException.class, iterator::next);
@@ -450,13 +456,13 @@ public class BaseRecordHandlerTest {
 
     @Test
     public void testGetIteratorWithParallelSplit() throws Exception {
-        ListRecordsResponse.RecordItem item1 = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item1 = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("field1", "value1"))
                 .build();
 
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(List.of(item1))
                         .hasMore(false)
                         .pageToken(null)
@@ -477,7 +483,8 @@ public class BaseRecordHandlerTest {
                 1,
                 100,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -487,13 +494,13 @@ public class BaseRecordHandlerTest {
 
     @Test
     public void testGetIteratorWithDebugLogging() throws Exception {
-        ListRecordsResponse.RecordItem item1 = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item1 = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("field1", "value1"))
                 .build();
 
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(List.of(item1))
                         .hasMore(false)
                         .pageToken(null)
@@ -513,7 +520,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "filter",
-                "sort"
+                "sort",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -534,7 +542,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertFalse(iterator.hasNext());
@@ -542,8 +551,8 @@ public class BaseRecordHandlerTest {
 
     @Test
     public void testGetIteratorWithNullItems() throws Exception {
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(null)
                         .hasMore(false)
                         .pageToken(null)
@@ -563,7 +572,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertFalse(iterator.hasNext());
@@ -571,13 +581,13 @@ public class BaseRecordHandlerTest {
 
     @Test
     public void testGetIteratorWithEmptyPageToken() throws Exception {
-        ListRecordsResponse.RecordItem item1 = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item1 = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("field1", "value1"))
                 .build();
 
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(List.of(item1))
                         .hasMore(true)
                         .pageToken("")
@@ -597,7 +607,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -610,13 +621,13 @@ public class BaseRecordHandlerTest {
         HashMap<String, Object> fields = new HashMap<>();
         fields.put("field1", "value1");
 
-        ListRecordsResponse.RecordItem item1 = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item1 = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(fields)
                 .build();
 
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(List.of(item1))
                         .hasMore(false)
                         .pageToken(null)
@@ -636,7 +647,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -646,16 +658,16 @@ public class BaseRecordHandlerTest {
 
     @Test
     public void testGetIteratorExceedsExpectedRowCount() throws Exception {
-        List<ListRecordsResponse.RecordItem> items = new ArrayList<>();
+        List<SearchRecordsResponse.RecordItem> items = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
-            items.add(ListRecordsResponse.RecordItem.builder()
+            items.add(SearchRecordsResponse.RecordItem.builder()
                     .recordId("rec" + i)
                     .fields(Map.of("field1", "value" + i))
                     .build());
         }
 
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(items)
                         .hasMore(true)
                         .pageToken("token1")
@@ -675,7 +687,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         int count = 0;
@@ -688,13 +701,13 @@ public class BaseRecordHandlerTest {
 
     @Test
     public void testGetIteratorWithNullFilterExpression() throws Exception {
-        ListRecordsResponse.RecordItem item1 = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item1 = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("field1", "value1"))
                 .build();
 
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(List.of(item1))
                         .hasMore(false)
                         .pageToken(null)
@@ -714,7 +727,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 null,
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -1205,16 +1219,16 @@ public class BaseRecordHandlerTest {
 
     @Test
     public void testGetIteratorStopsAtExpectedRowCountWithDebugLogging() throws Exception {
-        List<ListRecordsResponse.RecordItem> items = new ArrayList<>();
+        List<SearchRecordsResponse.RecordItem> items = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
-            items.add(ListRecordsResponse.RecordItem.builder()
+            items.add(SearchRecordsResponse.RecordItem.builder()
                     .recordId("rec" + i)
                     .fields(Map.of("field1", "value" + i))
                     .build());
         }
 
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(items)
                         .hasMore(true)
                         .pageToken("token1")
@@ -1234,7 +1248,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         // Fetch all available in first page (10 items)
@@ -1388,12 +1403,14 @@ public class BaseRecordHandlerTest {
                                                             int pageSizeForApi, int expectedRowCountForSplit,
                                                             boolean isParallelSplit, long splitStartIndex,
                                                             long splitEndIndex, String originalFilterExpression,
-                                                            String originalSortExpression) {
+                                                            String originalSortExpression,
+                                                            Map<String, String> fieldNameToAthenaNameMap) {
             if (customIterator != null) {
                 return customIterator;
             }
             return super.getIterator(baseId, tableId, pageSizeForApi, expectedRowCountForSplit,
-                    isParallelSplit, splitStartIndex, splitEndIndex, originalFilterExpression, originalSortExpression);
+                    isParallelSplit, splitStartIndex, splitEndIndex, originalFilterExpression, originalSortExpression,
+                    fieldNameToAthenaNameMap);
         }
 
         public void setCustomIterator(Iterator<Map<String, Object>> iterator) {

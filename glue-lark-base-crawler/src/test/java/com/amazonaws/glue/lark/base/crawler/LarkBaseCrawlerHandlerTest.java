@@ -137,6 +137,32 @@ public class LarkBaseCrawlerHandlerTest {
         assertEquals("LarkBase", handler.getCrawlingMethod());
     }
 
+    @Test
+    public void handleRequest_duplicateSanitizedTableNamesInSameBase_throws() {
+        // Reproduces a real risk: two distinct Lark tables in the same base (e.g. "Report A" and
+        // "report a") both sanitize to the same Glue table name. The create/update/delete diffing in
+        // processTablesForDatabase is entirely keyed by this name, so without a check, one of the two
+        // tables would silently never get created in Glue instead of erroring.
+        LarkDatabaseRecord larkDb = new LarkDatabaseRecord("dbId1", "db_name");
+        Database glueDb = Database.builder().name("db_name")
+                .locationUri("lark-base-flag/CrawlingMethod=LarkBase/DataSource=baseDs123:tableDs456/Base=dbId1").build();
+        ListAllTableResponse.BaseItem larkTable1 = ListAllTableResponse.BaseItem.builder().tableId("tableId1").name("report a").build();
+        ListAllTableResponse.BaseItem larkTable2 = ListAllTableResponse.BaseItem.builder().tableId("tableId2").name("Report A").build();
+
+        when(mockLarkBaseService.getTableRecords("baseDs123", "tableDs456")).thenReturn(Collections.singletonList(larkDb));
+        when(mockGlueCatalogService.getDatabases()).thenReturn(Collections.singletonList(glueDb));
+        when(mockGlueCatalogService.getTables("db_name")).thenReturn(Collections.emptyList());
+        when(mockLarkBaseService.listTables("dbId1")).thenReturn(java.util.Arrays.asList(larkTable1, larkTable2));
+
+        try {
+            handler.handleRequest(payload, mockContext);
+            fail("Expected RuntimeException for duplicate table names");
+        }
+        catch (RuntimeException e) {
+            assertTrue(e.getMessage().contains("Duplicate table names"));
+        }
+    }
+
 
 
     @Test
@@ -207,6 +233,28 @@ public class LarkBaseCrawlerHandlerTest {
         verify(mockGlueCatalogService, times(1)).batchCreateTable(any());
         verify(mockGlueCatalogService, never()).batchUpdateDatabase(any());
         verify(mockGlueCatalogService, never()).batchDeleteTable(any());
+    }
+
+    @Test
+    public void testHandleRequest_newDatabaseWithDuplicateSanitizedTableNames_throws() {
+        // Same collision risk as handleRequest_duplicateSanitizedTableNamesInSameBase_throws, but for
+        // a brand-new database (createTablesForNewDatabases), which has its own separate listTables
+        // call and duplicate-name check from the "update an existing database" path.
+        LarkDatabaseRecord larkDb = new LarkDatabaseRecord("dbId1", "new_db");
+        ListAllTableResponse.BaseItem larkTable1 = ListAllTableResponse.BaseItem.builder().tableId("tableId1").name("report a").build();
+        ListAllTableResponse.BaseItem larkTable2 = ListAllTableResponse.BaseItem.builder().tableId("tableId2").name("Report A").build();
+
+        when(mockLarkBaseService.getTableRecords("baseDs123", "tableDs456")).thenReturn(Collections.singletonList(larkDb));
+        when(mockGlueCatalogService.getDatabases()).thenReturn(Collections.emptyList());
+        when(mockLarkBaseService.listTables("dbId1")).thenReturn(java.util.Arrays.asList(larkTable1, larkTable2));
+
+        try {
+            handler.handleRequest(payload, mockContext);
+            fail("Expected RuntimeException for duplicate table names");
+        }
+        catch (RuntimeException e) {
+            assertTrue(e.getMessage().contains("Duplicate table names"));
+        }
     }
 
     @Test

@@ -1,6 +1,6 @@
 /*-
  * #%L
- * glue-lark-base-crawler
+ * athena-lark-base
  * %%
  * Copyright (C) 2019 - 2025 Amazon Web Services
  * %%
@@ -8,7 +8,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,25 +17,26 @@
  * limitations under the License.
  * #L%
  */
-package com.amazonaws.glue.lark.base.crawler.model.response;
+package com.amazonaws.athena.connectors.lark.base.model.response;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Response for List Records
+ * Response for Search Records
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-@JsonDeserialize(builder = ListRecordsResponse.Builder.class)
-public final class ListRecordsResponse extends BaseResponse<ListRecordsResponse.ListData>
+@JsonDeserialize(builder = SearchRecordsResponse.Builder.class)
+public final class SearchRecordsResponse extends BaseResponse<SearchRecordsResponse.ListData>
 {
-    private ListRecordsResponse(Builder builder)
+    private SearchRecordsResponse(Builder builder)
     {
         super(builder);
     }
@@ -63,17 +64,22 @@ public final class ListRecordsResponse extends BaseResponse<ListRecordsResponse.
         return (data != null) && data.hasMore();
     }
 
+    public int getTotal()
+    {
+        ListData data = getData();
+        return (data != null) ? data.total() : 0;
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonDeserialize(builder = RecordItem.Builder.class)
     public static final class RecordItem
     {
+        private Map<String, Object> fields;
         private final String recordId;
-        private final Map<String, Object> fields;
 
         private RecordItem(Builder builder)
         {
-            this.recordId = builder.recordId;
-            // Ensure immutable map, filter out null values (Lark now returns null for empty cells)
+            // Ensure immutable map, filter out null values
             if (builder.fields != null) {
                 Map<String, Object> nonNullFields = builder.fields.entrySet().stream()
                         .filter(e -> e.getValue() != null)
@@ -83,6 +89,13 @@ public final class ListRecordsResponse extends BaseResponse<ListRecordsResponse.
             else {
                 this.fields = Collections.emptyMap();
             }
+            this.recordId = builder.recordId;
+        }
+
+        @JsonProperty("fields")
+        public Map<String, Object> getFields()
+        {
+            return fields;
         }
 
         @JsonProperty("record_id")
@@ -91,9 +104,9 @@ public final class ListRecordsResponse extends BaseResponse<ListRecordsResponse.
             return recordId;
         }
 
-        public Map<String, Object> getFields()
+        public void setFields(Map<String, Object> fields)
         {
-            return fields;
+            this.fields = fields != null ? new HashMap<>(fields) : new HashMap<>();
         }
 
         public static Builder builder()
@@ -238,9 +251,9 @@ public final class ListRecordsResponse extends BaseResponse<ListRecordsResponse.
         }
 
         @Override
-        public ListRecordsResponse build()
+        public SearchRecordsResponse build()
         {
-            return new ListRecordsResponse(this);
+            return new SearchRecordsResponse(this);
         }
     }
 }

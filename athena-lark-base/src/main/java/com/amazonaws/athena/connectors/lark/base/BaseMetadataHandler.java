@@ -96,6 +96,7 @@ import static com.amazonaws.athena.connectors.lark.base.BaseConstants.EXPECTED_R
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.FILTER_EXPRESSION_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.IS_PARALLEL_SPLIT_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_BASE_FLAG;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_NAME_MAPPING_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_TYPE_MAPPING_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE_PROPERTY;
@@ -491,7 +492,8 @@ public class BaseMetadataHandler
                 .addBitField(IS_PARALLEL_SPLIT_PROPERTY)
                 .addBigIntField(SPLIT_START_INDEX_PROPERTY)
                 .addBigIntField(SPLIT_END_INDEX_PROPERTY)
-                .addStringField(LARK_FIELD_TYPE_MAPPING_PROPERTY);
+                .addStringField(LARK_FIELD_TYPE_MAPPING_PROPERTY)
+                .addStringField(LARK_FIELD_NAME_MAPPING_PROPERTY);
     }
 
     /**
@@ -562,6 +564,28 @@ public class BaseMetadataHandler
         }
         catch (JsonProcessingException e) {
             logger.warn("getPartitions: Failed to serialize Lark field type mapping for {}.{}: {}",
+                    tableName.getSchemaName(), tableName.getTableName(), e.getMessage());
+            return "";
+        }
+    }
+
+    private String buildFieldNameMappingJson(List<AthenaFieldLarkBaseMapping> fieldNameMappings, TableName tableName)
+    {
+        if (fieldNameMappings == null || fieldNameMappings.isEmpty()) {
+            return "";
+        }
+
+        Map<String, String> larkFieldNameMap = new HashMap<>();
+        for (AthenaFieldLarkBaseMapping mapping : fieldNameMappings) {
+            larkFieldNameMap.put(mapping.larkBaseFieldName(), mapping.athenaName());
+        }
+
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            return objectMapper.writeValueAsString(larkFieldNameMap);
+        }
+        catch (JsonProcessingException e) {
+            logger.warn("getPartitions: Failed to serialize Lark field name mapping for {}.{}: {}",
                     tableName.getSchemaName(), tableName.getTableName(), e.getMessage());
             return "";
         }
@@ -639,7 +663,7 @@ public class BaseMetadataHandler
 
     private void writeParallelPartitions(BlockWriter blockWriter, String baseId, String tableId,
                                          String filterExpression, String fieldTypeMappingJson,
-                                         long queryLimit, boolean hasOrderBy)
+                                         String fieldNameMappingJson, long queryLimit, boolean hasOrderBy)
     {
         int totalRowCount = getTotalRowCount(baseId, tableId, null);
         long effectiveRowCount = calculateEffectiveRowCount(totalRowCount, queryLimit, hasOrderBy);
@@ -668,6 +692,7 @@ public class BaseMetadataHandler
                 BlockUtils.setValue(block.getFieldVector(SPLIT_START_INDEX_PROPERTY), rowNum, startIndex);
                 BlockUtils.setValue(block.getFieldVector(SPLIT_END_INDEX_PROPERTY), rowNum, endIndex);
                 BlockUtils.setValue(block.getFieldVector(LARK_FIELD_TYPE_MAPPING_PROPERTY), rowNum, fieldTypeMappingJson);
+                BlockUtils.setValue(block.getFieldVector(LARK_FIELD_NAME_MAPPING_PROPERTY), rowNum, fieldNameMappingJson);
                 return 1;
             });
         }
@@ -676,7 +701,7 @@ public class BaseMetadataHandler
 
     private void writeSinglePartition(BlockWriter blockWriter, String baseId, String tableId,
                                       String filterExpression, String sortExpression, String fieldTypeMappingJson,
-                                      long queryLimit, boolean useParallelSplits, boolean hasOrderBy)
+                                      String fieldNameMappingJson, long queryLimit, boolean useParallelSplits, boolean hasOrderBy)
     {
         int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression);
         long effectiveRowCount = calculateEffectiveRowCount(totalRowCount, queryLimit, useParallelSplits && hasOrderBy);
@@ -700,6 +725,7 @@ public class BaseMetadataHandler
             BlockUtils.setValue(block.getFieldVector(SPLIT_START_INDEX_PROPERTY), rowNum, 0L);
             BlockUtils.setValue(block.getFieldVector(SPLIT_END_INDEX_PROPERTY), rowNum, 0L);
             BlockUtils.setValue(block.getFieldVector(LARK_FIELD_TYPE_MAPPING_PROPERTY), rowNum, fieldTypeMappingJson);
+            BlockUtils.setValue(block.getFieldVector(LARK_FIELD_NAME_MAPPING_PROPERTY), rowNum, fieldNameMappingJson);
             return 1;
         });
         logger.info("getPartitions: Successfully wrote 1 single partition row.");
@@ -767,6 +793,7 @@ public class BaseMetadataHandler
 
         long queryLimit = extractQueryLimit(request);
         String fieldTypeMappingJson = buildFieldTypeMappingJson(fieldNameMappings, tableName);
+        String fieldNameMappingJson = buildFieldNameMappingJson(fieldNameMappings, tableName);
         String filterExpression = translateFilterExpression(request, fieldNameMappings, tableName);
 
         boolean useParallelSplits = hasParallelSplitKey(fieldNameMappings);
@@ -777,11 +804,11 @@ public class BaseMetadataHandler
 
         if (shouldUseParallelSplits) {
             writeParallelPartitions(blockWriter, baseId, tableId, filterExpression, fieldTypeMappingJson,
-                    queryLimit, hasOrderBy);
+                    fieldNameMappingJson, queryLimit, hasOrderBy);
         }
         else {
             writeSinglePartition(blockWriter, baseId, tableId, filterExpression, sortExpression,
-                    fieldTypeMappingJson, queryLimit, useParallelSplits, hasOrderBy);
+                    fieldTypeMappingJson, fieldNameMappingJson, queryLimit, useParallelSplits, hasOrderBy);
         }
     }
 
@@ -871,6 +898,7 @@ public class BaseMetadataHandler
         FieldReader startIndexReader = partitions.getFieldReader(SPLIT_START_INDEX_PROPERTY);
         FieldReader endIndexReader = partitions.getFieldReader(SPLIT_END_INDEX_PROPERTY);
         FieldReader larkFieldTypeMappingReader = partitions.getFieldReader(LARK_FIELD_TYPE_MAPPING_PROPERTY);
+        FieldReader larkFieldNameMappingReader = partitions.getFieldReader(LARK_FIELD_NAME_MAPPING_PROPERTY);
 
         for (int rowNum = 0; rowNum < partitionCount; rowNum++) {
             logger.debug("doGetSplits: Processing partition row {}", rowNum);
@@ -885,6 +913,7 @@ public class BaseMetadataHandler
             long splitStartIndex = FieldReaderUtil.readLong(startIndexReader, rowNum);
             long splitEndIndex = FieldReaderUtil.readLong(endIndexReader, rowNum);
             String larkFieldTypeMappingJson = FieldReaderUtil.readText(larkFieldTypeMappingReader, rowNum);
+            String larkFieldNameMappingJson = FieldReaderUtil.readText(larkFieldNameMappingReader, rowNum);
 
             int pageSizeForSplit = pageSizeFromPartition;
             long finalExpectedRowCount = expectedRowCountFromPartition;
@@ -912,7 +941,8 @@ public class BaseMetadataHandler
                     .add(IS_PARALLEL_SPLIT_PROPERTY, String.valueOf(isParallelSplit))
                     .add(SPLIT_START_INDEX_PROPERTY, String.valueOf(splitStartIndex))
                     .add(SPLIT_END_INDEX_PROPERTY, String.valueOf(splitEndIndex))
-                    .add(LARK_FIELD_TYPE_MAPPING_PROPERTY, larkFieldTypeMappingJson);
+                    .add(LARK_FIELD_TYPE_MAPPING_PROPERTY, larkFieldTypeMappingJson)
+                    .add(LARK_FIELD_NAME_MAPPING_PROPERTY, larkFieldNameMappingJson);
 
             if (!isParallelSplit && !sortExpression.isEmpty()) {
                 splitBuilder.add(SORT_EXPRESSION_PROPERTY, sortExpression);

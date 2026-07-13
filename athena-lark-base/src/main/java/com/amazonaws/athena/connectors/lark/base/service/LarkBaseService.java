@@ -23,7 +23,7 @@ import com.amazonaws.athena.connectors.lark.base.model.LarkDatabaseRecord;
 import com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum;
 import com.amazonaws.athena.connectors.lark.base.model.response.ListAllTableResponse;
 import com.amazonaws.athena.connectors.lark.base.model.response.ListFieldResponse;
-import com.amazonaws.athena.connectors.lark.base.model.response.ListRecordsResponse;
+import com.amazonaws.athena.connectors.lark.base.model.response.SearchRecordsResponse;
 import com.amazonaws.athena.connectors.lark.base.util.CommonUtil;
 import com.amazonaws.athena.connectors.lark.base.util.SearchApiResponseNormalizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -137,11 +137,11 @@ public class LarkBaseService extends CommonLarkService
                             .pageToken(pageToken)
                             .build();
 
-            ListRecordsResponse recordsResponse = getTableRecords(tableRecordsRequest);
+            SearchRecordsResponse recordsResponse = getTableRecords(tableRecordsRequest);
 
             if (recordsResponse.getCode() == 0) {
                 if (recordsResponse.getItems() != null) {
-                    for (ListRecordsResponse.RecordItem record : recordsResponse.getItems()) {
+                    for (SearchRecordsResponse.RecordItem record : recordsResponse.getItems()) {
                         Map<String, Object> fields = record.getFields();
 
                         String id = null;
@@ -183,7 +183,7 @@ public class LarkBaseService extends CommonLarkService
      * @return Response with list of records and pagination token
      * @throws IOException if API communication fails
      */
-    public ListRecordsResponse getTableRecords(com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest request) throws IOException
+    public SearchRecordsResponse getTableRecords(com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest request) throws IOException
     {
         requireNonNull(request, "request cannot be null");
         refreshTenantAccessToken();
@@ -222,11 +222,11 @@ public class LarkBaseService extends CommonLarkService
             try (CloseableHttpResponse response = httpClient.execute(httpRequest)) {
                 String responseBody = EntityUtils.toString(response.getEntity());
 
-                ListRecordsResponse recordsResponse =
-                        OBJECT_MAPPER.readValue(responseBody, ListRecordsResponse.class);
+                SearchRecordsResponse recordsResponse =
+                        OBJECT_MAPPER.readValue(responseBody, SearchRecordsResponse.class);
 
                 if (recordsResponse.getCode() == 0) {
-                    sanitizeRecordFieldNames(recordsResponse);
+                    sanitizeRecordFieldNames(recordsResponse, request.getFieldNameToAthenaNameMap());
                     return recordsResponse;
                 }
                 else {
@@ -243,14 +243,21 @@ public class LarkBaseService extends CommonLarkService
      * Sanitize field names and normalize Search API response format for all records
      *
      * @param response Response object
+     * @param fieldNameToAthenaNameMap Maps each original Lark field name to the (possibly
+     * collision-disambiguated) Athena column name decided at schema-discovery time. When two Lark
+     * fields sanitize to the same name (e.g. "Segment 5" and "segment 5" both -> "segment_5"), the
+     * schema already tells them apart by suffixing one with its field ID; re-sanitizing each field
+     * name independently here (ignoring this map) would collapse both back into a single key,
+     * silently dropping one field's value or misattributing it to the other's column. Falls back to
+     * plain sanitization for any field name not present in the map (e.g. no schema was resolved).
      */
-    private void sanitizeRecordFieldNames(ListRecordsResponse response)
+    private void sanitizeRecordFieldNames(SearchRecordsResponse response, Map<String, String> fieldNameToAthenaNameMap)
     {
         if (response.getItems() == null) {
             return;
         }
 
-        for (ListRecordsResponse.RecordItem item : response.getItems()) {
+        for (SearchRecordsResponse.RecordItem item : response.getItems()) {
             Map<String, Object> sanitizedFields = new HashMap<>();
             Map<String, Object> originalFields = item.getFields();
 
@@ -258,9 +265,10 @@ public class LarkBaseService extends CommonLarkService
                 // First normalize Search API format to List API format
                 Map<String, Object> normalizedFields = SearchApiResponseNormalizer.normalizeRecordFields(originalFields);
 
-                // Then sanitize field names for Glue compatibility
+                // Then map field names to their resolved Athena column names
                 for (Map.Entry<String, Object> entry : normalizedFields.entrySet()) {
-                    String sanitizedKey = CommonUtil.sanitizeGlueRelatedName(entry.getKey());
+                    String athenaName = fieldNameToAthenaNameMap.get(entry.getKey());
+                    String sanitizedKey = athenaName != null ? athenaName : CommonUtil.sanitizeGlueRelatedName(entry.getKey());
                     sanitizedFields.put(sanitizedKey, entry.getValue());
                 }
 

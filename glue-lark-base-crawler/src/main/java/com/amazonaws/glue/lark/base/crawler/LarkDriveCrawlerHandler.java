@@ -25,12 +25,14 @@ import com.amazonaws.glue.lark.base.crawler.service.GlueCatalogService;
 import com.amazonaws.glue.lark.base.crawler.service.LarkBaseService;
 import com.amazonaws.glue.lark.base.crawler.service.LarkDriveService;
 import com.amazonaws.glue.lark.base.crawler.service.STSService;
+import com.amazonaws.glue.lark.base.crawler.util.Util;
 import com.amazonaws.services.lambda.runtime.Context;
 import software.amazon.awssdk.services.glue.model.Table;
 import software.amazon.awssdk.services.glue.model.TableInput;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static com.amazonaws.glue.lark.base.crawler.util.Util.constructTableLocationURI;
 
@@ -80,7 +82,20 @@ public class LarkDriveCrawlerHandler extends BaseLarkBaseCrawlerHandler
     @Override
     List<LarkDatabaseRecord> getLarkDatabases()
     {
-        return super.larkDriveService.getLarkBases(larkDriveFolderToken);
+        List<LarkDatabaseRecord> larkBases = super.larkDriveService.getLarkBases(larkDriveFolderToken);
+
+        // Unlike LarkBaseCrawlerHandler's source, names here aren't user-curated in a metadata table -
+        // they're derived from Drive file names, so two distinct bitable files can collide after
+        // sanitization (e.g. "Sales Data" and "sales_data" both -> "sales_data"). Fail loudly and
+        // consistently with the sibling handler rather than letting the second base silently overwrite
+        // the first one downstream (createGlueDatabases keys a Map by this name).
+        if (Util.doesGlueDatabasesNameValid(larkBases.stream()
+                .map(LarkDatabaseRecord::name)
+                .collect(Collectors.toList()))) {
+            throw new RuntimeException("Glue database name is not valid, only lowercase letters, numbers, and underscores are allowed.");
+        }
+
+        return larkBases;
     }
 
     @Override
