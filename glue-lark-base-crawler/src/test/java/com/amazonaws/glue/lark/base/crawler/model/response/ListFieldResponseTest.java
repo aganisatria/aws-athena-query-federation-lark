@@ -57,6 +57,24 @@ public class ListFieldResponseTest {
     }
 
     @Test
+    public void deserialize_withUnrecognizedErrorField_doesNotThrow() throws Exception {
+        // Reproduces a real production crash (glue-lark-base-crawler, LarkBaseService.getTableFields):
+        // Lark's fields-list endpoint sometimes returns an unexpected top-level "error" key, which
+        // Jackson rejected with UnrecognizedPropertyException since ListFieldResponse.Builder (the class
+        // actually deserialized into, per @JsonDeserialize(builder=...)) didn't ignore unknown properties.
+        // This silently failed lookup-type resolution for every field on the affected table (92 times in a
+        // single crawl run observed in production) instead of just ignoring the extra field.
+        com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        String json = "{\"code\":0,\"msg\":\"success\",\"data\":{\"items\":[]},"
+                + "\"error\":{\"log_id\":\"abc123\"}}";
+
+        ListFieldResponse response = objectMapper.readValue(json, ListFieldResponse.class);
+
+        assertEquals(0, response.getCode());
+        assertNotNull(response.getItems());
+    }
+
+    @Test
     public void fieldItem_property_whenValuesAreNull_shouldFilterThemOut() {
         Map<String, Object> propertyWithNull = new HashMap<>();
         propertyWithNull.put("formatter", "0.00");
