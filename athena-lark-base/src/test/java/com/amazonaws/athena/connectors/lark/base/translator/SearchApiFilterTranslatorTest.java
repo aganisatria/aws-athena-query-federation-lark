@@ -154,6 +154,29 @@ public class SearchApiFilterTranslatorTest {
     }
 
     @Test
+    public void testToSplitFilterJson_preservesChildrenOrGroup() throws Exception {
+        // An IN-clause is carried as an OR-group under "children" (see toFilterJson). Combining it with a
+        // parallel-split range must not silently drop that group, or the split's fetched rows would ignore
+        // the query's IN-clause entirely.
+        String existingFilter = "{\"conjunction\":\"and\",\"conditions\":[],"
+                + "\"children\":[{\"conjunction\":\"or\",\"conditions\":["
+                + "{\"field_name\":\"status\",\"operator\":\"is\",\"value\":[\"active\"]},"
+                + "{\"field_name\":\"status\",\"operator\":\"is\",\"value\":[\"pending\"]}]}]}";
+
+        String splitFilter = SearchApiFilterTranslator.toSplitFilterJson(existingFilter, 1, 100);
+
+        assertNotNull(splitFilter);
+        JsonNode filter = OBJECT_MAPPER.readTree(splitFilter);
+        assertEquals(2, filter.get("conditions").size()); // just the 2 split-range conditions
+
+        JsonNode children = filter.get("children");
+        assertNotNull(children);
+        assertEquals(1, children.size());
+        assertEquals("or", children.get(0).get("conjunction").asText());
+        assertEquals(2, children.get(0).get("conditions").size());
+    }
+
+    @Test
     public void testToSplitFilterJson_noExistingFilter() throws Exception {
         String splitFilter = SearchApiFilterTranslator.toSplitFilterJson(null, 1, 100);
 
@@ -535,13 +558,102 @@ public class SearchApiFilterTranslatorTest {
 
         assertNotNull(filterJson);
         JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+
+        // Lark's "is" operator only accepts a single value, so an IN-clause with multiple values must NOT be
+        // emitted as multiple top-level "is" conditions ANDed together (that would require the field to equal
+        // both values at once and always match zero rows). It must be an OR-group nested under "children".
         JsonNode conditions = filter.get("conditions");
-        assertEquals(2, conditions.size());
-        assertEquals("Text Field", conditions.get(0).get("field_name").asText());
+        assertEquals(0, conditions.size());
+
+        JsonNode children = filter.get("children");
+        assertEquals(1, children.size());
+        JsonNode orGroup = children.get(0);
+        assertEquals("or", orGroup.get("conjunction").asText());
+        JsonNode orConditions = orGroup.get("conditions");
+        assertEquals(2, orConditions.size());
+        assertEquals("Text Field", orConditions.get(0).get("field_name").asText());
+        assertEquals("is", orConditions.get(0).get("operator").asText());
+        assertEquals("value1", orConditions.get(0).get("value").get(0).asText());
+        assertEquals("is", orConditions.get(1).get("operator").asText());
+        assertEquals("value2", orConditions.get(1).get("value").get(0).asText());
+    }
+
+    @Test
+    public void testToFilterJson_withEquatableValueSet_whitelistSingleValue_staysFlatCondition() throws Exception {
+        // A single-value IN-clause (effectively "=") should stay a plain top-level condition, not a "children" group.
+        EquatableValueSet valueSet = mock(EquatableValueSet.class);
+        when(valueSet.isWhiteList()).thenReturn(true);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Utf8());
+
+        Block block = mock(Block.class);
+        when(block.getRowCount()).thenReturn(1);
+        when(valueSet.getValueBlock()).thenReturn(block);
+        when(valueSet.getValue(0)).thenReturn("value1");
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_text", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_text", "Text Field",
+                new NestedUIType(UITypeEnum.TEXT, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(1, conditions.size());
         assertEquals("is", conditions.get(0).get("operator").asText());
-        assertEquals("value1", conditions.get(0).get("value").get(0).asText());
-        assertEquals("is", conditions.get(1).get("operator").asText());
-        assertEquals("value2", conditions.get(1).get("value").get(0).asText());
+        assertNull(filter.get("children"));
+    }
+
+    @Test
+    public void testToFilterJson_withEquatableValueSet_multiValueInClauseCombinedWithOtherColumn() throws Exception {
+        // WHERE status IN ('active', 'pending') AND priority = 'high'
+        EquatableValueSet inClauseValueSet = mock(EquatableValueSet.class);
+        when(inClauseValueSet.isWhiteList()).thenReturn(true);
+        when(inClauseValueSet.isNullAllowed()).thenReturn(false);
+        when(inClauseValueSet.getType()).thenReturn(new ArrowType.Utf8());
+        Block inClauseBlock = mock(Block.class);
+        when(inClauseBlock.getRowCount()).thenReturn(2);
+        when(inClauseValueSet.getValueBlock()).thenReturn(inClauseBlock);
+        when(inClauseValueSet.getValue(0)).thenReturn("active");
+        when(inClauseValueSet.getValue(1)).thenReturn("pending");
+
+        EquatableValueSet equalityValueSet = mock(EquatableValueSet.class);
+        when(equalityValueSet.isWhiteList()).thenReturn(true);
+        when(equalityValueSet.isNullAllowed()).thenReturn(false);
+        when(equalityValueSet.getType()).thenReturn(new ArrowType.Utf8());
+        Block equalityBlock = mock(Block.class);
+        when(equalityBlock.getRowCount()).thenReturn(1);
+        when(equalityValueSet.getValueBlock()).thenReturn(equalityBlock);
+        when(equalityValueSet.getValue(0)).thenReturn("high");
+
+        Map<String, ValueSet> constraints = new LinkedHashMap<>();
+        constraints.put("status", inClauseValueSet);
+        constraints.put("priority", equalityValueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Arrays.asList(
+            new AthenaFieldLarkBaseMapping("status", "Status", new NestedUIType(UITypeEnum.TEXT, null)),
+            new AthenaFieldLarkBaseMapping("priority", "Priority", new NestedUIType(UITypeEnum.TEXT, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        assertEquals("and", filter.get("conjunction").asText());
+
+        // The single-value equality condition stays a flat, top-level AND condition.
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(1, conditions.size());
+        assertEquals("Priority", conditions.get(0).get("field_name").asText());
+
+        // The multi-value IN-clause becomes its own OR-group.
+        JsonNode children = filter.get("children");
+        assertEquals(1, children.size());
+        JsonNode orGroup = children.get(0);
+        assertEquals("or", orGroup.get("conjunction").asText());
+        assertEquals(2, orGroup.get("conditions").size());
+        assertEquals("Status", orGroup.get("conditions").get(0).get("field_name").asText());
     }
 
     @Test
@@ -572,6 +684,38 @@ public class SearchApiFilterTranslatorTest {
         assertEquals(1, conditions.size());
         assertEquals("isNot", conditions.get(0).get("operator").asText());
         assertEquals("excluded", conditions.get(0).get("value").get(0).asText());
+    }
+
+    @Test
+    public void testToFilterJson_withEquatableValueSet_multiValueBlacklist_staysFlatAndCondition() throws Exception {
+        // WHERE field NOT IN ('a', 'b') is correctly "field != a AND field != b" - unlike the whitelist (IN) case,
+        // ANDing multiple "isNot" conditions together is already correct, so this must stay flat, not grouped.
+        EquatableValueSet valueSet = mock(EquatableValueSet.class);
+        when(valueSet.isWhiteList()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Utf8());
+
+        Block block = mock(Block.class);
+        when(block.getRowCount()).thenReturn(2);
+        when(valueSet.getValueBlock()).thenReturn(block);
+        when(valueSet.getValue(0)).thenReturn("a");
+        when(valueSet.getValue(1)).thenReturn("b");
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_text", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_text", "Text Field",
+                new NestedUIType(UITypeEnum.TEXT, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(2, conditions.size());
+        assertEquals("isNot", conditions.get(0).get("operator").asText());
+        assertEquals("isNot", conditions.get(1).get("operator").asText());
+        assertNull(filter.get("children"));
     }
 
     @Test
