@@ -420,8 +420,19 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
             }
 
             for (ListAllTableResponse.BaseItem tableItem : listTables) {
-                TableInput newTableInput = this.constructNewTables(databaseId, tableItem.getTableId(), tableItem.getName());
-                tableInputs.add(newTableInput);
+                // getTableFields (inside constructNewTables) can fail for reasons unrelated to any
+                // other table - e.g. a field restricted by Advanced Permission at the field level, or
+                // a transient API error - and this table's own field list is a separate Lark API call
+                // per table, not a batch. Isolate the failure to this one table instead of letting it
+                // crash database and table creation for every other table in this (and other) bases.
+                try {
+                    TableInput newTableInput = this.constructNewTables(databaseId, tableItem.getTableId(), tableItem.getName());
+                    tableInputs.add(newTableInput);
+                }
+                catch (Exception e) {
+                    logger.error("Skipping table {} ({}) in base {}: failed to construct table input: {}",
+                            tableItem.getName(), tableItem.getTableId(), databaseId, e.getMessage(), e);
+                }
             }
 
             if (!tableInputs.isEmpty()) {
@@ -720,8 +731,16 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
                         .orElse(null);
 
                 if (tableId != null) {
-                    TableInput newTableInput = this.constructNewTables(databaseId, tableId, tableName);
-                    tablesToCreate.add(newTableInput);
+                    // See the comment in createTablesForNewDatabases: isolate a single table's
+                    // getTableFields failure instead of crashing the whole database update.
+                    try {
+                        TableInput newTableInput = this.constructNewTables(databaseId, tableId, tableName);
+                        tablesToCreate.add(newTableInput);
+                    }
+                    catch (Exception e) {
+                        logger.error("Skipping table {} ({}) in base {}: failed to construct table input: {}",
+                                tableName, tableId, databaseId, e.getMessage(), e);
+                    }
                 }
             }
         }
@@ -755,13 +774,21 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
                         .orElse(null);
 
                 if (existingTable != null) {
-                    TableInput tableInput = this.constructNewTables(databaseId, tableItem.getTableId(), tableName);
-                    boolean hasChanged = doesTableInputChanged(tableInput, existingTable);
-                    logger.info("Table {} has changed: {}", tableName, hasChanged);
+                    // See the comment in createTablesForNewDatabases: isolate a single table's
+                    // getTableFields failure instead of crashing the whole database update.
+                    try {
+                        TableInput tableInput = this.constructNewTables(databaseId, tableItem.getTableId(), tableName);
+                        boolean hasChanged = doesTableInputChanged(tableInput, existingTable);
+                        logger.info("Table {} has changed: {}", tableName, hasChanged);
 
-                    if (hasChanged) {
-                        tablesToUpdate.add(tableInput);
-                        logger.info("Marking table for update: {}", tableName);
+                        if (hasChanged) {
+                            tablesToUpdate.add(tableInput);
+                            logger.info("Marking table for update: {}", tableName);
+                        }
+                    }
+                    catch (Exception e) {
+                        logger.error("Skipping table {} ({}) in base {}: failed to construct table input: {}",
+                                tableName, tableItem.getTableId(), databaseId, e.getMessage(), e);
                     }
                 }
             }
