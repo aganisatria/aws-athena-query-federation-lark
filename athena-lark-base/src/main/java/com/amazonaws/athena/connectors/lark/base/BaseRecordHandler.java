@@ -68,6 +68,7 @@ import static com.amazonaws.athena.connectors.lark.base.BaseConstants.BASE_ID_PR
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.EXPECTED_ROW_COUNT_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.FILTER_EXPRESSION_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.IS_PARALLEL_SPLIT_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_NAME_MAPPING_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_TYPE_MAPPING_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RESERVED_BASE_ID;
@@ -165,6 +166,24 @@ public class BaseRecordHandler extends RecordHandler
                 logger.warn("readWithConstraint: Failed to deserialize Lark field type mapping: {}. Proceeding without it.", e.getMessage(), e);
             }
         }
+
+        // Maps each original Lark field name to its resolved (possibly collision-disambiguated)
+        // Athena column name. Without this, re-sanitizing field names independently while fetching
+        // records would collapse two colliding fields back into a single key, even though the schema
+        // (built from the same fieldNameMappings) already tells them apart.
+        String larkFieldNameMappingJson = split.getProperty(LARK_FIELD_NAME_MAPPING_PROPERTY);
+        Map<String, String> larkFieldNameMap = Collections.emptyMap();
+
+        if (larkFieldNameMappingJson != null && !larkFieldNameMappingJson.isEmpty()) {
+            try {
+                larkFieldNameMap = objectMapper.readValue(larkFieldNameMappingJson, new TypeReference<>()
+                {
+                });
+            }
+            catch (Exception e) {
+                logger.warn("readWithConstraint: Failed to deserialize Lark field name mapping: {}. Proceeding without it.", e.getMessage(), e);
+            }
+        }
         RegistererExtractor localRegistererExtractor = new RegistererExtractor(larkFieldTypeMap);
         if (envVarService.isEnableDebugLogging()) {
             logger.info("readWithConstraint: enter - {}", recordsRequest.getSplit());
@@ -192,7 +211,8 @@ public class BaseRecordHandler extends RecordHandler
                     splitStartIndex,
                     splitEndIndex,
                     originalFilterExpression,
-                    originalSortExpression);
+                    originalSortExpression,
+                    larkFieldNameMap);
 
             writeItemsToBlock(spiller, recordsRequest, queryStatusChecker, recordIterator, localRegistererExtractor);
         }
@@ -434,7 +454,8 @@ public class BaseRecordHandler extends RecordHandler
             long splitStartIndex,
             long splitEndIndex,
             String originalFilterExpression,
-            String originalSortExpression)
+            String originalSortExpression,
+            Map<String, String> fieldNameToAthenaNameMap)
     {
         return new Iterator<>()
         {
@@ -488,6 +509,7 @@ public class BaseRecordHandler extends RecordHandler
                                     .pageToken(currentPageToken)
                                     .filterJson(finalFilterExpression)
                                     .sortJson(finalSortExpression)
+                                    .fieldNameToAthenaNameMap(fieldNameToAthenaNameMap)
                                     .build();
 
                     ListRecordsResponse response = invokerCache.get(tableId).invoke(() ->

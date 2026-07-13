@@ -256,6 +256,50 @@ public class LarkBaseTableResolverTest {
     }
 
     @Test
+    public void testResolveTables_DuplicateSanitizedDatabaseNames_disambiguatesWithId() throws Exception {
+        // Reproduces a real risk: two distinct Lark Bases (e.g. Drive files "Sales Data" and
+        // "sales_data") both sanitize to the same Athena schema name. Without disambiguation, the
+        // second base would be permanently shadowed by LarkSourceMetadataProvider.findMapping()'s
+        // findFirst() - it would never be reachable via Athena, with no error at all.
+        when(mockEnvVarService.isActivateLarkBaseSource()).thenReturn(true);
+        when(mockEnvVarService.getLarkBaseSources()).thenReturn("base1:table1");
+        when(mockLarkBaseService.getDatabaseRecords(anyString(), anyString())).thenReturn(List.of(
+                new LarkDatabaseRecord("dbId1", "sales_data"),
+                new LarkDatabaseRecord("dbId2", "sales_data")));
+        when(mockLarkBaseService.listTables(anyString())).thenReturn(Collections.singletonList(
+                ListAllTableResponse.BaseItem.builder().name("table1").tableId("tableId1").build()));
+        when(mockLarkBaseService.getTableFields(anyString(), anyString())).thenReturn(Collections.emptyList());
+
+        List<TableDirectInitialized> tables = resolver.resolveTables();
+
+        assertEquals(2, tables.size());
+        List<String> dbNames = tables.stream().map(t -> t.database().athenaName()).toList();
+        assertEquals(2, new java.util.HashSet<>(dbNames).size());
+        assertEquals("sales_data", dbNames.get(0));
+        assertEquals("sales_data_dbid2", dbNames.get(1));
+    }
+
+    @Test
+    public void testResolveTables_DuplicateSanitizedTableNamesInSameBase_disambiguatesWithId() throws Exception {
+        // Same collision risk as database names, but scoped to two tables within one base.
+        when(mockEnvVarService.isActivateLarkBaseSource()).thenReturn(true);
+        when(mockEnvVarService.getLarkBaseSources()).thenReturn("base1:table1");
+        when(mockLarkBaseService.getDatabaseRecords(anyString(), anyString())).thenReturn(Collections.singletonList(new LarkDatabaseRecord("db1", "base1")));
+        when(mockLarkBaseService.listTables(anyString())).thenReturn(List.of(
+                ListAllTableResponse.BaseItem.builder().name("report a").tableId("tableId1").build(),
+                ListAllTableResponse.BaseItem.builder().name("Report A").tableId("tableId2").build()));
+        when(mockLarkBaseService.getTableFields(anyString(), anyString())).thenReturn(Collections.emptyList());
+
+        List<TableDirectInitialized> tables = resolver.resolveTables();
+
+        assertEquals(2, tables.size());
+        List<String> tableNames = tables.stream().map(t -> t.table().athenaName()).toList();
+        assertEquals(2, new java.util.HashSet<>(tableNames).size());
+        assertEquals("report_a", tableNames.get(0));
+        assertEquals("report_a_tableid2", tableNames.get(1));
+    }
+
+    @Test
     public void testDiscoverTableFields_InvalidFieldName() throws Exception {
         when(mockEnvVarService.isActivateLarkBaseSource()).thenReturn(true);
         when(mockEnvVarService.getLarkBaseSources()).thenReturn("base1:table1");

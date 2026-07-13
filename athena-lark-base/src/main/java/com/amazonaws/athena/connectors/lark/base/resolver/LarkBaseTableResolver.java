@@ -80,9 +80,15 @@ public class LarkBaseTableResolver
     public List<TableDirectInitialized> resolveTables()
     {
         List<TableDirectInitialized> resolvedMappings = new ArrayList<>();
+        // Shared across every source/location processed below: two Lark Bases discovered from
+        // different sources (or different locations of the same source) can still collide on the
+        // same Athena schema name after sanitization, so this must be tracked globally, not reset
+        // per-source - LarkSourceMetadataProvider.findMapping() matches by this name across the
+        // whole combined resolvedMappings list.
+        Set<String> seenDatabaseNames = new HashSet<>();
 
         if (envVarService.isActivateLarkBaseSource()) {
-            List<TableDirectInitialized> larkBaseTables = resolveFromLarkBaseSource();
+            List<TableDirectInitialized> larkBaseTables = resolveFromLarkBaseSource(seenDatabaseNames);
             logger.info("Lark Base source path: Resolved {} table mappings.", larkBaseTables.size());
             resolvedMappings.addAll(larkBaseTables);
         }
@@ -91,7 +97,7 @@ public class LarkBaseTableResolver
         }
 
         if (envVarService.isActivateLarkDriveSource()) {
-            List<TableDirectInitialized> larkDriveTables = resolveFromLarkDriveSource();
+            List<TableDirectInitialized> larkDriveTables = resolveFromLarkDriveSource(seenDatabaseNames);
             logger.info("Lark Drive source path: Resolved {} table mappings.", larkDriveTables.size());
             resolvedMappings.addAll(larkDriveTables);
         }
@@ -103,7 +109,7 @@ public class LarkBaseTableResolver
         return resolvedMappings;
     }
 
-    private List<TableDirectInitialized> resolveFromLarkBaseSource()
+    private List<TableDirectInitialized> resolveFromLarkBaseSource(Set<String> seenDatabaseNames)
     {
         Map<String, Set<String>> metadataTableLocations = CommonUtil.constructLarkBaseMappingFromLarkBaseSource(
                 envVarService.getLarkBaseSources()
@@ -116,7 +122,7 @@ public class LarkBaseTableResolver
             for (String metadataTableId : locationEntry.getValue()) {
                 try {
                     List<LarkDatabaseRecord> targetDatabaseRecords = invoker.invoke(() -> larkBaseService.getDatabaseRecords(metadataBaseId, metadataTableId));
-                    resolvedTables.addAll(processTargetDatabaseRecords(targetDatabaseRecords, "Base:" + metadataBaseId + "/" + metadataTableId));
+                    resolvedTables.addAll(processTargetDatabaseRecords(targetDatabaseRecords, "Base:" + metadataBaseId + "/" + metadataTableId, seenDatabaseNames));
                 }
                 catch (TimeoutException e) {
                     logger.error("Timeout while reading records from metadata table {}-{}: {}", metadataBaseId, metadataTableId, e.getMessage(), e);
@@ -129,7 +135,7 @@ public class LarkBaseTableResolver
         return resolvedTables;
     }
 
-    private List<TableDirectInitialized> resolveFromLarkDriveSource()
+    private List<TableDirectInitialized> resolveFromLarkDriveSource(Set<String> seenDatabaseNames)
     {
         Set<String> metadataTableLocations = new HashSet<>();
         String driveSources = envVarService.getLarkDriveSources();
@@ -145,7 +151,7 @@ public class LarkBaseTableResolver
             }
             try {
                 List<LarkDatabaseRecord> targetDatabaseRecords = invoker.invoke(() -> larkDriveService.getLarkBases(metadataTableId));
-                resolvedTables.addAll(processTargetDatabaseRecords(targetDatabaseRecords, "Drive:" + metadataTableId));
+                resolvedTables.addAll(processTargetDatabaseRecords(targetDatabaseRecords, "Drive:" + metadataTableId, seenDatabaseNames));
             }
             catch (TimeoutException e) {
                 logger.error("Timeout while reading records from Drive metadata table {}: {}", metadataTableId, e.getMessage(), e);
@@ -157,23 +163,30 @@ public class LarkBaseTableResolver
         return resolvedTables;
     }
 
-    private List<TableDirectInitialized> processTargetDatabaseRecords(List<LarkDatabaseRecord> targetDatabaseRecords, String sourceDescription) throws TimeoutException
+    private List<TableDirectInitialized> processTargetDatabaseRecords(List<LarkDatabaseRecord> targetDatabaseRecords, String sourceDescription, Set<String> seenDatabaseNames) throws TimeoutException
     {
         List<TableDirectInitialized> discoveredTables = new ArrayList<>();
 
         for (LarkDatabaseRecord record : targetDatabaseRecords) {
-            String prestoDbName = record.name();
             String larkBaseId = record.id();
+            // Two distinct Lark Bases can sanitize (or, for the unsanitized metadata-table source,
+            // literally coincide) to the same Athena schema name. Without disambiguation, the second
+            // one would be permanently shadowed by LarkSourceMetadataProvider.findMapping()'s
+            // findFirst() - it would never be reachable via Athena, with no error at all.
+            String prestoDbName = CommonUtil.sanitizeGlueRelatedNameWithDedup(record.name(), larkBaseId, seenDatabaseNames);
 
             logger.info("Processing database record from {}: PrestoName='{}', LarkBaseID='{}'", sourceDescription, prestoDbName, larkBaseId);
 
             if (isValidIdentifier(prestoDbName) && isValidIdentifier(larkBaseId)) {
                 AthenaLarkBaseMapping dbMapping = new AthenaLarkBaseMapping(prestoDbName, larkBaseId);
+                Set<String> seenTableNames = new HashSet<>();
                 try {
                     List<ListAllTableResponse.BaseItem> tablesFromLark = invoker.invoke(() -> larkBaseService.listTables(larkBaseId));
                     for (ListAllTableResponse.BaseItem table : tablesFromLark) {
-                        String prestoTableName = table.getName();
                         String larkTableId = table.getTableId();
+                        // Same collision risk as database names, but scoped to tables within this one
+                        // base (two tables in different bases sharing a name is fine - different schema).
+                        String prestoTableName = CommonUtil.sanitizeGlueRelatedNameWithDedup(table.getName(), larkTableId, seenTableNames);
 
                         if (isValidIdentifier(prestoTableName) && isValidIdentifier(larkTableId)) {
                             AthenaLarkBaseMapping tableMapping = new AthenaLarkBaseMapping(prestoTableName, larkTableId);

@@ -19,6 +19,9 @@
  */
 package com.amazonaws.athena.connectors.lark.base.model.request;
 
+import java.util.Collections;
+import java.util.Map;
+
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -33,6 +36,7 @@ public final class TableRecordsRequest
     private final String pageToken;
     private final String filterJson;
     private final String sortJson;
+    private final Map<String, String> fieldNameToAthenaNameMap;
 
     private TableRecordsRequest(Builder builder)
     {
@@ -42,6 +46,7 @@ public final class TableRecordsRequest
         this.pageToken = builder.pageToken;
         this.filterJson = builder.filterJson;
         this.sortJson = builder.sortJson;
+        this.fieldNameToAthenaNameMap = builder.fieldNameToAthenaNameMap;
     }
 
     public String getBaseId()
@@ -74,6 +79,17 @@ public final class TableRecordsRequest
         return sortJson;
     }
 
+    /**
+     * Maps each original Lark field name to the (possibly collision-disambiguated) Athena column
+     * name decided at schema-discovery time. Used to correctly re-key each record's raw field data
+     * so it lands on the right Athena column - re-sanitizing field names independently here would
+     * lose the disambiguation and either misplace or null out a colliding field's actual values.
+     */
+    public Map<String, String> getFieldNameToAthenaNameMap()
+    {
+        return fieldNameToAthenaNameMap;
+    }
+
     public static Builder builder()
     {
         return new Builder();
@@ -87,6 +103,7 @@ public final class TableRecordsRequest
         private String pageToken;
         private String filterJson;
         private String sortJson;
+        private Map<String, String> fieldNameToAthenaNameMap = Collections.emptyMap();
 
         private Builder()
         {
@@ -125,6 +142,12 @@ public final class TableRecordsRequest
         public Builder sortJson(String sortJson)
         {
             this.sortJson = sortJson;
+            return this;
+        }
+
+        public Builder fieldNameToAthenaNameMap(Map<String, String> fieldNameToAthenaNameMap)
+        {
+            this.fieldNameToAthenaNameMap = fieldNameToAthenaNameMap != null ? fieldNameToAthenaNameMap : Collections.emptyMap();
             return this;
         }
 

@@ -165,6 +165,13 @@ public final class BaseConstants
     public static final String LARK_FIELD_TYPE_MAPPING_PROPERTY = "lark_field_type_mapping";
 
     /**
+     * The property that helps metadata handler and record handler communicate the mapping from each
+     * original Lark field name to its resolved (possibly collision-disambiguated) Athena column name.
+     * Stores a JSON string representing a Map<String, String> (LarkFieldName -> AthenaFieldName).
+     */
+    public static final String LARK_FIELD_NAME_MAPPING_PROPERTY = "lark_field_name_mapping";
+
+    /**
      * The reserved record id property that helps metadata handler and record handler communicate the reserved record id.
      * this is used to identify the record id that is used to identify the record in the lark base.
      */

@@ -39,6 +39,7 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -209,6 +210,37 @@ public class LarkBaseServiceTest {
         assertEquals("rec123", result1.getItems().get(0).getRecordId());
         assertEquals(1, result2.getItems().size());
         assertEquals("rec456", result2.getItems().get(0).getRecordId());
+    }
+
+    @Test
+    public void getTableRecords_collidingFieldNames_withFieldNameMap_preservesBothValues() throws Exception {
+        // Reproduces a real production case: two distinct Lark fields "segment 5" and "Segment 5"
+        // both sanitize to "segment_5". Without the field-name mapping computed at schema-discovery
+        // time (and passed in via the request), sanitizeRecordFieldNames would collapse both fields'
+        // values into a single "segment_5" key, silently losing one of them for every row.
+        String baseId = "baseR1";
+        String tableId = "tblR1";
+        String mockJsonResponse = "{\"code\":0,\"data\":{\"items\":[{\"record_id\":\"rec123\","
+                + "\"fields\":{\"segment 5\":\"00\",\"Segment 5\":\"SS\"}}],\"has_more\":false}}";
+
+        MockHttpClientWrapper mockHttpClient = new MockHttpClientWrapper();
+        mockHttpClient.addResponse(mockJsonResponse, 200, "OK");
+        LarkBaseService larkBaseService = new LarkBaseService(TEST_APP_ID, TEST_APP_SECRET, mockHttpClient);
+
+        Map<String, String> fieldNameToAthenaNameMap = Map.of(
+                "segment 5", "segment_5",
+                "Segment 5", "segment_5_fldzrayo2s");
+
+        TableRecordsRequest request = TableRecordsRequest.builder()
+                .baseId(baseId)
+                .tableId(tableId)
+                .fieldNameToAthenaNameMap(fieldNameToAthenaNameMap)
+                .build();
+        ListRecordsResponse result = larkBaseService.getTableRecords(request);
+
+        Map<String, Object> fields = result.getItems().get(0).getFields();
+        assertEquals("00", fields.get("segment_5"));
+        assertEquals("SS", fields.get("segment_5_fldzrayo2s"));
     }
 
     @Test

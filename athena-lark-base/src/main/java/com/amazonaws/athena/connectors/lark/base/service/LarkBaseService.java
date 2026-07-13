@@ -226,7 +226,7 @@ public class LarkBaseService extends CommonLarkService
                         OBJECT_MAPPER.readValue(responseBody, ListRecordsResponse.class);
 
                 if (recordsResponse.getCode() == 0) {
-                    sanitizeRecordFieldNames(recordsResponse);
+                    sanitizeRecordFieldNames(recordsResponse, request.getFieldNameToAthenaNameMap());
                     return recordsResponse;
                 }
                 else {
@@ -243,8 +243,15 @@ public class LarkBaseService extends CommonLarkService
      * Sanitize field names and normalize Search API response format for all records
      *
      * @param response Response object
+     * @param fieldNameToAthenaNameMap Maps each original Lark field name to the (possibly
+     * collision-disambiguated) Athena column name decided at schema-discovery time. When two Lark
+     * fields sanitize to the same name (e.g. "Segment 5" and "segment 5" both -> "segment_5"), the
+     * schema already tells them apart by suffixing one with its field ID; re-sanitizing each field
+     * name independently here (ignoring this map) would collapse both back into a single key,
+     * silently dropping one field's value or misattributing it to the other's column. Falls back to
+     * plain sanitization for any field name not present in the map (e.g. no schema was resolved).
      */
-    private void sanitizeRecordFieldNames(ListRecordsResponse response)
+    private void sanitizeRecordFieldNames(ListRecordsResponse response, Map<String, String> fieldNameToAthenaNameMap)
     {
         if (response.getItems() == null) {
             return;
@@ -258,9 +265,10 @@ public class LarkBaseService extends CommonLarkService
                 // First normalize Search API format to List API format
                 Map<String, Object> normalizedFields = SearchApiResponseNormalizer.normalizeRecordFields(originalFields);
 
-                // Then sanitize field names for Glue compatibility
+                // Then map field names to their resolved Athena column names
                 for (Map.Entry<String, Object> entry : normalizedFields.entrySet()) {
-                    String sanitizedKey = CommonUtil.sanitizeGlueRelatedName(entry.getKey());
+                    String athenaName = fieldNameToAthenaNameMap.get(entry.getKey());
+                    String sanitizedKey = athenaName != null ? athenaName : CommonUtil.sanitizeGlueRelatedName(entry.getKey());
                     sanitizedFields.put(sanitizedKey, entry.getValue());
                 }
 

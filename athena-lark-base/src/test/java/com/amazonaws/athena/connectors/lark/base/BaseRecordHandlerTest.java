@@ -261,7 +261,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -317,7 +318,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -359,7 +361,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -392,7 +395,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertFalse(iterator.hasNext());
@@ -412,7 +416,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         // After the fix, exceptions should be handled gracefully and return false instead of throwing
@@ -442,7 +447,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertThrows(NoSuchElementException.class, iterator::next);
@@ -477,7 +483,8 @@ public class BaseRecordHandlerTest {
                 1,
                 100,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -513,7 +520,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "filter",
-                "sort"
+                "sort",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -534,7 +542,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertFalse(iterator.hasNext());
@@ -563,7 +572,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertFalse(iterator.hasNext());
@@ -597,7 +607,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -636,7 +647,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -675,7 +687,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         int count = 0;
@@ -714,7 +727,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 null,
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         assertTrue(iterator.hasNext());
@@ -1234,7 +1248,8 @@ public class BaseRecordHandlerTest {
                 0,
                 0,
                 "",
-                ""
+                "",
+                Collections.emptyMap()
         );
 
         // Fetch all available in first page (10 items)
@@ -1388,12 +1403,14 @@ public class BaseRecordHandlerTest {
                                                             int pageSizeForApi, int expectedRowCountForSplit,
                                                             boolean isParallelSplit, long splitStartIndex,
                                                             long splitEndIndex, String originalFilterExpression,
-                                                            String originalSortExpression) {
+                                                            String originalSortExpression,
+                                                            Map<String, String> fieldNameToAthenaNameMap) {
             if (customIterator != null) {
                 return customIterator;
             }
             return super.getIterator(baseId, tableId, pageSizeForApi, expectedRowCountForSplit,
-                    isParallelSplit, splitStartIndex, splitEndIndex, originalFilterExpression, originalSortExpression);
+                    isParallelSplit, splitStartIndex, splitEndIndex, originalFilterExpression, originalSortExpression,
+                    fieldNameToAthenaNameMap);
         }
 
         public void setCustomIterator(Iterator<Map<String, Object>> iterator) {
