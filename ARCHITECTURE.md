@@ -852,6 +852,18 @@ All tables automatically include these fields:
 - Complex types (ATTACHMENT, PERSON, etc.)
 - FORMULA fields
 
+**IN-clauses and OR'd ranges**: Lark's Search API has no native "in" operator and its `is`/`isNot`
+operators accept only one value each, so a multi-value IN-clause (`WHERE x IN (a, b)`) and a multi-range
+union on one column (`WHERE x < 5 OR x > 100`, or `x != 5` when modeled internally as two disjoint ranges)
+are both pushed down as an OR-group nested under the top-level AND via `children`, matching Lark's filter
+guide. `NOT IN` is unaffected - ANDing multiple `isNot` conditions is already correct. A union containing a
+range that needs both bounds (e.g. a BETWEEN mixed into the union) can't be expressed this way, since Lark
+supports only one level of `children` nesting with a single conjunction per group ("OR of ANDs" would need
+two levels) - that case is skipped entirely and left to Athena's client-side filtering rather than risk
+pushing down an incorrect result. Verified against Lark's live Search Records API: `x < 1 OR x > 200000000`
+correctly matched the expected rows, while `x < 1 AND x > 200000000` (the flattened equivalent) always
+matched zero rows.
+
 **Example**:
 ```sql
 -- SQL Query

@@ -534,6 +534,122 @@ public class SearchApiFilterTranslatorTest {
     }
 
     @Test
+    public void testToFilterJson_withSortedRangeSet_multiRangeUnion_pushedDownAsOrGroup() throws Exception {
+        // WHERE field_number < 5 OR field_number > 100 - Presto/Trino models this as a single SortedRangeSet
+        // with two disjoint, single-bounded ranges (per the SDK's own definition of SortedRangeSet: "col
+        // between 10 and 30, or col between 40 and 60, ..."). Flattening both ranges' conditions into the
+        // same top-level AND list (the pre-fix behavior) would produce "field_number < 5 AND field_number >
+        // 100", which can never match anything. It must instead become an OR-group.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(true);
+        when(valueSet.getType()).thenReturn(new ArrowType.Int(32, true));
+
+        Ranges ranges = mock(Ranges.class);
+
+        Range lessThanFive = mock(Range.class);
+        Marker lessThanFiveLow = mock(Marker.class);
+        Marker lessThanFiveHigh = mock(Marker.class);
+        when(lessThanFiveLow.isLowerUnbounded()).thenReturn(true);
+        when(lessThanFiveHigh.isUpperUnbounded()).thenReturn(false);
+        when(lessThanFiveHigh.getBound()).thenReturn(Marker.Bound.BELOW);
+        when(lessThanFiveHigh.getValue()).thenReturn(5);
+        when(lessThanFive.getLow()).thenReturn(lessThanFiveLow);
+        when(lessThanFive.getHigh()).thenReturn(lessThanFiveHigh);
+
+        Range greaterThanHundred = mock(Range.class);
+        Marker greaterThanHundredLow = mock(Marker.class);
+        Marker greaterThanHundredHigh = mock(Marker.class);
+        when(greaterThanHundredLow.isLowerUnbounded()).thenReturn(false);
+        when(greaterThanHundredLow.getBound()).thenReturn(Marker.Bound.ABOVE);
+        when(greaterThanHundredLow.getValue()).thenReturn(100);
+        when(greaterThanHundredHigh.isUpperUnbounded()).thenReturn(true);
+        when(greaterThanHundred.getLow()).thenReturn(greaterThanHundredLow);
+        when(greaterThanHundred.getHigh()).thenReturn(greaterThanHundredHigh);
+
+        when(ranges.getOrderedRanges()).thenReturn(Arrays.asList(lessThanFive, greaterThanHundred));
+        when(valueSet.getRanges()).thenReturn(ranges);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_number", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_number", "Number Field",
+                new NestedUIType(UITypeEnum.NUMBER, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        // No top-level AND conditions for this field - it must live entirely inside the OR-group.
+        assertEquals(0, filter.get("conditions").size());
+
+        JsonNode children = filter.get("children");
+        assertEquals(1, children.size());
+        JsonNode orGroup = children.get(0);
+        assertEquals("or", orGroup.get("conjunction").asText());
+        JsonNode orConditions = orGroup.get("conditions");
+        assertEquals(2, orConditions.size());
+        assertEquals("isLess", orConditions.get(0).get("operator").asText());
+        assertEquals("5", orConditions.get(0).get("value").get(0).asText());
+        assertEquals("isGreater", orConditions.get(1).get("operator").asText());
+        assertEquals("100", orConditions.get(1).get("value").get(0).asText());
+    }
+
+    @Test
+    public void testToFilterJson_withSortedRangeSet_multiRangeUnionWithDoubleBoundedRange_skipsPushdown() throws Exception {
+        // A union containing a range that needs BOTH bounds (e.g. one BETWEEN-shaped range OR'd with a
+        // single-bounded range) can't be expressed within Lark's one-level-of-nesting filter API (it would
+        // require "OR of ANDs"). It must be skipped entirely rather than pushed down incorrectly.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(true);
+        when(valueSet.getType()).thenReturn(new ArrowType.Int(32, true));
+
+        Ranges ranges = mock(Ranges.class);
+
+        // First range: BETWEEN 10 AND 20 (both bounds set).
+        Range between = mock(Range.class);
+        Marker betweenLow = mock(Marker.class);
+        Marker betweenHigh = mock(Marker.class);
+        when(betweenLow.isLowerUnbounded()).thenReturn(false);
+        when(betweenLow.getBound()).thenReturn(Marker.Bound.EXACTLY);
+        when(betweenLow.getValue()).thenReturn(10);
+        when(betweenHigh.isUpperUnbounded()).thenReturn(false);
+        when(betweenHigh.getBound()).thenReturn(Marker.Bound.EXACTLY);
+        when(betweenHigh.getValue()).thenReturn(20);
+        when(between.getLow()).thenReturn(betweenLow);
+        when(between.getHigh()).thenReturn(betweenHigh);
+
+        // Second range: > 100 (single-bounded).
+        Range greaterThanHundred = mock(Range.class);
+        Marker greaterThanHundredLow = mock(Marker.class);
+        Marker greaterThanHundredHigh = mock(Marker.class);
+        when(greaterThanHundredLow.isLowerUnbounded()).thenReturn(false);
+        when(greaterThanHundredLow.getBound()).thenReturn(Marker.Bound.ABOVE);
+        when(greaterThanHundredLow.getValue()).thenReturn(100);
+        when(greaterThanHundredHigh.isUpperUnbounded()).thenReturn(true);
+        when(greaterThanHundred.getLow()).thenReturn(greaterThanHundredLow);
+        when(greaterThanHundred.getHigh()).thenReturn(greaterThanHundredHigh);
+
+        when(ranges.getOrderedRanges()).thenReturn(Arrays.asList(between, greaterThanHundred));
+        when(valueSet.getRanges()).thenReturn(ranges);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_number", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_number", "Number Field",
+                new NestedUIType(UITypeEnum.NUMBER, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        // Not pushed down at all - correctness over optimization when it can't be expressed safely.
+        assertNotNull(filterJson);
+        assertEquals("", filterJson);
+    }
+
+    @Test
     public void testToFilterJson_withEquatableValueSet_whitelist() throws Exception {
         // Mock EquatableValueSet with whitelist (IN clause)
         EquatableValueSet valueSet = mock(EquatableValueSet.class);
