@@ -40,6 +40,7 @@ import software.amazon.awssdk.services.glue.model.Column;
 import software.amazon.awssdk.services.glue.model.Database;
 import software.amazon.awssdk.services.glue.model.StorageDescriptor;
 import software.amazon.awssdk.services.glue.model.Table;
+import software.amazon.awssdk.services.glue.model.TableInput;
 import software.amazon.awssdk.utils.Pair;
 
 import java.util.Collections;
@@ -255,6 +256,33 @@ public class LarkBaseCrawlerHandlerTest {
         catch (RuntimeException e) {
             assertTrue(e.getMessage().contains("Duplicate table names"));
         }
+    }
+
+    @Test
+    public void testHandleRequest_newDatabaseWithOneTableFailingFieldFetch_othersStillCreated() {
+        // Reproduces a real production risk: getTableFields for one table can fail for reasons
+        // unrelated to any other table - e.g. a field hidden by Advanced Permission at the field
+        // level, or a transient API error - observed as "The role has no permissions" for a whole
+        // table in production logs. Before this fix, constructNewTables had no try/catch around this
+        // call, so one bad table would crash table creation for every other table in the database.
+        LarkDatabaseRecord larkDb = new LarkDatabaseRecord("dbId1", "new_db");
+        ListAllTableResponse.BaseItem goodTable = ListAllTableResponse.BaseItem.builder().tableId("tableId1").name("good_table").build();
+        ListAllTableResponse.BaseItem badTable = ListAllTableResponse.BaseItem.builder().tableId("tableId2").name("bad_table").build();
+
+        when(mockLarkBaseService.getTableRecords("baseDs123", "tableDs456")).thenReturn(Collections.singletonList(larkDb));
+        when(mockGlueCatalogService.getDatabases()).thenReturn(Collections.emptyList());
+        when(mockLarkBaseService.listTables("dbId1")).thenReturn(java.util.Arrays.asList(goodTable, badTable));
+        when(mockLarkBaseService.getTableFields("dbId1", "tableId1")).thenReturn(Collections.emptyList());
+        when(mockLarkBaseService.getTableFields("dbId1", "tableId2")).thenThrow(new RuntimeException("The role has no permissions."));
+
+        String result = handler.handleRequest(payload, mockContext);
+
+        assertEquals("Success", result);
+        org.mockito.ArgumentCaptor<Map<String, List<TableInput>>> captor = org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(mockGlueCatalogService, times(1)).batchCreateTable(captor.capture());
+        List<TableInput> createdTables = captor.getValue().get("new_db");
+        assertEquals(1, createdTables.size());
+        assertEquals("good_table", createdTables.get(0).name());
     }
 
     @Test
