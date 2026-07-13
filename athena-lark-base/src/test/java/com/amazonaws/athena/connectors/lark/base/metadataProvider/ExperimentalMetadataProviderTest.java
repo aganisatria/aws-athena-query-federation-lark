@@ -92,6 +92,28 @@ public class ExperimentalMetadataProviderTest {
     }
 
     @Test
+    public void getTableSchema_collidingSanitizedFieldNames_disambiguatesWithFieldId() throws Exception {
+        // Reproduces a real production case: two distinct Lark fields named "segment 5" and "Segment 5"
+        // both sanitize to the same Athena column name "segment_5". Without disambiguation, one field
+        // would silently vanish from the schema (SchemaBuilder.addField overwrites by name).
+        when(athenaService.getAthenaQueryString(anyString())).thenReturn("SELECT * FROM \"base1\".\"table1\"");
+        when(larkBaseService.getTableFields(anyString(), anyString())).thenReturn(List.of(
+                ListFieldResponse.FieldItem.builder().fieldName("segment 5").fieldId("fldxdVXbHa").uiType(UITypeEnum.TEXT.name()).build(),
+                ListFieldResponse.FieldItem.builder().fieldName("Segment 5").fieldId("fldZrayo2s").uiType(UITypeEnum.TEXT.name()).build()
+        ));
+
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+
+        Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
+
+        assertTrue(result.isPresent());
+        Schema schema = result.get().schema();
+        List<String> fieldNames = schema.getFields().stream().map(org.apache.arrow.vector.types.pojo.Field::getName).toList();
+        assertTrue(fieldNames.contains("segment_5"));
+        assertTrue(fieldNames.contains("segment_5_fldzrayo2s"));
+    }
+
+    @Test
     public void getTableSchema_lookupField() throws Exception {
         when(athenaService.getAthenaQueryString(anyString())).thenReturn("SELECT * FROM \"base1\".\"table1\"");
         ListFieldResponse.FieldItem lookupField = ListFieldResponse.FieldItem.builder()

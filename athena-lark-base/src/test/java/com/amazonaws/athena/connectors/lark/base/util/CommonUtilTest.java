@@ -561,4 +561,44 @@ class CommonUtilTest {
         // Assert
         assertThat(result.getCustomMetadata()).isEqualTo(customMetadata);
     }
+
+    @Test
+    void testSanitizeGlueRelatedNameWithDedup_noCollision_returnsPlainSanitizedName() {
+        Set<String> seenNames = new HashSet<>();
+
+        String result = CommonUtil.sanitizeGlueRelatedNameWithDedup("Segment 5", "fldxdVXbHa", seenNames);
+
+        assertThat(result).isEqualTo("segment_5");
+        assertThat(seenNames).containsExactly("segment_5");
+    }
+
+    @Test
+    void testSanitizeGlueRelatedNameWithDedup_collision_suffixesWithFieldId() {
+        // Reproduces a real production case: two distinct Lark fields named "segment 5" and "Segment 5"
+        // (in different grouped columns, "Payable" vs "Receivable") both sanitize to "segment_5".
+        Set<String> seenNames = new HashSet<>();
+
+        String first = CommonUtil.sanitizeGlueRelatedNameWithDedup("segment 5", "fldxdVXbHa", seenNames);
+        String second = CommonUtil.sanitizeGlueRelatedNameWithDedup("Segment 5", "fldZrayo2s", seenNames);
+
+        assertThat(first).isEqualTo("segment_5");
+        assertThat(second).isEqualTo("segment_5_fldzrayo2s");
+        assertThat(second).isNotEqualTo(first);
+    }
+
+    @Test
+    void testBuildSchemaFromLarkFields_usesAlreadyDedupedAthenaName() {
+        // field.athenaName() is already sanitized and deduplicated at discovery time. This must be
+        // trusted as-is; re-sanitizing the raw larkBaseFieldName here would reintroduce the exact
+        // collision that discovery already resolved.
+        AthenaFieldLarkBaseMapping first = new AthenaFieldLarkBaseMapping(
+                "segment_5", "segment 5", new NestedUIType(UITypeEnum.TEXT, null));
+        AthenaFieldLarkBaseMapping second = new AthenaFieldLarkBaseMapping(
+                "segment_5_fldzrayo2s", "Segment 5", new NestedUIType(UITypeEnum.TEXT, null));
+
+        Schema schema = CommonUtil.buildSchemaFromLarkFields(List.of(first, second));
+
+        List<String> fieldNames = schema.getFields().stream().map(Field::getName).toList();
+        assertThat(fieldNames).containsExactlyInAnyOrder("segment_5", "segment_5_fldzrayo2s");
+    }
 }

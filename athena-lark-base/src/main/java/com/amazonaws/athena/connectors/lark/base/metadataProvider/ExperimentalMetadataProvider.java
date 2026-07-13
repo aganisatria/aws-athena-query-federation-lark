@@ -40,8 +40,10 @@ import software.amazon.awssdk.utils.Pair;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
 
 import static java.util.Objects.requireNonNull;
@@ -81,6 +83,7 @@ public class ExperimentalMetadataProvider
                 logger.info("Experimental Path: Got {} fields from Lark", larkFields.size());
 
                 List<AthenaFieldLarkBaseMapping> fieldMappings = new ArrayList<>();
+                Set<String> seenFieldNames = new HashSet<>();
 
                 for (ListFieldResponse.FieldItem field : larkFields) {
                     String larkFieldName = field.getFieldName();
@@ -114,7 +117,13 @@ public class ExperimentalMetadataProvider
                         }
 
                         NestedUIType nestedUIType = new NestedUIType(field.getUIType(), childUIType);
-                        fieldMappings.add(new AthenaFieldLarkBaseMapping(request.getTableName().getTableName(), larkFieldName, nestedUIType));
+                        // The athenaName was previously (incorrectly) set to the table name itself for
+                        // every field, collapsing all fields into one in the built schema. It went
+                        // unnoticed because buildSchemaFromLarkFields used to ignore athenaName and
+                        // re-sanitize the raw field name instead - it now trusts athenaName as-is, so this
+                        // must be the real sanitized (and deduplicated) field name.
+                        String prestoFieldName = CommonUtil.sanitizeGlueRelatedNameWithDedup(larkFieldName, field.getFieldId(), seenFieldNames);
+                        fieldMappings.add(new AthenaFieldLarkBaseMapping(prestoFieldName, larkFieldName, nestedUIType));
                     }
                 }
 
@@ -205,13 +214,14 @@ public class ExperimentalMetadataProvider
     private List<AthenaFieldLarkBaseMapping> discoverTableFields(String larkBaseId, String larkTableId)
     {
         List<AthenaFieldLarkBaseMapping> fieldMappings = new ArrayList<>();
+        Set<String> seenFieldNames = new HashSet<>();
         logger.info("Experimental Path: Discovering fields for {}-{}", larkBaseId, larkTableId);
         try {
             List<ListFieldResponse.FieldItem> fields = invoker.invoke(() -> larkBaseService.getTableFields(larkBaseId, larkTableId));
             for (ListFieldResponse.FieldItem field : fields) {
                 String larkFieldName = field.getFieldName();
                 if (larkFieldName != null && !larkFieldName.trim().isEmpty()) {
-                    String prestoFieldName = CommonUtil.sanitizeGlueRelatedName(larkFieldName);
+                    String prestoFieldName = CommonUtil.sanitizeGlueRelatedNameWithDedup(larkFieldName, field.getFieldId(), seenFieldNames);
                     // See the comment in getTableSchema(): branch on the field's own UI type, not
                     // getFormulaGlueCatalogUITypeEnum(), which can never actually equal LOOKUP for a genuine
                     // LOOKUP field and would otherwise leave the child type unresolved (dead code).
