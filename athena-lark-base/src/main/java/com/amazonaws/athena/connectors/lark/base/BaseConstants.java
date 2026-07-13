@@ -63,6 +63,19 @@ public final class BaseConstants
     public static final String ENABLE_DEBUG_LOGGING_ENV_VAR = "default_enable_debug_logging";
 
     /**
+     * The environment variable which is used to cap how many LOOKUP hops the connector will follow when resolving
+     * a chained LOOKUP field's effective type (e.g. a LOOKUP pointing at another LOOKUP in a different table).
+     * This is a defense-in-depth safety valve on top of cycle detection, in case a legitimate (non-circular) chain
+     * is unexpectedly deep. Defaults to {@code DEFAULT_LARK_LOOKUP_MAX_DEPTH} if unset or not a positive integer.
+     */
+    public static final String LARK_LOOKUP_MAX_DEPTH_ENV_VAR = "default_lark_lookup_max_depth";
+
+    /**
+     * Default value for {@link #LARK_LOOKUP_MAX_DEPTH_ENV_VAR} when the environment variable is not set.
+     */
+    public static final int DEFAULT_LARK_LOOKUP_MAX_DEPTH = 20;
+
+    /**
      * The environment variable which is used to set the default lark base sources for the connector.
      * If we use this, we can ignore crawler and use the lark base sources directly.
      * format: [larkBaseId:larkTableId1,larkBaseId:larkTableId2,...]

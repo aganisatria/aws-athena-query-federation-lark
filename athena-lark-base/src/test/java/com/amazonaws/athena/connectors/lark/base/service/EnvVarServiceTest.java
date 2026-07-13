@@ -98,6 +98,7 @@ public class EnvVarServiceTest {
         configOptions.put(ENABLE_DEBUG_LOGGING_ENV_VAR, "true");
         configOptions.put(LARK_BASE_SOURCES_ENV_VAR, "base1,base2");
         configOptions.put(LARK_DRIVE_SOURCES_ENV_VAR, "drive1,drive2");
+        configOptions.put(LARK_LOOKUP_MAX_DEPTH_ENV_VAR, "5");
 
         SecretValue secretValue = new SecretValue("test_app_id", "test_app_secret");
         String secretJson = objectMapper.writeValueAsString(secretValue);
@@ -114,5 +115,42 @@ public class EnvVarServiceTest {
         assertTrue(envVarService.isEnableDebugLogging());
         assertEquals("base1,base2", envVarService.getLarkBaseSources());
         assertEquals("drive1,drive2", envVarService.getLarkDriveSources());
+        assertEquals(5, envVarService.getLookupMaxDepth());
+    }
+
+    @Test
+    public void getLookupMaxDepth_whenUnset_usesDefault() throws Exception {
+        Map<String, String> configOptions = new HashMap<>();
+        configOptions.put(LARK_APP_KEY_ENV_VAR, "test_secret");
+
+        SecretValue secretValue = new SecretValue("test_app_id", "test_app_secret");
+        String secretJson = objectMapper.writeValueAsString(secretValue);
+
+        ThrottlingInvoker invoker = Mockito.mock(ThrottlingInvoker.class);
+        when(invoker.invoke(any())).thenReturn(secretJson);
+
+        EnvVarService envVarService = new EnvVarService(configOptions, invoker);
+
+        assertEquals(DEFAULT_LARK_LOOKUP_MAX_DEPTH, envVarService.getLookupMaxDepth());
+    }
+
+    @Test
+    public void getLookupMaxDepth_whenInvalidOrNonPositive_usesDefault() throws Exception {
+        SecretValue secretValue = new SecretValue("test_app_id", "test_app_secret");
+        String secretJson = objectMapper.writeValueAsString(secretValue);
+
+        for (String invalidValue : new String[] {"not_a_number", "0", "-5", ""}) {
+            Map<String, String> configOptions = new HashMap<>();
+            configOptions.put(LARK_APP_KEY_ENV_VAR, "test_secret");
+            configOptions.put(LARK_LOOKUP_MAX_DEPTH_ENV_VAR, invalidValue);
+
+            ThrottlingInvoker invoker = Mockito.mock(ThrottlingInvoker.class);
+            when(invoker.invoke(any())).thenReturn(secretJson);
+
+            EnvVarService envVarService = new EnvVarService(configOptions, invoker);
+
+            assertEquals(DEFAULT_LARK_LOOKUP_MAX_DEPTH, envVarService.getLookupMaxDepth(),
+                    "Expected default for invalid value: '" + invalidValue + "'");
+        }
     }
 }

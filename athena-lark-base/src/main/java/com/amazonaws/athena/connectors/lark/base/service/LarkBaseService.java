@@ -46,10 +46,13 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.DEFAULT_LARK_LOOKUP_MAX_DEPTH;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE;
 import static java.util.Objects.requireNonNull;
 
@@ -65,31 +68,36 @@ public class LarkBaseService extends CommonLarkService
     // Cache table fields to avoid N+1 query problem when resolving lookup types
     private final LoadingCache<String, List<ListFieldResponse.FieldItem>> tableFieldsCache;
 
+    // Safety valve on top of cycle detection for chained LOOKUP resolution; see BaseConstants.LARK_LOOKUP_MAX_DEPTH_ENV_VAR.
+    private final int lookupMaxDepth;
+
     public LarkBaseService(String larkAppId, String larkAppSecret)
     {
+        this(larkAppId, larkAppSecret, DEFAULT_LARK_LOOKUP_MAX_DEPTH);
+    }
+
+    public LarkBaseService(String larkAppId, String larkAppSecret, int lookupMaxDepth)
+    {
         super(larkAppId, larkAppSecret);
-        this.tableFieldsCache = CacheBuilder.newBuilder()
-                .maximumSize(FIELD_CACHE_MAX_SIZE)
-                .expireAfterWrite(FIELD_CACHE_TTL_MINUTES, TimeUnit.MINUTES)
-                .build(new CacheLoader<String, List<ListFieldResponse.FieldItem>>()
-                {
-                    @Override
-                    @Nonnull
-                    public List<ListFieldResponse.FieldItem> load(@Nonnull String tableKey) throws Exception
-                    {
-                        String[] parts = tableKey.split("\\|");
-                        if (parts.length != 2) {
-                            throw new IllegalArgumentException("Invalid table key format: " + tableKey);
-                        }
-                        return fetchTableFieldsUncached(parts[0], parts[1]);
-                    }
-                });
+        this.lookupMaxDepth = lookupMaxDepth;
+        this.tableFieldsCache = buildTableFieldsCache();
     }
 
     public LarkBaseService(String larkAppId, String larkAppSecret, HttpClientWrapper httpClient)
     {
+        this(larkAppId, larkAppSecret, httpClient, DEFAULT_LARK_LOOKUP_MAX_DEPTH);
+    }
+
+    public LarkBaseService(String larkAppId, String larkAppSecret, HttpClientWrapper httpClient, int lookupMaxDepth)
+    {
         super(larkAppId, larkAppSecret, httpClient);
-        this.tableFieldsCache = CacheBuilder.newBuilder()
+        this.lookupMaxDepth = lookupMaxDepth;
+        this.tableFieldsCache = buildTableFieldsCache();
+    }
+
+    private LoadingCache<String, List<ListFieldResponse.FieldItem>> buildTableFieldsCache()
+    {
+        return CacheBuilder.newBuilder()
                 .maximumSize(FIELD_CACHE_MAX_SIZE)
                 .expireAfterWrite(FIELD_CACHE_TTL_MINUTES, TimeUnit.MINUTES)
                 .build(new CacheLoader<String, List<ListFieldResponse.FieldItem>>()
@@ -414,6 +422,35 @@ public class LarkBaseService extends CommonLarkService
 
     public UITypeEnum getLookupType(String baseId, String tableId, String fieldId)
     {
+        return getLookupType(baseId, tableId, fieldId, new HashSet<>());
+    }
+
+    /**
+     * Resolves the effective UI type of a (possibly chained) LOOKUP field, following each LOOKUP to its target
+     * field/table until a non-LOOKUP type is found.
+     *
+     * @param visited table/field pairs already visited in this resolution chain. A misconfigured Lark Base can
+     *                have LOOKUP fields that reference each other in a cycle (e.g. table A's field looks up to
+     *                table B's field, which looks up back to table A's field); without cycle detection this would
+     *                recurse indefinitely and crash schema discovery with a StackOverflowError. On top of that,
+     *                {@code lookupMaxDepth} (configurable via {@code LARK_LOOKUP_MAX_DEPTH_ENV_VAR}) caps how many
+     *                hops are followed even for a legitimate, non-circular chain, as a defense-in-depth safety valve.
+     */
+    private UITypeEnum getLookupType(String baseId, String tableId, String fieldId, Set<String> visited)
+    {
+        if (visited.size() >= lookupMaxDepth) {
+            logger.warn("LOOKUP resolution for field '{}' in table '{}' (base '{}') exceeded the configured max "
+                    + "depth ({}). Returning UNKNOWN.", fieldId, tableId, baseId, lookupMaxDepth);
+            return UITypeEnum.UNKNOWN;
+        }
+
+        String visitKey = tableId + "|" + fieldId;
+        if (!visited.add(visitKey)) {
+            logger.warn("Detected circular LOOKUP reference while resolving field '{}' in table '{}' (base '{}'). "
+                    + "Breaking the cycle and returning UNKNOWN.", fieldId, tableId, baseId);
+            return UITypeEnum.UNKNOWN;
+        }
+
         List<ListFieldResponse.FieldItem> fields = getTableFields(baseId, tableId);
         for (ListFieldResponse.FieldItem field : fields) {
             if (field.getFieldId().equalsIgnoreCase(fieldId)) {
@@ -421,7 +458,7 @@ public class LarkBaseService extends CommonLarkService
                     Pair<String, String> lookupId = field.getTargetFieldAndTableForLookup();
                     String newTableId = lookupId.right();
                     String newFieldId = lookupId.left();
-                    return getLookupType(baseId, newTableId, newFieldId);
+                    return getLookupType(baseId, newTableId, newFieldId, visited);
                 }
 
                 return field.getUIType();
