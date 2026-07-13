@@ -148,6 +148,10 @@ All Lark Base field types are supported:
 - **Advanced**: Attachment, Person, Location, Formula
 - **Special**: Lookup (with recursive resolution), Duplex Link, Auto Number
 
+### Known Limitations
+
+- **NUMBER field precision**: Lark Base stores `Number` field values as IEEE 754 double-precision floats, which only preserve about 15-17 significant digits. Values that exceed this (e.g. bank card numbers, long numeric IDs) are silently rounded by Lark Base itself - trailing digits are replaced with zeros - before the data ever reaches this connector. This is a Lark Base platform limitation, not a connector bug, and it cannot be corrected downstream by the connector. Per [Lark's own documentation](https://www.larksuite.com/hc/en-US/articles/890398616778-base-limits-faqs): *"To record information containing large numbers, such as bank card numbers, use the text field."* If you need exact large numbers or high-precision decimals, store them in a `Text` field in Lark Base instead of a `Number` field.
+
 ## Architecture
 
 ```
@@ -208,6 +212,7 @@ JAVA_HOME="/path/to/jdk-17" mvn checkstyle:check
 | `ACTIVATE_LARK_BASE_SOURCE` | No | Enable Lark Base metadata discovery |
 | `ACTIVATE_PARALLEL_SPLIT` | No | Enable parallel split execution |
 | `ENABLE_DEBUG_LOGGING` | No | Enable detailed debug logs |
+| `LARK_LOOKUP_MAX_DEPTH` | No | Max hops followed when resolving a chained LOOKUP field's type (default: 20). Also caps runaway resolution if a Lark Base has a misconfigured circular LOOKUP reference |
 
 See [ARCHITECTURE.md#Configuration](./ARCHITECTURE.md#configuration) for complete reference.
 
