@@ -255,7 +255,7 @@ public final class ListFieldResponse extends BaseResponse<ListFieldResponse.List
 
         public boolean blackListField()
         {
-            // Due to no results from Lark API List Records/Search Records
+            // Due to no results from Lark API Search Records
             return this.getUIType() == BUTTON || this.getUIType() == STAGE ||
                     (this.getUIType() == UITypeEnum.FORMULA &&
                             (this.getFormulaGlueCatalogUITypeEnum() == BUTTON ||

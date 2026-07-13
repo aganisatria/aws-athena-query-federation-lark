@@ -30,13 +30,13 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Response for List Records
+ * Response for Search Records
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-@JsonDeserialize(builder = ListRecordsResponse.Builder.class)
-public final class ListRecordsResponse extends BaseResponse<ListRecordsResponse.ListData>
+@JsonDeserialize(builder = SearchRecordsResponse.Builder.class)
+public final class SearchRecordsResponse extends BaseResponse<SearchRecordsResponse.ListData>
 {
-    private ListRecordsResponse(Builder builder)
+    private SearchRecordsResponse(Builder builder)
     {
         super(builder);
     }
@@ -251,9 +251,9 @@ public final class ListRecordsResponse extends BaseResponse<ListRecordsResponse.
         }
 
         @Override
-        public ListRecordsResponse build()
+        public SearchRecordsResponse build()
         {
-            return new ListRecordsResponse(this);
+            return new SearchRecordsResponse(this);
         }
     }
 }

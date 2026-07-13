@@ -31,7 +31,7 @@ import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException
 import com.amazonaws.athena.connector.lambda.handlers.RecordHandler;
 import com.amazonaws.athena.connector.lambda.records.ReadRecordsRequest;
 import com.amazonaws.athena.connectors.lark.base.model.NestedUIType;
-import com.amazonaws.athena.connectors.lark.base.model.response.ListRecordsResponse;
+import com.amazonaws.athena.connectors.lark.base.model.response.SearchRecordsResponse;
 import com.amazonaws.athena.connectors.lark.base.service.EnvVarService;
 import com.amazonaws.athena.connectors.lark.base.service.LarkBaseService;
 import com.amazonaws.athena.connectors.lark.base.translator.RegistererExtractor;
@@ -459,7 +459,7 @@ public class BaseRecordHandler extends RecordHandler
     {
         return new Iterator<>()
         {
-            private Iterator<ListRecordsResponse.RecordItem> currentPageIterator = null;
+            private Iterator<SearchRecordsResponse.RecordItem> currentPageIterator = null;
             private String currentPageToken = null;
             private boolean hasMorePages = true;
             private int currentFetchDataCount = 0;
@@ -512,13 +512,13 @@ public class BaseRecordHandler extends RecordHandler
                                     .fieldNameToAthenaNameMap(fieldNameToAthenaNameMap)
                                     .build();
 
-                    ListRecordsResponse response = invokerCache.get(tableId).invoke(() ->
+                    SearchRecordsResponse response = invokerCache.get(tableId).invoke(() ->
                             larkBaseService.getTableRecords(tableRecordsRequest)
                     );
 
                     String nextPageToken = (response != null) ? response.getPageToken() : null;
                     boolean responseHasMore = (response != null) && response.hasMore();
-                    List<ListRecordsResponse.RecordItem> records = (response != null) ? response.getItems() : Collections.emptyList();
+                    List<SearchRecordsResponse.RecordItem> records = (response != null) ? response.getItems() : Collections.emptyList();
                     if (records == null) {
                         records = Collections.emptyList();
                     }
@@ -571,7 +571,7 @@ public class BaseRecordHandler extends RecordHandler
                 if (!hasNext()) {
                     throw new NoSuchElementException("No more records available for this split");
                 }
-                ListRecordsResponse.RecordItem item = currentPageIterator.next();
+                SearchRecordsResponse.RecordItem item = currentPageIterator.next();
                 Map<String, Object> result = item.getFields() instanceof HashMap ?
                         item.getFields() : new HashMap<>(item.getFields());
                 result.put(RESERVED_RECORD_ID, item.getRecordId());

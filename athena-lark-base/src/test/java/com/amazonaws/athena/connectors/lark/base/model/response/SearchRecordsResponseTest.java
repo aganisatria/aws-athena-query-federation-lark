@@ -28,14 +28,14 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class ListRecordsResponseTest {
+class SearchRecordsResponseTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
     void testRecordItemBuilder() {
         // Arrange & Act
-        ListRecordsResponse.RecordItem item = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec123")
                 .fields(Map.of("name", "John", "age", 30))
                 .build();
@@ -50,7 +50,7 @@ class ListRecordsResponseTest {
     @Test
     void testRecordItemWithNullFields() {
         // Arrange & Act
-        ListRecordsResponse.RecordItem item = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(null)
                 .build();
@@ -69,7 +69,7 @@ class ListRecordsResponseTest {
         fieldsWithNull.put("age", 25);
 
         // Act
-        ListRecordsResponse.RecordItem item = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec2")
                 .fields(fieldsWithNull)
                 .build();
@@ -83,7 +83,7 @@ class ListRecordsResponseTest {
     @Test
     void testRecordItemSetFields() {
         // Arrange
-        ListRecordsResponse.RecordItem item = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("old", "value"))
                 .build();
@@ -100,7 +100,7 @@ class ListRecordsResponseTest {
     @Test
     void testRecordItemSetFieldsWithNull() {
         // Arrange
-        ListRecordsResponse.RecordItem item = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("key", "value"))
                 .build();
@@ -118,7 +118,7 @@ class ListRecordsResponseTest {
         HashMap<String, Object> mutableMap = new HashMap<>();
         mutableMap.put("key1", "value1");
 
-        ListRecordsResponse.RecordItem item = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(mutableMap)
                 .build();
@@ -134,18 +134,18 @@ class ListRecordsResponseTest {
     @Test
     void testListDataBuilder() {
         // Arrange
-        ListRecordsResponse.RecordItem item1 = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item1 = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("name", "John"))
                 .build();
 
-        ListRecordsResponse.RecordItem item2 = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item2 = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec2")
                 .fields(Map.of("name", "Jane"))
                 .build();
 
         // Act
-        ListRecordsResponse.ListData listData = ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse.ListData listData = SearchRecordsResponse.ListData.builder()
                 .items(List.of(item1, item2))
                 .pageToken("next_token")
                 .hasMore(true)
@@ -162,7 +162,7 @@ class ListRecordsResponseTest {
     @Test
     void testListDataWithNullItems() {
         // Arrange & Act
-        ListRecordsResponse.ListData listData = ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse.ListData listData = SearchRecordsResponse.ListData.builder()
                 .items(null)
                 .pageToken(null)
                 .hasMore(false)
@@ -179,12 +179,12 @@ class ListRecordsResponseTest {
     @Test
     void testResponseBuilder() {
         // Arrange
-        ListRecordsResponse.RecordItem item = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("field1", "value1"))
                 .build();
 
-        ListRecordsResponse.ListData data = ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse.ListData data = SearchRecordsResponse.ListData.builder()
                 .items(List.of(item))
                 .pageToken("token123")
                 .hasMore(true)
@@ -192,9 +192,9 @@ class ListRecordsResponseTest {
                 .build();
 
         // Act
-        ListRecordsResponse.Builder builder = ListRecordsResponse.builder();
+        SearchRecordsResponse.Builder builder = SearchRecordsResponse.builder();
         builder.data(data);
-        ListRecordsResponse response = builder.build();
+        SearchRecordsResponse response = builder.build();
 
         // Assert
         assertThat(response.getItems()).hasSize(1);
@@ -206,9 +206,9 @@ class ListRecordsResponseTest {
     @Test
     void testResponseWithNullData() {
         // Arrange & Act
-        ListRecordsResponse.Builder builder = ListRecordsResponse.builder();
+        SearchRecordsResponse.Builder builder = SearchRecordsResponse.builder();
         builder.data(null);
-        ListRecordsResponse response = builder.build();
+        SearchRecordsResponse response = builder.build();
 
         // Assert
         assertThat(response.getItems()).isEmpty();
@@ -250,7 +250,7 @@ class ListRecordsResponseTest {
                 """;
 
         // Act
-        ListRecordsResponse response = objectMapper.readValue(json, ListRecordsResponse.class);
+        SearchRecordsResponse response = objectMapper.readValue(json, SearchRecordsResponse.class);
 
         // Assert
         assertThat(response.getCode()).isEqualTo(0);
@@ -280,7 +280,7 @@ class ListRecordsResponseTest {
                 """;
 
         // Act
-        ListRecordsResponse response = objectMapper.readValue(json, ListRecordsResponse.class);
+        SearchRecordsResponse response = objectMapper.readValue(json, SearchRecordsResponse.class);
 
         // Assert
         assertThat(response.getItems()).isEmpty();
@@ -315,7 +315,7 @@ class ListRecordsResponseTest {
                 """;
 
         // Act
-        ListRecordsResponse response = objectMapper.readValue(json, ListRecordsResponse.class);
+        SearchRecordsResponse response = objectMapper.readValue(json, SearchRecordsResponse.class);
 
         // Assert
         assertThat(response.getItems()).hasSize(1);
@@ -325,42 +325,42 @@ class ListRecordsResponseTest {
     @Test
     void testRecordItemBuilderChaining() {
         // Arrange
-        ListRecordsResponse.RecordItem.Builder builder = ListRecordsResponse.RecordItem.builder();
+        SearchRecordsResponse.RecordItem.Builder builder = SearchRecordsResponse.RecordItem.builder();
 
         // Act & Assert
-        assertThat(builder.recordId("id")).isInstanceOf(ListRecordsResponse.RecordItem.Builder.class);
-        assertThat(builder.fields(Map.of())).isInstanceOf(ListRecordsResponse.RecordItem.Builder.class);
+        assertThat(builder.recordId("id")).isInstanceOf(SearchRecordsResponse.RecordItem.Builder.class);
+        assertThat(builder.fields(Map.of())).isInstanceOf(SearchRecordsResponse.RecordItem.Builder.class);
     }
 
     @Test
     void testListDataBuilderChaining() {
         // Arrange
-        ListRecordsResponse.ListData.Builder builder = ListRecordsResponse.ListData.builder();
+        SearchRecordsResponse.ListData.Builder builder = SearchRecordsResponse.ListData.builder();
 
         // Act & Assert
-        assertThat(builder.items(List.of())).isInstanceOf(ListRecordsResponse.ListData.Builder.class);
-        assertThat(builder.pageToken("token")).isInstanceOf(ListRecordsResponse.ListData.Builder.class);
-        assertThat(builder.hasMore(true)).isInstanceOf(ListRecordsResponse.ListData.Builder.class);
-        assertThat(builder.total(10)).isInstanceOf(ListRecordsResponse.ListData.Builder.class);
+        assertThat(builder.items(List.of())).isInstanceOf(SearchRecordsResponse.ListData.Builder.class);
+        assertThat(builder.pageToken("token")).isInstanceOf(SearchRecordsResponse.ListData.Builder.class);
+        assertThat(builder.hasMore(true)).isInstanceOf(SearchRecordsResponse.ListData.Builder.class);
+        assertThat(builder.total(10)).isInstanceOf(SearchRecordsResponse.ListData.Builder.class);
     }
 
     @Test
     void testListDataImmutability() {
         // Arrange
-        ListRecordsResponse.RecordItem item = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("key", "value"))
                 .build();
 
-        java.util.ArrayList<ListRecordsResponse.RecordItem> mutableList = new java.util.ArrayList<>();
+        java.util.ArrayList<SearchRecordsResponse.RecordItem> mutableList = new java.util.ArrayList<>();
         mutableList.add(item);
 
-        ListRecordsResponse.ListData listData = ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse.ListData listData = SearchRecordsResponse.ListData.builder()
                 .items(mutableList)
                 .build();
 
         // Act - try to modify original list
-        mutableList.add(ListRecordsResponse.RecordItem.builder().recordId("rec2").build());
+        mutableList.add(SearchRecordsResponse.RecordItem.builder().recordId("rec2").build());
 
         // Assert - listData should not be affected
         assertThat(listData.items()).hasSize(1);
@@ -377,7 +377,7 @@ class ListRecordsResponseTest {
         complexFields.put("map", Map.of("nested", "value"));
 
         // Act
-        ListRecordsResponse.RecordItem item = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(complexFields)
                 .build();
@@ -394,7 +394,7 @@ class ListRecordsResponseTest {
     @Test
     void testSetFieldsCreatesNewMap() {
         // Arrange
-        ListRecordsResponse.RecordItem item = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("initial", "value"))
                 .build();
@@ -415,25 +415,25 @@ class ListRecordsResponseTest {
     @Test
     void testMultipleRecordsWithDifferentFields() {
         // Arrange & Act
-        ListRecordsResponse.RecordItem item1 = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item1 = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec1")
                 .fields(Map.of("name", "Alice", "age", 30))
                 .build();
 
-        ListRecordsResponse.RecordItem item2 = ListRecordsResponse.RecordItem.builder()
+        SearchRecordsResponse.RecordItem item2 = SearchRecordsResponse.RecordItem.builder()
                 .recordId("rec2")
                 .fields(Map.of("name", "Bob", "city", "NYC"))
                 .build();
 
-        ListRecordsResponse.ListData data = ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse.ListData data = SearchRecordsResponse.ListData.builder()
                 .items(List.of(item1, item2))
                 .hasMore(false)
                 .total(2)
                 .build();
 
-        ListRecordsResponse.Builder builder = ListRecordsResponse.builder();
+        SearchRecordsResponse.Builder builder = SearchRecordsResponse.builder();
         builder.data(data);
-        ListRecordsResponse response = builder.build();
+        SearchRecordsResponse response = builder.build();
 
         // Assert
         assertThat(response.getItems()).hasSize(2);

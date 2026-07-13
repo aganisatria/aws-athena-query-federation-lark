@@ -22,7 +22,7 @@ package com.amazonaws.glue.lark.base.crawler.service;
 import com.amazonaws.glue.lark.base.crawler.model.LarkDatabaseRecord;
 import com.amazonaws.glue.lark.base.crawler.model.response.ListAllTableResponse;
 import com.amazonaws.glue.lark.base.crawler.model.response.ListFieldResponse;
-import com.amazonaws.glue.lark.base.crawler.model.response.ListRecordsResponse;
+import com.amazonaws.glue.lark.base.crawler.model.response.SearchRecordsResponse;
 import com.amazonaws.glue.lark.base.crawler.util.SearchApiResponseNormalizer;
 import com.amazonaws.glue.lark.base.crawler.util.Util;
 import org.apache.http.HttpResponse;
@@ -251,12 +251,12 @@ public class LarkBaseService extends CommonLarkService
                 HttpResponse response = httpClient.execute(request);
                 String responseBody = EntityUtils.toString(response.getEntity());
 
-                ListRecordsResponse recordsResponse =
-                        objectMapper.readValue(responseBody, ListRecordsResponse.class);
+                SearchRecordsResponse recordsResponse =
+                        objectMapper.readValue(responseBody, SearchRecordsResponse.class);
 
                 if (recordsResponse.getCode() == 0) {
                     if (recordsResponse.getItems() != null) {
-                        for (ListRecordsResponse.RecordItem record : recordsResponse.getItems()) {
+                        for (SearchRecordsResponse.RecordItem record : recordsResponse.getItems()) {
                             Map<String, Object> originalFields = record.getFields();
 
                             // Normalize Search API response to List API format

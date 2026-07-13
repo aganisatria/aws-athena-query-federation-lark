@@ -24,7 +24,7 @@ import com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum;
 import com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest;
 import com.amazonaws.athena.connectors.lark.base.model.response.ListAllTableResponse;
 import com.amazonaws.athena.connectors.lark.base.model.response.ListFieldResponse;
-import com.amazonaws.athena.connectors.lark.base.model.response.ListRecordsResponse;
+import com.amazonaws.athena.connectors.lark.base.model.response.SearchRecordsResponse;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.HttpEntity;
@@ -182,7 +182,7 @@ public class LarkBaseServiceTest {
         LarkBaseService larkBaseService = new LarkBaseService(TEST_APP_ID, TEST_APP_SECRET, mockHttpClient);
 
         TableRecordsRequest request = TableRecordsRequest.builder().baseId(baseId).tableId(tableId).build();
-        ListRecordsResponse result = larkBaseService.getTableRecords(request);
+        SearchRecordsResponse result = larkBaseService.getTableRecords(request);
 
         assertEquals(1, result.getItems().size());
         assertEquals("rec123", result.getItems().get(0).getRecordId());
@@ -201,10 +201,10 @@ public class LarkBaseServiceTest {
         LarkBaseService larkBaseService = new LarkBaseService(TEST_APP_ID, TEST_APP_SECRET, mockHttpClient);
 
         TableRecordsRequest request = TableRecordsRequest.builder().baseId(baseId).tableId(tableId).build();
-        ListRecordsResponse result1 = larkBaseService.getTableRecords(request);
+        SearchRecordsResponse result1 = larkBaseService.getTableRecords(request);
 
         TableRecordsRequest request2 = TableRecordsRequest.builder().baseId(baseId).tableId(tableId).pageToken("token2").build();
-        ListRecordsResponse result2 = larkBaseService.getTableRecords(request2);
+        SearchRecordsResponse result2 = larkBaseService.getTableRecords(request2);
 
         assertEquals(1, result1.getItems().size());
         assertEquals("rec123", result1.getItems().get(0).getRecordId());
@@ -236,7 +236,7 @@ public class LarkBaseServiceTest {
                 .tableId(tableId)
                 .fieldNameToAthenaNameMap(fieldNameToAthenaNameMap)
                 .build();
-        ListRecordsResponse result = larkBaseService.getTableRecords(request);
+        SearchRecordsResponse result = larkBaseService.getTableRecords(request);
 
         Map<String, Object> fields = result.getItems().get(0).getFields();
         assertEquals("00", fields.get("segment_5"));
@@ -542,7 +542,7 @@ public class LarkBaseServiceTest {
                 .tableId(tableId)
                 .filterJson(filterJson)
                 .build();
-        ListRecordsResponse result = larkBaseService.getTableRecords(request);
+        SearchRecordsResponse result = larkBaseService.getTableRecords(request);
 
         assertEquals(1, result.getItems().size());
         assertEquals("rec123", result.getItems().get(0).getRecordId());
@@ -564,7 +564,7 @@ public class LarkBaseServiceTest {
                 .tableId(tableId)
                 .sortJson(sortJson)
                 .build();
-        ListRecordsResponse result = larkBaseService.getTableRecords(request);
+        SearchRecordsResponse result = larkBaseService.getTableRecords(request);
 
         assertEquals(1, result.getItems().size());
         assertEquals("rec123", result.getItems().get(0).getRecordId());
@@ -588,7 +588,7 @@ public class LarkBaseServiceTest {
                 .filterJson(filterJson)
                 .sortJson(sortJson)
                 .build();
-        ListRecordsResponse result = larkBaseService.getTableRecords(request);
+        SearchRecordsResponse result = larkBaseService.getTableRecords(request);
 
         assertEquals(1, result.getItems().size());
         assertEquals("rec123", result.getItems().get(0).getRecordId());
@@ -609,7 +609,7 @@ public class LarkBaseServiceTest {
                 .tableId(tableId)
                 .filterJson("")
                 .build();
-        ListRecordsResponse result = larkBaseService.getTableRecords(request);
+        SearchRecordsResponse result = larkBaseService.getTableRecords(request);
 
         assertEquals(1, result.getItems().size());
         assertEquals("rec123", result.getItems().get(0).getRecordId());
@@ -630,7 +630,7 @@ public class LarkBaseServiceTest {
                 .tableId(tableId)
                 .sortJson("")
                 .build();
-        ListRecordsResponse result = larkBaseService.getTableRecords(request);
+        SearchRecordsResponse result = larkBaseService.getTableRecords(request);
 
         assertEquals(1, result.getItems().size());
         assertEquals("rec123", result.getItems().get(0).getRecordId());
@@ -654,7 +654,7 @@ public class LarkBaseServiceTest {
         LarkBaseService larkBaseService = new LarkBaseService(TEST_APP_ID, TEST_APP_SECRET, mockHttpClient);
 
         TableRecordsRequest request = TableRecordsRequest.builder().baseId(baseId).tableId(tableId).build();
-        ListRecordsResponse result = larkBaseService.getTableRecords(request);
+        SearchRecordsResponse result = larkBaseService.getTableRecords(request);
 
         // When items is null, it gets deserialized as an empty list
         // The sanitizeRecordFieldNames method returns early when items is null

@@ -28,7 +28,7 @@ import com.amazonaws.athena.connector.lambda.security.LocalKeyFactory;
 import com.amazonaws.athena.connectors.lark.base.metadataProvider.ExperimentalMetadataProvider;
 import com.amazonaws.athena.connectors.lark.base.metadataProvider.LarkSourceMetadataProvider;
 import com.amazonaws.athena.connectors.lark.base.model.TableDirectInitialized;
-import com.amazonaws.athena.connectors.lark.base.model.response.ListRecordsResponse;
+import com.amazonaws.athena.connectors.lark.base.model.response.SearchRecordsResponse;
 import com.amazonaws.athena.connectors.lark.base.service.EnvVarService;
 import com.amazonaws.athena.connectors.lark.base.service.GlueCatalogService;
 import com.amazonaws.athena.connectors.lark.base.service.LarkBaseService;
@@ -275,8 +275,8 @@ public class BaseMetadataHandlerTest {
             new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
         when(mockEnvVarService.isActivateParallelSplit()).thenReturn(true);
 
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(Collections.emptyList())
                         .hasMore(false)
                         .total(1)
@@ -295,8 +295,8 @@ public class BaseMetadataHandlerTest {
             new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
         when(mockEnvVarService.isActivateParallelSplit()).thenReturn(true);
 
-        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
-                .data(ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
                         .items(Collections.emptyList())
                         .hasMore(false)
                         .total(50_000)

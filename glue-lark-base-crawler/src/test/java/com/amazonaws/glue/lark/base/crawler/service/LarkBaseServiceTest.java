@@ -22,7 +22,7 @@ package com.amazonaws.glue.lark.base.crawler.service;
 import com.amazonaws.glue.lark.base.crawler.model.LarkDatabaseRecord;
 import com.amazonaws.glue.lark.base.crawler.model.response.ListAllTableResponse;
 import com.amazonaws.glue.lark.base.crawler.model.response.ListFieldResponse;
-import com.amazonaws.glue.lark.base.crawler.model.response.ListRecordsResponse;
+import com.amazonaws.glue.lark.base.crawler.model.response.SearchRecordsResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
@@ -186,12 +186,12 @@ public class LarkBaseServiceTest {
         String baseId = "baseR1";
         String tableId = "tblR1";
         Map<String, Object> recordFields = Map.of("id", "rec123", "name", "Record Name");
-        ListRecordsResponse.RecordItem recordItem = ListRecordsResponse.RecordItem.builder().recordId("rec123").fields(recordFields).build();
-        List<ListRecordsResponse.RecordItem> items = Collections.singletonList(recordItem);
+        SearchRecordsResponse.RecordItem recordItem = SearchRecordsResponse.RecordItem.builder().recordId("rec123").fields(recordFields).build();
+        List<SearchRecordsResponse.RecordItem> items = Collections.singletonList(recordItem);
 
-        ListRecordsResponse.ListData listData = ListRecordsResponse.ListData.builder()
+        SearchRecordsResponse.ListData listData = SearchRecordsResponse.ListData.builder()
                 .items(items).hasMore(false).pageToken(null).total(1).build();
-        ListRecordsResponse mockResponse = (ListRecordsResponse) ListRecordsResponse.builder().code(0).data(listData).build();
+        SearchRecordsResponse mockResponse = (SearchRecordsResponse) SearchRecordsResponse.builder().code(0).data(listData).build();
         String mockJsonResponse = "{\"code\":0,\"data\":{\"items\":[{\"record_id\":\"rec123\",\"fields\":{\"id\":\"rec123\",\"name\":\"Record Name\"}}],\"has_more\":false}}";
 
 

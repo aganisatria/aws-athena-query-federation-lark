@@ -23,7 +23,7 @@ import com.amazonaws.athena.connectors.lark.base.model.LarkDatabaseRecord;
 import com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum;
 import com.amazonaws.athena.connectors.lark.base.model.response.ListAllTableResponse;
 import com.amazonaws.athena.connectors.lark.base.model.response.ListFieldResponse;
-import com.amazonaws.athena.connectors.lark.base.model.response.ListRecordsResponse;
+import com.amazonaws.athena.connectors.lark.base.model.response.SearchRecordsResponse;
 import com.amazonaws.athena.connectors.lark.base.util.CommonUtil;
 import com.amazonaws.athena.connectors.lark.base.util.SearchApiResponseNormalizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -137,11 +137,11 @@ public class LarkBaseService extends CommonLarkService
                             .pageToken(pageToken)
                             .build();
 
-            ListRecordsResponse recordsResponse = getTableRecords(tableRecordsRequest);
+            SearchRecordsResponse recordsResponse = getTableRecords(tableRecordsRequest);
 
             if (recordsResponse.getCode() == 0) {
                 if (recordsResponse.getItems() != null) {
-                    for (ListRecordsResponse.RecordItem record : recordsResponse.getItems()) {
+                    for (SearchRecordsResponse.RecordItem record : recordsResponse.getItems()) {
                         Map<String, Object> fields = record.getFields();
 
                         String id = null;
@@ -183,7 +183,7 @@ public class LarkBaseService extends CommonLarkService
      * @return Response with list of records and pagination token
      * @throws IOException if API communication fails
      */
-    public ListRecordsResponse getTableRecords(com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest request) throws IOException
+    public SearchRecordsResponse getTableRecords(com.amazonaws.athena.connectors.lark.base.model.request.TableRecordsRequest request) throws IOException
     {
         requireNonNull(request, "request cannot be null");
         refreshTenantAccessToken();
@@ -222,8 +222,8 @@ public class LarkBaseService extends CommonLarkService
             try (CloseableHttpResponse response = httpClient.execute(httpRequest)) {
                 String responseBody = EntityUtils.toString(response.getEntity());
 
-                ListRecordsResponse recordsResponse =
-                        OBJECT_MAPPER.readValue(responseBody, ListRecordsResponse.class);
+                SearchRecordsResponse recordsResponse =
+                        OBJECT_MAPPER.readValue(responseBody, SearchRecordsResponse.class);
 
                 if (recordsResponse.getCode() == 0) {
                     sanitizeRecordFieldNames(recordsResponse, request.getFieldNameToAthenaNameMap());
@@ -251,13 +251,13 @@ public class LarkBaseService extends CommonLarkService
      * silently dropping one field's value or misattributing it to the other's column. Falls back to
      * plain sanitization for any field name not present in the map (e.g. no schema was resolved).
      */
-    private void sanitizeRecordFieldNames(ListRecordsResponse response, Map<String, String> fieldNameToAthenaNameMap)
+    private void sanitizeRecordFieldNames(SearchRecordsResponse response, Map<String, String> fieldNameToAthenaNameMap)
     {
         if (response.getItems() == null) {
             return;
         }
 
-        for (ListRecordsResponse.RecordItem item : response.getItems()) {
+        for (SearchRecordsResponse.RecordItem item : response.getItems()) {
             Map<String, Object> sanitizedFields = new HashMap<>();
             Map<String, Object> originalFields = item.getFields();
 
