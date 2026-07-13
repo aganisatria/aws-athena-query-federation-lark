@@ -46,6 +46,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 public class LarkBaseTableResolverTest {
@@ -150,12 +152,25 @@ public class LarkBaseTableResolverTest {
                 .build();
 
         when(mockLarkBaseService.getTableFields(anyString(), anyString())).thenReturn(Collections.singletonList(lookupField));
-        when(mockLarkBaseService.getLookupType("base1", "relatedTableId", "relatedFieldId")).thenReturn(UITypeEnum.TEXT);
+        // The LOOKUP is resolved using the Lark base ID ("db1", from LarkDatabaseRecord.id()), not the
+        // Athena/Presto database name ("base1", from LarkDatabaseRecord.name()) - discoverTableFields is called
+        // with larkBaseId, which comes from record.id() in processTargetDatabaseRecords.
+        when(mockLarkBaseService.getLookupType("db1", "relatedTableId", "relatedFieldId")).thenReturn(UITypeEnum.TEXT);
 
         List<TableDirectInitialized> tables = resolver.resolveTables();
         assertEquals(1, tables.size());
         assertEquals(1, tables.get(0).columns().size());
         assertEquals("lookupField", tables.get(0).columns().get(0).larkBaseFieldName());
+        // The chained LOOKUP must actually resolve to its target field's type (TEXT), not be left null/UNKNOWN.
+        assertEquals(UITypeEnum.TEXT, tables.get(0).columns().get(0).nestedUIType().childType());
+
+        // getLookupType() itself calls getTableFields() internally on a cache miss, hitting the Lark API
+        // directly; it must go through the same throttling invoker as every other Lark API call in this
+        // resolver so a 429 gets rate-limit backoff instead of failing raw. The lookup call must be routed
+        // through invoker.invoke(...) (4 calls total: getDatabaseRecords, listTables, getTableFields for
+        // table1, and the LOOKUP resolution), not called directly and unwrapped.
+        verify(mockLarkBaseService).getLookupType("db1", "relatedTableId", "relatedFieldId");
+        verify(mockInvoker, times(4)).invoke(any(Callable.class));
     }
 
     @Test

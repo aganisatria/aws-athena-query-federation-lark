@@ -508,6 +508,43 @@ public class RegistererExtractorTest {
     }
 
     @Test
+    public void testVarCharExtractor_withMultipleTextSegments_concatenatesAllSegments() throws Exception {
+        larkFieldTypeMapping.put("test_field", new NestedUIType(UITypeEnum.TEXT, null));
+        registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
+        when(mockRowWriterBuilder.withExtractor(any(String.class), any())).thenReturn(mockRowWriterBuilder);
+
+        ArgumentCaptor<VarCharExtractor> extractorCaptor = ArgumentCaptor.forClass(VarCharExtractor.class);
+        Field field = new Field("test_field", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, new Schema(Collections.singletonList(field)));
+        verify(mockRowWriterBuilder).withExtractor(eq("test_field"), extractorCaptor.capture());
+
+        VarCharExtractor extractor = extractorCaptor.getValue();
+
+        // Lark splits a TEXT cell into multiple segments, e.g. when content mixes plain text with an @mention.
+        Map<String, Object> segment1 = new HashMap<>();
+        segment1.put("text", "Please check ");
+        segment1.put("type", "text");
+        Map<String, Object> mentionSegment = new HashMap<>();
+        mentionSegment.put("text", "@Amanda");
+        mentionSegment.put("type", "mention");
+        mentionSegment.put("token", "ou_8240099442cf5da49f04f4bf8f8abcef");
+        mentionSegment.put("mentionType", "User");
+        Map<String, Object> segment3 = new HashMap<>();
+        segment3.put("text", " for review");
+        segment3.put("type", "text");
+
+        Map<String, Object> context = new HashMap<>();
+        context.put("test_field", Arrays.asList(segment1, mentionSegment, segment3));
+        NullableVarCharHolder holder = new NullableVarCharHolder();
+
+        extractor.extract(context, holder);
+
+        assertEquals("Please check @Amanda for review", holder.value);
+        assertEquals(1, holder.isSet);
+    }
+
+    @Test
     public void testVarCharExtractor_withNonStringValue() throws Exception {
         ArgumentCaptor<VarCharExtractor> extractorCaptor = ArgumentCaptor.forClass(VarCharExtractor.class);
         Field field = new Field("test_field", FieldType.nullable(new ArrowType.Utf8()), null);

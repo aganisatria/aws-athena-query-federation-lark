@@ -28,6 +28,7 @@ import software.amazon.awssdk.utils.Pair;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum.BUTTON;
 import static com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum.STAGE;
@@ -84,7 +85,16 @@ public final class ListFieldResponse extends BaseResponse<ListFieldResponse.List
         {
             this.fieldId = builder.fieldId;
             this.fieldName = builder.fieldName;
-            this.property = builder.property != null ? Map.copyOf(builder.property) : Collections.emptyMap();
+            // Ensure immutable map, filter out null values (Lark returns null for unset properties)
+            if (builder.property != null) {
+                Map<String, Object> nonNullProperty = builder.property.entrySet().stream()
+                        .filter(e -> e.getValue() != null)
+                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+                this.property = Map.copyOf(nonNullProperty);
+            }
+            else {
+                this.property = Collections.emptyMap();
+            }
             this.description = builder.description;
             this.isPrimary = builder.isPrimary;
             this.required = builder.required;

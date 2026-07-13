@@ -135,7 +135,9 @@ public final class SearchApiResponseNormalizer
                         return textValue;
                     }
 
-                    // Multiple items: keep as array (for FORMULA, LOOKUP fields)
+                    // Multiple items: keep as array. This happens for FORMULA/LOOKUP fields, and also for plain
+                    // TEXT fields whose content mixes @mentions or links with regular text - each segment must
+                    // reach RegistererExtractor so it can reconstruct the full text instead of using only one segment.
                     logger.debug("Keeping array format for field '{}' with {} items", fieldName, listValue.size());
                     return value;
                 }

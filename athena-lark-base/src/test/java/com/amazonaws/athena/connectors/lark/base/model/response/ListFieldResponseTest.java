@@ -24,6 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.utils.Pair;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -69,6 +70,22 @@ class ListFieldResponseTest {
         // Assert
         assertThat(item.getFieldId()).isEqualTo("fld1");
         assertThat(item.getUIType()).isEqualTo(UITypeEnum.NUMBER);
+    }
+
+    @Test
+    void testFieldItemProperty_whenValuesAreNull_shouldNotThrowAndStillResolve() {
+        Map<String, Object> propertyWithNull = new HashMap<>();
+        propertyWithNull.put("type", Map.of("ui_type", "Number"));
+        propertyWithNull.put("unset_config", null);
+
+        ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder()
+                .fieldId("fld1")
+                .fieldName("Formula Field")
+                .uiType("Formula")
+                .property(propertyWithNull)
+                .build();
+
+        assertThat(item.getFormulaGlueCatalogUITypeEnum()).isEqualTo(UITypeEnum.NUMBER);
     }
 
     @Test

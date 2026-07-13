@@ -28,6 +28,7 @@ import com.amazonaws.athena.connector.lambda.security.LocalKeyFactory;
 import com.amazonaws.athena.connectors.lark.base.metadataProvider.ExperimentalMetadataProvider;
 import com.amazonaws.athena.connectors.lark.base.metadataProvider.LarkSourceMetadataProvider;
 import com.amazonaws.athena.connectors.lark.base.model.TableDirectInitialized;
+import com.amazonaws.athena.connectors.lark.base.model.response.ListRecordsResponse;
 import com.amazonaws.athena.connectors.lark.base.service.EnvVarService;
 import com.amazonaws.athena.connectors.lark.base.service.GlueCatalogService;
 import com.amazonaws.athena.connectors.lark.base.service.LarkBaseService;
@@ -174,5 +175,82 @@ public class BaseMetadataHandlerTest {
         assertNotNull(response);
         assertEquals("test-catalog", response.getCatalogName());
         assertTrue(response.getSplits().isEmpty());
+    }
+
+    @Test
+    public void testShouldUseParallelSplits_falseWhenTableHasNoParallelSplitKey() {
+        com.amazonaws.athena.connector.lambda.domain.TableName tableName =
+            new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
+
+        // Absence of the split key must short-circuit before even checking the activation flag.
+        boolean result = handler.shouldUseParallelSplits(false, "base1", "tbl1", "", tableName);
+
+        assertFalse(result);
+    }
+
+    @Test
+    public void testShouldUseParallelSplits_falseWhenFeatureNotActivated() {
+        com.amazonaws.athena.connector.lambda.domain.TableName tableName =
+            new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
+        when(mockEnvVarService.isActivateParallelSplit()).thenReturn(false);
+
+        boolean result = handler.shouldUseParallelSplits(true, "base1", "tbl1", "", tableName);
+
+        assertFalse(result);
+    }
+
+    @Test
+    public void testShouldUseParallelSplits_trueWhenNoFilter() throws Exception {
+        com.amazonaws.athena.connector.lambda.domain.TableName tableName =
+            new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
+        when(mockEnvVarService.isActivateParallelSplit()).thenReturn(true);
+
+        boolean result = handler.shouldUseParallelSplits(true, "base1", "tbl1", "", tableName);
+
+        assertTrue(result);
+        // No filter means no selectivity check is needed, so the row-count lookup must never fire.
+        verify(mockInvoker, never()).invoke(any());
+    }
+
+    @Test
+    public void testShouldUseParallelSplits_falseWhenFilterIsHighlySelective() throws Exception {
+        // A selective filter (e.g. WHERE id = 'x') matching only a handful of rows must not trigger parallel
+        // splitting, because splits are sized off the table's full row count and would mostly return zero rows.
+        com.amazonaws.athena.connector.lambda.domain.TableName tableName =
+            new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
+        when(mockEnvVarService.isActivateParallelSplit()).thenReturn(true);
+
+        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
+                .data(ListRecordsResponse.ListData.builder()
+                        .items(Collections.emptyList())
+                        .hasMore(false)
+                        .total(1)
+                        .build())
+                .build();
+        when(mockInvoker.invoke(any())).thenReturn(response);
+
+        boolean result = handler.shouldUseParallelSplits(true, "base1", "tbl1", "{\"conditions\":[]}", tableName);
+
+        assertFalse(result);
+    }
+
+    @Test
+    public void testShouldUseParallelSplits_trueWhenFilterMatchesManyRows() throws Exception {
+        com.amazonaws.athena.connector.lambda.domain.TableName tableName =
+            new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
+        when(mockEnvVarService.isActivateParallelSplit()).thenReturn(true);
+
+        ListRecordsResponse response = (ListRecordsResponse) ListRecordsResponse.builder()
+                .data(ListRecordsResponse.ListData.builder()
+                        .items(Collections.emptyList())
+                        .hasMore(false)
+                        .total(50_000)
+                        .build())
+                .build();
+        when(mockInvoker.invoke(any())).thenReturn(response);
+
+        boolean result = handler.shouldUseParallelSplits(true, "base1", "tbl1", "{\"conditions\":[]}", tableName);
+
+        assertTrue(result);
     }
 }

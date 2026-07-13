@@ -22,6 +22,7 @@ package com.amazonaws.glue.lark.base.crawler.model.response;
 import org.junit.Test;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -53,6 +54,26 @@ public class ListFieldResponseTest {
         assertEquals(items, response.getItems());
         assertEquals("nextPage", response.getPageToken());
         assertTrue(response.hasMore());
+    }
+
+    @Test
+    public void fieldItem_property_whenValuesAreNull_shouldFilterThemOut() {
+        Map<String, Object> propertyWithNull = new HashMap<>();
+        propertyWithNull.put("formatter", "0.00");
+        propertyWithNull.put("date_formatter", null);
+        propertyWithNull.put("auto_fill", true);
+
+        ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder()
+                .fieldId("f1")
+                .fieldName("Field")
+                .uiType("Number")
+                .property(propertyWithNull)
+                .build();
+
+        assertEquals(2, item.getProperty().size());
+        assertTrue(item.getProperty().containsKey("formatter"));
+        assertTrue(item.getProperty().containsKey("auto_fill"));
+        assertFalse(item.getProperty().containsKey("date_formatter"));
     }
 
     @Test

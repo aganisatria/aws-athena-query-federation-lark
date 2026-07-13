@@ -68,7 +68,11 @@ public final class LarkBaseTypeUtils
             case CHECKBOX -> Types.MinorType.BIT;
 
             // Glue: array<...> -> Arrow: LIST
-            case MULTI_SELECT, USER, GROUP_CHAT, ATTACHMENT, CREATED_USER, MODIFIED_USER -> Types.MinorType.LIST;
+            // LOOKUP is included here to match the Glue Crawler path (UITypeEnum.getGlueCatalogType), which maps
+            // LOOKUP to array<{target field's type}>. Without this, LOOKUP fell through to the default VARCHAR
+            // case below, discarding the resolved target type entirely (see getLarkListChildField for how the
+            // list's child element type is derived from nestedUIType().childType()).
+            case MULTI_SELECT, USER, GROUP_CHAT, ATTACHMENT, CREATED_USER, MODIFIED_USER, LOOKUP -> Types.MinorType.LIST;
 
             // Glue: struct<...> -> Arrow: STRUCT
             case URL, LOCATION, SINGLE_LINK, DUPLEX_LINK -> Types.MinorType.STRUCT;
@@ -139,8 +143,40 @@ public final class LarkBaseTypeUtils
                     Field.nullable("name", ArrowType.Utf8.INSTANCE)
             ));
 
-  
+            // Glue: array<{target field's type}> -> Arrow Child: derived from the resolved LOOKUP target type
+            // (nestedUIType().childType(), already resolved to a terminal, non-LOOKUP type by
+            // LarkBaseService.getLookupType, which follows chained LOOKUPs to their final target).
+            case LOOKUP -> Field.nullable("item", scalarArrowTypeForLookupTarget(larkField.nestedUIType().childType()));
+
             default -> Field.nullable("item", ArrowType.Utf8.INSTANCE);
+        };
+    }
+
+    /**
+     * Maps a LOOKUP field's resolved target UI type to a simple/scalar Arrow type, for use as the LOOKUP's
+     * LIST child element type. Mirrors the Glue Crawler path's fallback semantics (glue-lark-base-crawler's
+     * UITypeEnum.getGlueCatalogType), which resolves a LOOKUP target to its Glue type when the target is a
+     * simple scalar (e.g. "decimal", "boolean", "timestamp"), and otherwise falls back to a plain string.
+     *
+     * @param targetUiType The resolved (terminal) UI type of the field the LOOKUP points to, or null/UNKNOWN
+     *                     if it could not be resolved (e.g. a broken/circular reference or an API error).
+     * @return The Arrow type to use for the LOOKUP list's child element.
+     */
+    private static ArrowType scalarArrowTypeForLookupTarget(UITypeEnum targetUiType)
+    {
+        if (targetUiType == null) {
+            return ArrowType.Utf8.INSTANCE;
+        }
+
+        return switch (targetUiType) {
+            case NUMBER, PROGRESS, CURRENCY -> new ArrowType.Decimal(38, 18, 128);
+            case RATING -> Types.MinorType.TINYINT.getType();
+            case CHECKBOX -> ArrowType.Bool.INSTANCE;
+            case DATE_TIME, CREATED_TIME, MODIFIED_TIME -> new ArrowType.Timestamp(TimeUnit.MILLISECOND, "UTC");
+            // TEXT, BARCODE, SINGLE_SELECT, PHONE, AUTO_NUMBER, EMAIL, and any type not yet supported as a
+            // LOOKUP target (MULTI_SELECT, USER, ATTACHMENT, URL, LOCATION, LINK, UNKNOWN, ...) fall back to a
+            // plain string representation, matching the Glue Crawler path's "array<string>" fallback.
+            default -> ArrowType.Utf8.INSTANCE;
         };
     }
 

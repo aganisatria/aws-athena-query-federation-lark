@@ -190,6 +190,42 @@ class LarkBaseTypeUtilsTest {
         assertThat(result).isEqualTo(Types.MinorType.STRUCT);
     }
 
+    // Test larkFieldToArrowMinorType for LOOKUP type
+    // This is the test that would have caught the dead-code bug where LarkBaseTableResolver and
+    // ExperimentalMetadataProvider could never actually populate childType() for a genuine LOOKUP field: with
+    // no case LOOKUP here, every LOOKUP field silently fell through to the default VARCHAR branch instead of LIST.
+    @Test
+    void testLarkFieldToArrowMinorType_LookupWithTextTarget() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.TEXT));
+
+        Types.MinorType result = LarkBaseTypeUtils.larkFieldToArrowMinorType(field);
+
+        assertThat(result).isEqualTo(Types.MinorType.LIST);
+    }
+
+    @Test
+    void testLarkFieldToArrowMinorType_LookupWithNumberTarget() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.NUMBER));
+
+        Types.MinorType result = LarkBaseTypeUtils.larkFieldToArrowMinorType(field);
+
+        assertThat(result).isEqualTo(Types.MinorType.LIST);
+    }
+
+    @Test
+    void testLarkFieldToArrowMinorType_LookupWithUnresolvedTarget() {
+        // childType is UNKNOWN when the target couldn't be resolved (broken reference, API error, cycle).
+        // The field must still be a LIST at the top level - only the child element type falls back to string.
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.UNKNOWN));
+
+        Types.MinorType result = LarkBaseTypeUtils.larkFieldToArrowMinorType(field);
+
+        assertThat(result).isEqualTo(Types.MinorType.LIST);
+    }
+
     // Test larkFieldToArrowMinorType for FORMULA type
     @Test
     void testLarkFieldToArrowMinorType_FormulaWithNumber() {
@@ -319,6 +355,99 @@ class LarkBaseTypeUtilsTest {
 
         assertThat(result.getName()).isEqualTo("item");
         assertThat(result.getType()).isEqualTo(ArrowType.Utf8.INSTANCE);
+    }
+
+    @Test
+    void testGetLarkListChildField_LookupWithNumber() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.NUMBER));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getName()).isEqualTo("item");
+        assertThat(result.getType()).isEqualTo(new ArrowType.Decimal(38, 18, 128));
+    }
+
+    @Test
+    void testGetLarkListChildField_LookupWithCurrency() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.CURRENCY));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getType()).isEqualTo(new ArrowType.Decimal(38, 18, 128));
+    }
+
+    @Test
+    void testGetLarkListChildField_LookupWithCheckbox() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.CHECKBOX));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getName()).isEqualTo("item");
+        assertThat(result.getType()).isEqualTo(ArrowType.Bool.INSTANCE);
+    }
+
+    @Test
+    void testGetLarkListChildField_LookupWithDateTime() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.DATE_TIME));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getName()).isEqualTo("item");
+        assertThat(result.getType()).isEqualTo(new ArrowType.Timestamp(org.apache.arrow.vector.types.TimeUnit.MILLISECOND, "UTC"));
+    }
+
+    @Test
+    void testGetLarkListChildField_LookupWithRating() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.RATING));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getName()).isEqualTo("item");
+        assertThat(result.getType()).isEqualTo(Types.MinorType.TINYINT.getType());
+    }
+
+    @Test
+    void testGetLarkListChildField_LookupWithUnresolvedTarget_fallsBackToString() {
+        // childType UNKNOWN (target couldn't be resolved) must fall back to a plain string element,
+        // matching the Glue Crawler path's "array<string>" fallback - not throw or produce a null type.
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.UNKNOWN));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getName()).isEqualTo("item");
+        assertThat(result.getType()).isEqualTo(ArrowType.Utf8.INSTANCE);
+    }
+
+    @Test
+    void testGetLarkListChildField_LookupWithNullTarget_fallsBackToString() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, null));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getName()).isEqualTo("item");
+        assertThat(result.getType()).isEqualTo(ArrowType.Utf8.INSTANCE);
+    }
+
+    // End-to-end: larkFieldToArrowField for a LOOKUP field must produce a LIST Field whose single child carries
+    // the resolved target type - this is the full schema shape Athena actually sees for a LOOKUP column.
+    @Test
+    void testLarkFieldToArrowField_LookupWithNumber_producesListOfDecimal() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup Field", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.NUMBER));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field);
+
+        assertThat(result.getName()).isEqualTo("Lookup Field");
+        assertThat(result.getType()).isEqualTo(ArrowType.List.INSTANCE);
+        assertThat(result.getChildren()).hasSize(1);
+        assertThat(result.getChildren().get(0).getType()).isEqualTo(new ArrowType.Decimal(38, 18, 128));
     }
 
     // Test getLarkStructChildFields for URL

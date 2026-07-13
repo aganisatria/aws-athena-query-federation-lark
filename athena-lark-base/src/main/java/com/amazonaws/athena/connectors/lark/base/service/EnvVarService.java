@@ -29,6 +29,7 @@ import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.DEFAULT_LARK_LOOKUP_MAX_DEPTH;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.DOES_ACTIVATE_EXPERIMENTAL_FEATURE_ENV_VAR;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.DOES_ACTIVATE_LARK_BASE_SOURCE_ENV_VAR;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.DOES_ACTIVATE_LARK_DRIVE_SOURCE_ENV_VAR;
@@ -37,6 +38,7 @@ import static com.amazonaws.athena.connectors.lark.base.BaseConstants.ENABLE_DEB
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_APP_KEY_ENV_VAR;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_BASE_SOURCES_ENV_VAR;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_DRIVE_SOURCES_ENV_VAR;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_LOOKUP_MAX_DEPTH_ENV_VAR;
 import static java.util.Objects.requireNonNull;
 
 public class EnvVarService
@@ -53,6 +55,7 @@ public class EnvVarService
     private final boolean enableDebugLogging;
     private final String larkBaseSources;
     private final String larkDriveSources;
+    private final int lookupMaxDepth;
 
     public EnvVarService(Map<String, String> configOptions, ThrottlingInvoker invoker)
     {
@@ -91,6 +94,21 @@ public class EnvVarService
         this.enableDebugLogging = Boolean.parseBoolean(configOptions.getOrDefault(ENABLE_DEBUG_LOGGING_ENV_VAR, "false"));
         this.larkBaseSources = configOptions.getOrDefault(LARK_BASE_SOURCES_ENV_VAR, "");
         this.larkDriveSources = configOptions.getOrDefault(LARK_DRIVE_SOURCES_ENV_VAR, "");
+        this.lookupMaxDepth = parseLookupMaxDepth(configOptions.get(LARK_LOOKUP_MAX_DEPTH_ENV_VAR));
+    }
+
+    private static int parseLookupMaxDepth(String rawValue)
+    {
+        if (rawValue == null || rawValue.isEmpty()) {
+            return DEFAULT_LARK_LOOKUP_MAX_DEPTH;
+        }
+        try {
+            int parsed = Integer.parseInt(rawValue);
+            return parsed > 0 ? parsed : DEFAULT_LARK_LOOKUP_MAX_DEPTH;
+        }
+        catch (NumberFormatException e) {
+            return DEFAULT_LARK_LOOKUP_MAX_DEPTH;
+        }
     }
 
     public String getLarkAppId()
@@ -136,5 +154,10 @@ public class EnvVarService
     public String getLarkDriveSources()
     {
         return larkDriveSources;
+    }
+
+    public int getLookupMaxDepth()
+    {
+        return lookupMaxDepth;
     }
 }

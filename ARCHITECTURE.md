@@ -808,6 +808,14 @@ MODIFIED_BY         STRUCT                   Person struct extractor
 | AUTO_NUMBER | VARCHAR | Auto-generated number |
 | DUPLEX_LINK | LIST<STRUCT<record_id:VARCHAR, text:VARCHAR>> | Bidirectional links |
 
+### Known Limitations
+
+**NUMBER field precision**: Lark Base stores `Number`/`Progress`/`Currency`/`Rating` field values as IEEE 754 double-precision floats internally. Values exceeding ~15-17 significant digits (e.g. bank card numbers, long numeric IDs) are already rounded by Lark Base itself - trailing digits become zeros - before the Search Records API ever returns the data. This connector maps NUMBER to `Decimal(38, 18)`, which is more than wide enough to hold the value once received, but it cannot recover precision Lark Base already discarded upstream. Confirmed by direct API testing: sending `12345678901234567890` (20 digits) round-trips through Lark's Search Records API as `12345678901234500000`. Lark's own FAQ documents this and recommends storing such values in a `Text` field instead: see [Base limits FAQs](https://www.larksuite.com/hc/en-US/articles/890398616778-base-limits-faqs).
+
+**LOOKUP field type resolution** (fixed): `LarkBaseTableResolver` and `ExperimentalMetadataProvider` (the "Lark Base Source" and "Experimental" discovery paths) previously guarded LOOKUP resolution with `field.getFormulaGlueCatalogUITypeEnum().equals(LOOKUP)`, which can only be true for FORMULA fields, then called `getTargetFieldAndTableForLookup()`, which only returns a usable target for LOOKUP fields - a self-contradictory condition that made the branch dead code. A genuine LOOKUP field's child type was always left `UNKNOWN`, and `LarkBaseTypeUtils.larkFieldToArrowMinorType` had no `case LOOKUP` at all, so the field's top-level Arrow type fell through to `default -> VARCHAR` instead of `LIST`. Both are now fixed: the resolvers branch on the field's own UI type (matching `glue-lark-base-crawler`'s correct logic), and LOOKUP now maps to `LIST` with its child element type derived from the resolved target (`Decimal` for NUMBER/PROGRESS/CURRENCY, `Bool` for CHECKBOX, `Timestamp` for DATE_TIME family, `TinyInt` for RATING, `Utf8` otherwise - matching the Glue Crawler path's `array<{target type}>` semantics).
+
+**Chained LOOKUP type parsing from Glue comments** (fixed): the Glue Crawler encodes a LOOKUP field's resolved type in the column comment as `LarkBaseFieldType=Lookup<{target type}>`, and recurses to a nested string like `Lookup<Lookup<Number>>` when the LOOKUP's target is itself another LOOKUP field (`BaseLarkBaseCrawlerHandler.getLarkBaseOriginalColumnType`). `CommonUtil.extractFormulaOrLookup`, which parses this comment back out on the primary Glue Catalog discovery path, used to split on the *first* `<` and take index `[1]`, which only ever captured the immediate next level ("Lookup") instead of the terminal type ("Number") for any chain of depth 2+. Fixed to extract from the *last* `<` instead, which always yields the innermost/terminal type regardless of nesting depth.
+
 ### Reserved Fields
 
 All tables automatically include these fields:
@@ -932,6 +940,13 @@ Translated to Lark API:
 - Faster query execution for large tables
 - Better Lambda concurrency utilization
 - Reduced individual Lambda memory pressure
+
+**Filter selectivity check**: Splits are sized off the table's full row count, because `$reserved_split_key`
+is a positional index over the whole table rather than over filtered results - a selective filter can match
+rows anywhere in that key range, so splits must cover it entirely to stay correct. Before committing to
+parallel splitting, the connector runs a cheap `pageSize=1` count query with the filter applied; if the
+matching row count already fits in a single page, it falls back to a single partition instead of spawning
+splits that would mostly return zero rows (e.g. `WHERE id = 'x'` on a 100,000-row table).
 
 ---
 

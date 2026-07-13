@@ -334,6 +334,81 @@ public class LarkBaseServiceTest {
     }
 
     @Test
+    public void getLookupType_multiHopChain_resolvesThroughSeveralTables() throws Exception {
+        // tbl1.fld1 -> looks up tbl2.fld2 -> looks up tbl3.fld3 (Text)
+        String baseId = "base1";
+
+        String mockJsonResponse1 = "{\"code\":0, \"data\":{\"items\":[{\"field_id\":\"fld1\",\"field_name\":\"Field 1\",\"ui_type\":\"Lookup\", \"property\":{\"target_field\":\"fld2\",\"filter_info\":{\"target_table\":\"tbl2\"}}}]}}";
+        String mockJsonResponse2 = "{\"code\":0, \"data\":{\"items\":[{\"field_id\":\"fld2\",\"field_name\":\"Field 2\",\"ui_type\":\"Lookup\", \"property\":{\"target_field\":\"fld3\",\"filter_info\":{\"target_table\":\"tbl3\"}}}]}}";
+        String mockJsonResponse3 = "{\"code\":0, \"data\":{\"items\":[{\"field_id\":\"fld3\",\"field_name\":\"Field 3\",\"ui_type\":\"Text\"}],\"has_more\":false}}";
+
+        MockHttpClientWrapper mockHttpClient = new MockHttpClientWrapper();
+        mockHttpClient.addResponse(mockJsonResponse1, 200, "OK");
+        mockHttpClient.addResponse(mockJsonResponse2, 200, "OK");
+        mockHttpClient.addResponse(mockJsonResponse3, 200, "OK");
+        LarkBaseService larkBaseService = new LarkBaseService(TEST_APP_ID, TEST_APP_SECRET, mockHttpClient);
+
+        UITypeEnum result = larkBaseService.getLookupType(baseId, "tbl1", "fld1");
+
+        assertEquals(UITypeEnum.TEXT, result);
+    }
+
+    @Test
+    public void getLookupType_directSelfReference_breaksLoopAndReturnsUnknown() throws Exception {
+        // tbl1.fld1 is a LOOKUP that (misconfigured) points back at itself.
+        String baseId = "base1";
+        String mockJsonResponse = "{\"code\":0, \"data\":{\"items\":[{\"field_id\":\"fld1\",\"field_name\":\"Field 1\",\"ui_type\":\"Lookup\", \"property\":{\"target_field\":\"fld1\",\"filter_info\":{\"target_table\":\"tbl1\"}}}]}}";
+
+        MockHttpClientWrapper mockHttpClient = new MockHttpClientWrapper();
+        mockHttpClient.addResponse(mockJsonResponse, 200, "OK");
+        LarkBaseService larkBaseService = new LarkBaseService(TEST_APP_ID, TEST_APP_SECRET, mockHttpClient);
+
+        UITypeEnum result = larkBaseService.getLookupType(baseId, "tbl1", "fld1");
+
+        assertEquals(UITypeEnum.UNKNOWN, result);
+    }
+
+    @Test
+    public void getLookupType_circularReferenceAcrossTwoTables_breaksLoopAndReturnsUnknown() throws Exception {
+        // tbl1.fld1 looks up tbl2.fld2, which looks up back to tbl1.fld1 - a cycle spanning two tables.
+        // Without cycle detection this recurses forever (using cached field data, so no extra HTTP calls are
+        // even needed to keep looping) and crashes schema discovery with a StackOverflowError.
+        String baseId = "base1";
+
+        String mockJsonResponse1 = "{\"code\":0, \"data\":{\"items\":[{\"field_id\":\"fld1\",\"field_name\":\"Field 1\",\"ui_type\":\"Lookup\", \"property\":{\"target_field\":\"fld2\",\"filter_info\":{\"target_table\":\"tbl2\"}}}]}}";
+        String mockJsonResponse2 = "{\"code\":0, \"data\":{\"items\":[{\"field_id\":\"fld2\",\"field_name\":\"Field 2\",\"ui_type\":\"Lookup\", \"property\":{\"target_field\":\"fld1\",\"filter_info\":{\"target_table\":\"tbl1\"}}}]}}";
+
+        MockHttpClientWrapper mockHttpClient = new MockHttpClientWrapper();
+        mockHttpClient.addResponse(mockJsonResponse1, 200, "OK");
+        mockHttpClient.addResponse(mockJsonResponse2, 200, "OK");
+        LarkBaseService larkBaseService = new LarkBaseService(TEST_APP_ID, TEST_APP_SECRET, mockHttpClient);
+
+        UITypeEnum result = larkBaseService.getLookupType(baseId, "tbl1", "fld1");
+
+        assertEquals(UITypeEnum.UNKNOWN, result);
+    }
+
+    @Test
+    public void getLookupType_configuredMaxDepth_cutsOffLegitimateChainBeforeCycleWouldTrigger() throws Exception {
+        // tbl1.fld1 -> tbl2.fld2 -> tbl3.fld3 (Text) is a legitimate, non-circular 3-hop chain. With the
+        // configurable max depth set to 2, resolution must stop after the 2nd hop and return UNKNOWN without
+        // ever fetching tbl3 - proving the constructor-supplied max depth (not just the default) is honored.
+        String baseId = "base1";
+
+        String mockJsonResponse1 = "{\"code\":0, \"data\":{\"items\":[{\"field_id\":\"fld1\",\"field_name\":\"Field 1\",\"ui_type\":\"Lookup\", \"property\":{\"target_field\":\"fld2\",\"filter_info\":{\"target_table\":\"tbl2\"}}}]}}";
+        String mockJsonResponse2 = "{\"code\":0, \"data\":{\"items\":[{\"field_id\":\"fld2\",\"field_name\":\"Field 2\",\"ui_type\":\"Lookup\", \"property\":{\"target_field\":\"fld3\",\"filter_info\":{\"target_table\":\"tbl3\"}}}]}}";
+
+        MockHttpClientWrapper mockHttpClient = new MockHttpClientWrapper();
+        mockHttpClient.addResponse(mockJsonResponse1, 200, "OK");
+        mockHttpClient.addResponse(mockJsonResponse2, 200, "OK");
+        LarkBaseService larkBaseService = new LarkBaseService(TEST_APP_ID, TEST_APP_SECRET, mockHttpClient, 2);
+
+        UITypeEnum result = larkBaseService.getLookupType(baseId, "tbl1", "fld1");
+
+        assertEquals(UITypeEnum.UNKNOWN, result);
+    }
+
+    @Test
     public void getTableFields_invalidCacheKey_fallsBackToDirectFetch() throws Exception {
         // Test that the cache loader's IllegalArgumentException path is covered
         String baseId = "base1";

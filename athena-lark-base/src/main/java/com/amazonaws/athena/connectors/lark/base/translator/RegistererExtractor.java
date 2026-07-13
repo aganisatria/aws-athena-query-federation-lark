@@ -296,17 +296,26 @@ public class RegistererExtractor
                     Object textVal = mapElement.get("text");
                     outputValue = (textVal != null) ? String.valueOf(textVal) : null;
                 }
-                // Handle TEXT fields: [{text: "...", type: "text"}] (list of maps)
+                // Handle TEXT fields with multiple segments: [{text: "...", type: "text"}, {text: "...", type: "mention", ...}, ...]
+                // Lark splits a cell into several segments when the text contains @mentions or links mixed with
+                // plain text. Every segment (text or mention) carries a "text" key with its display value, so all
+                // segments must be concatenated - otherwise everything after the first segment is silently dropped.
                 else if (unwrappedValue instanceof List<?> listVal && !listVal.isEmpty()) {
-                    Object firstElement = listVal.get(0);
-                    if (firstElement instanceof Map<?, ?> mapElement && mapElement.containsKey("text")) {
-                        Object textVal = mapElement.get("text");
-                        outputValue = (textVal != null) ? String.valueOf(textVal) : null;
+                    StringBuilder segmentsBuilder = new StringBuilder();
+                    for (Object element : listVal) {
+                        if (element instanceof Map<?, ?> mapElement && mapElement.containsKey("text")) {
+                            Object textVal = mapElement.get("text");
+                            if (textVal != null) {
+                                segmentsBuilder.append(textVal);
+                            }
+                        }
+                        else {
+                            segmentsBuilder.append(String.valueOf(element));
+                        }
                     }
-                    else {
-                        // Fallback to first element as string
-                        outputValue = String.valueOf(firstElement);
-                    }
+                    // Fall back to the raw list representation only if every segment yielded nothing
+                    // (e.g. a single segment with a null "text" value), matching the single-map fallback below.
+                    outputValue = (segmentsBuilder.length() > 0) ? segmentsBuilder.toString() : null;
                 }
 
                 if (outputValue == null) {
@@ -319,7 +328,7 @@ public class RegistererExtractor
                 }
             }
             catch (Exception e) {
-                logger.error("VarCharExtractor: Error untuk field '{}', nilai mentah tipe {}: {}. Nilai: {}",
+                logger.error("VarCharExtractor: Error for field '{}', raw value type {}: {}. Value: {}",
                         athenaFieldName, rawValue.getClass().getName(), e.getMessage(), rawValue, e);
                 dst.isSet = 0;
             }

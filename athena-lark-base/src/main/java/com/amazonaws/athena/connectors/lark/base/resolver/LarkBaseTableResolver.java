@@ -216,13 +216,23 @@ public class LarkBaseTableResolver
                 String larkFieldName = field.getFieldName();
                 if (isValidIdentifier(larkFieldName)) {
                     String prestoFieldName = CommonUtil.sanitizeGlueRelatedName(larkFieldName);
-                    UITypeEnum childUIType = field.getFormulaGlueCatalogUITypeEnum();
-
-                    if (childUIType.equals(UITypeEnum.LOOKUP)) {
+                    // NOTE: getFormulaGlueCatalogUITypeEnum() only returns a meaningful (non-UNKNOWN) value when
+                    // the field's own UI type is FORMULA, while getTargetFieldAndTableForLookup() only returns a
+                    // usable target when the field's own UI type is LOOKUP. A field cannot be both at once, so
+                    // checking the former for LOOKUP and then calling the latter was dead code - a genuine LOOKUP
+                    // field's child type could never actually be resolved this way. Branch on the field's own UI
+                    // type instead, matching the (correct) logic in glue-lark-base-crawler's BaseLarkBaseCrawlerHandler.
+                    UITypeEnum childUIType;
+                    if (field.getUIType().equals(UITypeEnum.LOOKUP)) {
                         Pair<String, String> lookupId = field.getTargetFieldAndTableForLookup();
                         String newTableId = lookupId.right();
                         String newFieldId = lookupId.left();
-                        childUIType = larkBaseService.getLookupType(larkBaseId, newTableId, newFieldId);
+                        // Route through the invoker so a cache-miss fetch inside getLookupType gets the same
+                        // rate-limit backoff as every other Lark API call here.
+                        childUIType = invoker.invoke(() -> larkBaseService.getLookupType(larkBaseId, newTableId, newFieldId));
+                    }
+                    else {
+                        childUIType = field.getFormulaGlueCatalogUITypeEnum();
                     }
 
                     NestedUIType nestedUIType = new NestedUIType(field.getUIType(), childUIType);

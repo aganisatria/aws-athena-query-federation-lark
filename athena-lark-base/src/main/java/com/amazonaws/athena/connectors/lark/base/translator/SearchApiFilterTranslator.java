@@ -69,6 +69,7 @@ public final class SearchApiFilterTranslator
         }
 
         List<Map<String, Object>> allConditions = new ArrayList<>();
+        List<Map<String, Object>> orGroups = new ArrayList<>();
 
         for (Map.Entry<String, ValueSet> entry : constraints.entrySet()) {
             String lowercaseColumnName = entry.getKey();
@@ -88,11 +89,28 @@ public final class SearchApiFilterTranslator
                 continue;
             }
 
-            List<Map<String, Object>> conditions = translateValueSetToConditions(fieldName, valueSet, fieldUiType);
-            allConditions.addAll(conditions);
+            // Lark's Search API restricts the "is"/"isNot" operators to a single value each (there is no native
+            // "in" operator - it is documented as not yet supported), so an IN-clause with more than one value
+            // cannot be expressed as multiple "is" conditions ANDed together - that would require the field to
+            // equal every value simultaneously and would always match zero rows. Instead, express it as an
+            // OR-group of single-value "is" conditions nested under the top-level AND via "children", which is
+            // the pattern Lark's filter guide recommends. A NOT IN-clause (blacklist) is unaffected: multiple
+            // "isNot" conditions ANDed together already correctly means "not equal to any of these values".
+            if (valueSet instanceof EquatableValueSet equatableValueSet
+                    && equatableValueSet.isWhiteList() && equatableValueSet.getValueBlock().getRowCount() > 1) {
+                List<Map<String, Object>> orConditions = translateEquatableValueSet(fieldName, equatableValueSet, fieldUiType);
+                Map<String, Object> orGroup = new HashMap<>();
+                orGroup.put("conjunction", "or");
+                orGroup.put("conditions", orConditions);
+                orGroups.add(orGroup);
+            }
+            else {
+                List<Map<String, Object>> conditions = translateValueSetToConditions(fieldName, valueSet, fieldUiType);
+                allConditions.addAll(conditions);
+            }
         }
 
-        if (allConditions.isEmpty()) {
+        if (allConditions.isEmpty() && orGroups.isEmpty()) {
             return "";
         }
 
@@ -100,6 +118,9 @@ public final class SearchApiFilterTranslator
         Map<String, Object> filter = new HashMap<>();
         filter.put("conjunction", "and");
         filter.put("conditions", allConditions);
+        if (!orGroups.isEmpty()) {
+            filter.put("children", orGroups);
+        }
 
         try {
             return OBJECT_MAPPER.writeValueAsString(filter);
@@ -375,6 +396,7 @@ public final class SearchApiFilterTranslator
 
         try {
             List<Map<String, Object>> allConditions = new ArrayList<>();
+            List<Map<String, Object>> existingChildren = null;
 
             // Parse existing filter if present
             if (existingFilterJson != null && !existingFilterJson.isBlank()) {
@@ -383,6 +405,9 @@ public final class SearchApiFilterTranslator
                 if (existingConditions != null) {
                     allConditions.addAll(existingConditions);
                 }
+                // IN-clause conditions are carried as OR-groups under "children" (see toFilterJson); they must be
+                // preserved here too, otherwise combining a split range with an IN-clause would silently drop it.
+                existingChildren = (List<Map<String, Object>>) existingFilter.get("children");
             }
 
             // Add split range conditions
@@ -403,6 +428,9 @@ public final class SearchApiFilterTranslator
             Map<String, Object> filter = new HashMap<>();
             filter.put("conjunction", "and");
             filter.put("conditions", allConditions);
+            if (existingChildren != null && !existingChildren.isEmpty()) {
+                filter.put("children", existingChildren);
+            }
 
             return OBJECT_MAPPER.writeValueAsString(filter);
         }

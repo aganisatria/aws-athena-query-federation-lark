@@ -50,6 +50,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 public class ExperimentalMetadataProviderTest {
@@ -254,6 +255,8 @@ public class ExperimentalMetadataProviderTest {
 
         assertTrue(result.isPresent());
         assertEquals(1, result.get().fieldNameMappings().size());
+        // The chained LOOKUP must actually resolve to its target field's type (TEXT), not be left null/UNKNOWN.
+        assertEquals(UITypeEnum.TEXT, result.get().fieldNameMappings().get(0).nestedUIType().childType());
     }
 
     @Test
@@ -327,8 +330,12 @@ public class ExperimentalMetadataProviderTest {
 
         Optional<TableSchemaResult> result = metadataProvider.getTableSchema(request);
 
-        assertTrue(result.isPresent());
-        assertEquals(1, result.get().schema().getFields().size());
+        // The only field is a LOOKUP whose type resolution throws, so it is skipped (see the catch+continue in
+        // getTableSchema). With no fields left, the schema is empty, not the pre-fix behavior of silently
+        // including it with an unresolved type - that only "worked" because getLookupType was never actually
+        // reached due to the (now fixed) dead-code bug in the LOOKUP-vs-FORMULA branch condition.
+        assertFalse(result.isPresent());
+        verify(larkBaseService).getLookupType("base1", "tblxxxx", "fldxxxx");
     }
 
     @Test
@@ -360,8 +367,10 @@ public class ExperimentalMetadataProviderTest {
 
         Optional<PartitionInfoResult> result = metadataProvider.getPartitionInfo(new TableName("base1", "table1"), request);
 
-        assertTrue(result.isPresent());
-        assertEquals(1, result.get().fieldNameMappings().size());
+        // Same reasoning as getTableSchema_lookupTypeThrowsException: the only field is a LOOKUP whose type
+        // resolution throws, so it's skipped (catch+continue), leaving no field mappings and an empty Optional.
+        assertFalse(result.isPresent());
+        verify(larkBaseService).getLookupType("base1", "tblxxxx", "fldxxxx");
     }
 
     @Test
