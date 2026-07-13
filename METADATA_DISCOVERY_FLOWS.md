@@ -161,14 +161,18 @@ Table: databases
 Columns:
   - id (TEXT): Lark Base ID (e.g., "bascnxxxxxx")
   - name (TEXT): Glue database name (lowercase, underscores only)
+  - whitelist_tables (TEXT, optional): comma-separated Lark table IDs to exclusively crawl for this
+    database. Leave blank to crawl all tables (subject to blacklist_tables).
+  - blacklist_tables (TEXT, optional): comma-separated Lark table IDs to always exclude from crawling
+    for this database. Takes precedence over whitelist_tables.
 ```
 
 Example data:
 ```
-| id                   | name              |
-|---------------------|-------------------|
-| bascnABC123456789   | sales_data        |
-| bascnDEF987654321   | customer_records  |
+| id                   | name              | whitelist_tables | blacklist_tables |
+|---------------------|-------------------|-------------------|-------------------|
+| bascnABC123456789   | sales_data        |                   | tblARCHIVED123    |
+| bascnDEF987654321   | customer_records  | tblACTIVE111,tblACTIVE222 |           |
 ```
 
 **Step 3: Run Crawler**

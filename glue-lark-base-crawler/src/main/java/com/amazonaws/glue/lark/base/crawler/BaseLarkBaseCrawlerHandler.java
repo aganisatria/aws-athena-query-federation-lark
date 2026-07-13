@@ -358,11 +358,37 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
     }
 
     /**
+     * Filters the tables discovered in Lark for a database down to those allowed by that database's
+     * whitelist/blacklist configuration (read from the control table's "whitelist_tables"/"blacklist_tables"
+     * columns). The blacklist always wins; the whitelist only restricts a database that has at least one
+     * whitelist entry.
+     *
+     * @param tables The tables discovered in Lark for this database.
+     * @param recordItem The control-table record for this database, carrying its whitelist/blacklist table IDs.
+     * @return The filtered list of tables allowed to be crawled.
+     */
+    private List<ListAllTableResponse.BaseItem> filterTablesByAccessControl(List<ListAllTableResponse.BaseItem> tables,
+                                                                            LarkDatabaseRecord recordItem)
+    {
+        Set<String> blacklistTableIds = recordItem.blacklistTableIds();
+        Set<String> whitelistTableIds = recordItem.whitelistTableIds();
+
+        return tables.stream()
+                .filter(table -> blacklistTableIds == null || blacklistTableIds.isEmpty()
+                        || !blacklistTableIds.contains(table.getTableId()))
+                .filter(table -> whitelistTableIds == null || whitelistTableIds.isEmpty()
+                        || whitelistTableIds.contains(table.getTableId()))
+                .collect(Collectors.toList());
+    }
+
+    /**
      * Create Tables for New Databases
      *
      * @param databaseToCreate The database to create
+     * @param recordsByDatabaseName The control-table record for each database being created, keyed by database name
      */
-    private void createTablesForNewDatabases(Map<String, String> databaseToCreate)
+    private void createTablesForNewDatabases(Map<String, String> databaseToCreate,
+                                             Map<String, LarkDatabaseRecord> recordsByDatabaseName)
     {
         Map<String, List<TableInput>> batchCreateTableRequest = new HashMap<>();
 
@@ -374,6 +400,10 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
             List<TableInput> tableInputs = new ArrayList<>();
 
             List<ListAllTableResponse.BaseItem> listTables = larkBaseService.listTables(databaseId);
+            LarkDatabaseRecord recordItem = recordsByDatabaseName.get(databaseName);
+            if (recordItem != null) {
+                listTables = filterTablesByAccessControl(listTables, recordItem);
+            }
 
             for (ListAllTableResponse.BaseItem tableItem : listTables) {
                 TableInput newTableInput = this.constructNewTables(databaseId, tableItem.getTableId(), tableItem.getName());
@@ -406,6 +436,7 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
                                                       List<LarkDatabaseRecord> databaseFromLark)
     {
         Map<String, String> databaseToCreate = new HashMap<>();
+        Map<String, LarkDatabaseRecord> recordsByDatabaseName = new HashMap<>();
         Set<String> existingDatabaseNames = databasesFromCatalog.stream()
                 .map(Database::name)
                 .collect(Collectors.toSet());
@@ -417,6 +448,7 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
             if (!existingDatabaseNames.contains(recordItem.name())) {
                 databaseToCreate.put(recordItem.name(), Util.constructDatabaseLocationURI(
                         getCrawlingMethod(), getCrawlingSource(), recordItem.id()));
+                recordsByDatabaseName.put(recordItem.name(), recordItem);
                 logger.info("Marking database for creation: {}, locationUri: {}",
                         recordItem.name(), Util.constructDatabaseLocationURIPrefix(
                                 getCrawlingMethod(), getCrawlingSource()
@@ -440,7 +472,7 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
             // Step 4.1: Create tables for new databases
             logger.info("Step 4.1: Creating tables for new databases");
-            this.createTablesForNewDatabases(databaseToCreate);
+            this.createTablesForNewDatabases(databaseToCreate, recordsByDatabaseName);
             logger.info("Step 4.1: Tables created successfully");
         }
         else {
@@ -552,7 +584,8 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
         logger.info("Step 5.2.1: Found {} tables in Glue for database: {}", originalExistingTables.size(), database.name());
 
         logger.info("Step 5.2.2: Getting tables from Lark");
-        List<ListAllTableResponse.BaseItem> larkTables = larkBaseService.listTables(recordItem.id());
+        List<ListAllTableResponse.BaseItem> larkTables = filterTablesByAccessControl(
+                larkBaseService.listTables(recordItem.id()), recordItem);
         logger.info("Step 5.2.2: Found {} tables in Lark for database: {}", larkTables.size(), database.name());
 
         Map<String, String> larkTableNameMap = new HashMap<>();

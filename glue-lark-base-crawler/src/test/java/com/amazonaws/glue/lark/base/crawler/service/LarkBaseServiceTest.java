@@ -43,6 +43,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -204,6 +205,58 @@ public class LarkBaseServiceTest {
         assertEquals("rec123", result.get(0).id());
         assertEquals("record_name", result.get(0).name());
         verify(larkBaseService, times(1)).refreshTenantAccessToken();
+    }
+
+    @Test
+    public void getTableRecords_success_withWhitelistAndBlacklistColumns() throws Exception {
+        String baseId = "baseR1";
+        String tableId = "tblR1";
+        String mockJsonResponse = "{\"code\":0,\"data\":{\"items\":[{\"record_id\":\"rec123\",\"fields\":{"
+                + "\"id\":\"rec123\",\"name\":\"Record Name\","
+                + "\"whitelist_tables\":\"tblA, tblB ,tblC\","
+                + "\"blacklist_tables\":\"tblD\"}}],\"has_more\":false}}";
+
+        when(mockHttpClient.execute(any(HttpPost.class))).thenReturn(mockHttpResponse);
+        when(mockHttpResponse.getEntity()).thenReturn(mockHttpEntity);
+        when(mockHttpEntity.getContent()).thenReturn(new ByteArrayInputStream(mockJsonResponse.getBytes()));
+
+        List<LarkDatabaseRecord> result = larkBaseService.getTableRecords(baseId, tableId);
+
+        assertEquals(1, result.size());
+        assertEquals(Set.of("tblA", "tblB", "tblC"), result.get(0).whitelistTableIds());
+        assertEquals(Set.of("tblD"), result.get(0).blacklistTableIds());
+    }
+
+    @Test
+    public void getTableRecords_success_withoutWhitelistOrBlacklistColumns_defaultsToEmpty() throws Exception {
+        String baseId = "baseR1";
+        String tableId = "tblR1";
+        String mockJsonResponse = "{\"code\":0,\"data\":{\"items\":[{\"record_id\":\"rec123\",\"fields\":{"
+                + "\"id\":\"rec123\",\"name\":\"Record Name\"}}],\"has_more\":false}}";
+
+        when(mockHttpClient.execute(any(HttpPost.class))).thenReturn(mockHttpResponse);
+        when(mockHttpResponse.getEntity()).thenReturn(mockHttpEntity);
+        when(mockHttpEntity.getContent()).thenReturn(new ByteArrayInputStream(mockJsonResponse.getBytes()));
+
+        List<LarkDatabaseRecord> result = larkBaseService.getTableRecords(baseId, tableId);
+
+        assertEquals(1, result.size());
+        assertEquals(Collections.emptySet(), result.get(0).whitelistTableIds());
+        assertEquals(Collections.emptySet(), result.get(0).blacklistTableIds());
+    }
+
+    @Test
+    public void sanitizeRecords_preservesWhitelistAndBlacklistTableIds() {
+        Set<String> whitelist = Set.of("tblA");
+        Set<String> blacklist = Set.of("tblB");
+        List<LarkDatabaseRecord> records = Collections.singletonList(
+                new LarkDatabaseRecord("id1", "Record One", whitelist, blacklist)
+        );
+
+        List<LarkDatabaseRecord> sanitized = larkBaseService.sanitizeRecords(records);
+
+        assertEquals(whitelist, sanitized.get(0).whitelistTableIds());
+        assertEquals(blacklist, sanitized.get(0).blacklistTableIds());
     }
 
     @Test

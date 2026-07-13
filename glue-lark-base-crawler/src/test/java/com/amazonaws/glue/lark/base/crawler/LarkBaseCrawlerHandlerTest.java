@@ -210,6 +210,79 @@ public class LarkBaseCrawlerHandlerTest {
     }
 
     @Test
+    public void testHandleRequest_newDatabaseWithBlacklistedTable_tableNotCreated() {
+        // Lark has 2 tables, but one is blacklisted on the control-table record for this database.
+        LarkDatabaseRecord larkDb = new LarkDatabaseRecord("dbId1", "new_db",
+                Collections.emptySet(), java.util.Set.of("tableId2"));
+        ListAllTableResponse.BaseItem allowedTable = ListAllTableResponse.BaseItem.builder().tableId("tableId1").name("allowed_table").build();
+        ListAllTableResponse.BaseItem blacklistedTable = ListAllTableResponse.BaseItem.builder().tableId("tableId2").name("blacklisted_table").build();
+
+        when(mockLarkBaseService.getTableRecords("baseDs123", "tableDs456")).thenReturn(Collections.singletonList(larkDb));
+        when(mockGlueCatalogService.getDatabases()).thenReturn(Collections.emptyList());
+        when(mockLarkBaseService.listTables("dbId1")).thenReturn(java.util.List.of(allowedTable, blacklistedTable));
+        when(mockLarkBaseService.getTableFields(anyString(), anyString())).thenReturn(Collections.emptyList());
+
+        String result = handler.handleRequest(payload, mockContext);
+        assertEquals("Success", result);
+
+        org.mockito.ArgumentCaptor<Map<String, List<software.amazon.awssdk.services.glue.model.TableInput>>> captor =
+                org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(mockGlueCatalogService, times(1)).batchCreateTable(captor.capture());
+
+        List<software.amazon.awssdk.services.glue.model.TableInput> createdTables = captor.getValue().get("new_db");
+        assertEquals(1, createdTables.size());
+        assertEquals("allowed_table", createdTables.get(0).name());
+    }
+
+    @Test
+    public void testHandleRequest_newDatabaseWithWhitelist_onlyWhitelistedTableCreated() {
+        LarkDatabaseRecord larkDb = new LarkDatabaseRecord("dbId1", "new_db",
+                java.util.Set.of("tableId1"), Collections.emptySet());
+        ListAllTableResponse.BaseItem whitelistedTable = ListAllTableResponse.BaseItem.builder().tableId("tableId1").name("whitelisted_table").build();
+        ListAllTableResponse.BaseItem otherTable = ListAllTableResponse.BaseItem.builder().tableId("tableId2").name("other_table").build();
+
+        when(mockLarkBaseService.getTableRecords("baseDs123", "tableDs456")).thenReturn(Collections.singletonList(larkDb));
+        when(mockGlueCatalogService.getDatabases()).thenReturn(Collections.emptyList());
+        when(mockLarkBaseService.listTables("dbId1")).thenReturn(java.util.List.of(whitelistedTable, otherTable));
+        when(mockLarkBaseService.getTableFields(anyString(), anyString())).thenReturn(Collections.emptyList());
+
+        String result = handler.handleRequest(payload, mockContext);
+        assertEquals("Success", result);
+
+        org.mockito.ArgumentCaptor<Map<String, List<software.amazon.awssdk.services.glue.model.TableInput>>> captor =
+                org.mockito.ArgumentCaptor.forClass(Map.class);
+        verify(mockGlueCatalogService, times(1)).batchCreateTable(captor.capture());
+
+        List<software.amazon.awssdk.services.glue.model.TableInput> createdTables = captor.getValue().get("new_db");
+        assertEquals(1, createdTables.size());
+        assertEquals("whitelisted_table", createdTables.get(0).name());
+    }
+
+    @Test
+    public void testHandleRequest_existingTableNewlyBlacklisted_getsDeleted() {
+        // A table that was previously crawled is now blacklisted on the control-table record; it must be
+        // removed from Glue on the next crawl, the same as if it no longer existed in Lark at all.
+        LarkDatabaseRecord larkDb = new LarkDatabaseRecord("dbId1", "db_name",
+                Collections.emptySet(), java.util.Set.of("tableId1"));
+        Database glueDb = Database.builder().name("db_name")
+                .locationUri("lark-base-flag/CrawlingMethod=LarkBase/DataSource=baseDs123:tableDs456/Base=dbId1").build();
+        Table glueTable = Table.builder().name("now_blacklisted_table").databaseName("db_name").build();
+        ListAllTableResponse.BaseItem larkTable = ListAllTableResponse.BaseItem.builder().tableId("tableId1").name("now_blacklisted_table").build();
+
+        when(mockLarkBaseService.getTableRecords(anyString(), anyString())).thenReturn(Collections.singletonList(larkDb));
+        when(mockGlueCatalogService.getDatabases()).thenReturn(Collections.singletonList(glueDb));
+        when(mockGlueCatalogService.getTables("db_name")).thenReturn(Collections.singletonList(glueTable));
+        when(mockLarkBaseService.listTables("dbId1")).thenReturn(Collections.singletonList(larkTable));
+
+        String result = handler.handleRequest(payload, mockContext);
+        assertEquals("Success", result);
+
+        verify(mockGlueCatalogService, times(1)).batchDeleteTable(any());
+        verify(mockGlueCatalogService, never()).batchCreateTable(any());
+        verify(mockGlueCatalogService, never()).batchUpdateTable(any());
+    }
+
+    @Test
     public void testHandleRequest_withDatabaseDeletion() {
         // Glue memiliki 1 DB, Lark kosong
         Database glueDb = Database.builder().name("old_db")

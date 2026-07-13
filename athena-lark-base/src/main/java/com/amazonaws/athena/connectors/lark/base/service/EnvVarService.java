@@ -29,6 +29,7 @@ import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.BLACKLIST_TABLES_ENV_VAR;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.DEFAULT_LARK_LOOKUP_MAX_DEPTH;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.DOES_ACTIVATE_EXPERIMENTAL_FEATURE_ENV_VAR;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.DOES_ACTIVATE_LARK_BASE_SOURCE_ENV_VAR;
@@ -39,6 +40,7 @@ import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_APP_K
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_BASE_SOURCES_ENV_VAR;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_DRIVE_SOURCES_ENV_VAR;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_LOOKUP_MAX_DEPTH_ENV_VAR;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.WHITELIST_TABLES_ENV_VAR;
 import static java.util.Objects.requireNonNull;
 
 public class EnvVarService
@@ -56,6 +58,8 @@ public class EnvVarService
     private final String larkBaseSources;
     private final String larkDriveSources;
     private final int lookupMaxDepth;
+    private final String whitelistTables;
+    private final String blacklistTables;
 
     public EnvVarService(Map<String, String> configOptions, ThrottlingInvoker invoker)
     {
@@ -95,6 +99,8 @@ public class EnvVarService
         this.larkBaseSources = configOptions.getOrDefault(LARK_BASE_SOURCES_ENV_VAR, "");
         this.larkDriveSources = configOptions.getOrDefault(LARK_DRIVE_SOURCES_ENV_VAR, "");
         this.lookupMaxDepth = parseLookupMaxDepth(configOptions.get(LARK_LOOKUP_MAX_DEPTH_ENV_VAR));
+        this.whitelistTables = configOptions.getOrDefault(WHITELIST_TABLES_ENV_VAR, "");
+        this.blacklistTables = configOptions.getOrDefault(BLACKLIST_TABLES_ENV_VAR, "");
     }
 
     private static int parseLookupMaxDepth(String rawValue)
@@ -159,5 +165,15 @@ public class EnvVarService
     public int getLookupMaxDepth()
     {
         return lookupMaxDepth;
+    }
+
+    public String getWhitelistTables()
+    {
+        return whitelistTables;
+    }
+
+    public String getBlacklistTables()
+    {
+        return blacklistTables;
     }
 }

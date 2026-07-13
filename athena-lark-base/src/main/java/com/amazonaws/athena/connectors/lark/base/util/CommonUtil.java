@@ -231,6 +231,76 @@ public final class CommonUtil
     }
 
     /**
+     * Parses a "schemaName:tableName,schemaName:tableName2,..." environment variable string (used by
+     * {@code WHITELIST_TABLES_ENV_VAR} / {@code BLACKLIST_TABLES_ENV_VAR}) into a schema-to-table-names map.
+     * Both schema and table names are lowercased so lookups can be done case-insensitively, matching how
+     * Athena/Glue names are already normalized elsewhere in this connector.
+     *
+     * @param fromEnvVar The environment variable string.
+     * @return Map of lowercased schema name to a set of lowercased table names, or an empty map if unset.
+     */
+    public static Map<String, Set<String>> parseSchemaTableGrouping(String fromEnvVar)
+    {
+        if (fromEnvVar == null || fromEnvVar.trim().isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, Set<String>> schemaToTableNames = new HashMap<>();
+
+        String[] entries = fromEnvVar.split(",");
+        for (String entry : entries) {
+            String trimmedEntry = entry.trim();
+            if (trimmedEntry.isEmpty()) {
+                continue;
+            }
+            String[] parts = trimmedEntry.split(":", 2);
+            if (parts.length == 2) {
+                String schemaName = parts[0].trim().toLowerCase();
+                String tableName = parts[1].trim().toLowerCase();
+
+                if (schemaName.isEmpty() || tableName.isEmpty()) {
+                    continue;
+                }
+
+                schemaToTableNames.computeIfAbsent(schemaName, k -> new HashSet<>()).add(tableName);
+            }
+        }
+
+        return schemaToTableNames;
+    }
+
+    /**
+     * Decides whether a table should be visible/queryable given the connector's configured whitelist and
+     * blacklist. The blacklist always wins: a table listed there is blocked even if it also matches the
+     * whitelist. The whitelist only restricts schemas that have at least one entry in it - a schema with no
+     * whitelist entries is unrestricted by the whitelist (only the blacklist, if any, applies to it).
+     *
+     * @param schemaName The schema (database) name, matched case-insensitively.
+     * @param tableName The table name, matched case-insensitively.
+     * @param whitelistTables Schema-to-table-names map from {@link #parseSchemaTableGrouping}, or empty if unset.
+     * @param blacklistTables Schema-to-table-names map from {@link #parseSchemaTableGrouping}, or empty if unset.
+     * @return true if the table should be visible/queryable.
+     */
+    public static boolean isTableAccessAllowed(String schemaName, String tableName,
+            Map<String, Set<String>> whitelistTables, Map<String, Set<String>> blacklistTables)
+    {
+        String normalizedSchema = schemaName == null ? "" : schemaName.toLowerCase();
+        String normalizedTable = tableName == null ? "" : tableName.toLowerCase();
+
+        Set<String> blacklistedTables = blacklistTables.get(normalizedSchema);
+        if (blacklistedTables != null && blacklistedTables.contains(normalizedTable)) {
+            return false;
+        }
+
+        Set<String> whitelistedTables = whitelistTables.get(normalizedSchema);
+        if (whitelistedTables != null && !whitelistedTables.isEmpty()) {
+            return whitelistedTables.contains(normalizedTable);
+        }
+
+        return true;
+    }
+
+    /**
      * Enhances the original table schema by adding connector-specific reserved fields.
      * These fields provide additional context about the record's origin within Lark Base.
      * (Moved from BaseMetadataHandler.generateNewTableResponse)

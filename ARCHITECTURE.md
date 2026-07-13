@@ -963,9 +963,37 @@ splits that would mostly return zero rows (e.g. `WHERE id = 'x'` on a 100,000-ro
 | `ACTIVATE_EXPERIMENTAL_FEATURES` | No | false | Enable experimental metadata provider |
 | `ACTIVATE_PARALLEL_SPLIT` | No | false | Enable parallel split execution |
 | `ENABLE_DEBUG_LOGGING` | No | false | Enable detailed debug logs |
+| `LARK_LOOKUP_MAX_DEPTH` | No | 20 | Max hops followed when resolving a chained LOOKUP field's type |
+| `WHITELIST_TABLES` | No | - | Per-schema table allowlist, format `schemaName:tableName,...` (see [Table Access Control](#table-access-control)) |
+| `BLACKLIST_TABLES` | No | - | Per-schema table denylist, same format; always wins over `WHITELIST_TABLES` |
 | `LARK_BASE_DATA_SOURCE_ID` | Conditional | - | Base ID for table discovery (if LARK_BASE_SOURCE) |
 | `LARK_TABLE_DATA_SOURCE_ID` | Conditional | - | Table ID for table discovery (if LARK_BASE_SOURCE) |
 | `LARK_FOLDER_TOKEN_DATA_SOURCE` | Conditional | - | Folder token for discovery (if LARK_DRIVE_SOURCE) |
+
+### Table Access Control
+
+The connector (Lambda) and the Glue Crawler each have their own independent whitelist/blacklist mechanism,
+matching where each component naturally has the relevant information available:
+
+**Connector (`athena-lark-base`)** - controlled directly via `WHITELIST_TABLES_ENV_VAR` /
+`BLACKLIST_TABLES_ENV_VAR` (format: `schemaName:tableName,schemaName:tableName2,...`, matched
+case-insensitively against the Athena-facing schema/table names). This applies uniformly on top of
+whatever metadata discovery path is active (Glue Catalog, Lark Base Source, Lark Drive Source, or
+Experimental) - it is a final gate, not tied to any one discovery mechanism. A schema with no whitelist
+entries is unrestricted by the whitelist; the blacklist always wins if a table appears in both. Enforcement
+is a full block: a disallowed table is filtered out of `doListTables` (hidden from `SHOW TABLES`) and
+`doGetTable` throws `ENTITY_NOT_FOUND_EXCEPTION` for it (so a direct `SELECT`/`DESCRIBE` fails as if the
+table doesn't exist), since Athena always resolves a table's schema via `doGetTable` before executing a
+query against it.
+
+**Glue Crawler (`glue-lark-base-crawler`)** - controlled from Lark Base itself: the crawler's existing
+control table (configured via `LARK_BASE_DATA_SOURCE_ID`/`LARK_TABLE_DATA_SOURCE_ID`, one row per database
+with `id`/`name` columns) supports two additional optional columns, `whitelist_tables` and
+`blacklist_tables`, each a comma-separated list of Lark **table IDs** (not names, since table IDs are
+stable across renames) to restrict that database's crawl. The crawler filters the tables it discovers in
+Lark against these lists before deciding what to create/update in Glue, so a table that becomes blacklisted
+(or falls outside a newly-added whitelist) after having already been crawled is deleted from Glue on the
+next crawl run, the same as if it had been deleted in Lark.
 
 ### AWS Secrets Manager
 

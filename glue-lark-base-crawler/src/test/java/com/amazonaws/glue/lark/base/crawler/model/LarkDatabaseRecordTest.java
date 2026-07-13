@@ -20,6 +20,10 @@
 package com.amazonaws.glue.lark.base.crawler.model;
 
 import org.junit.Test;
+
+import java.util.Collections;
+import java.util.Set;
+
 import static org.junit.Assert.*;
 
 public class LarkDatabaseRecordTest {
@@ -43,5 +47,24 @@ public class LarkDatabaseRecordTest {
         assertEquals(record1a, record1b);
         assertNotEquals(record1a, record2);
         assertEquals(record1a.hashCode(), record1b.hashCode());
+    }
+
+    @Test
+    public void twoArgConstructor_defaultsWhitelistAndBlacklistToEmpty() {
+        LarkDatabaseRecord record = new LarkDatabaseRecord("id1", "name1");
+
+        assertEquals(Collections.emptySet(), record.whitelistTableIds());
+        assertEquals(Collections.emptySet(), record.blacklistTableIds());
+    }
+
+    @Test
+    public void fourArgConstructor_shouldHoldWhitelistAndBlacklistValues() {
+        Set<String> whitelist = Set.of("tbl1", "tbl2");
+        Set<String> blacklist = Set.of("tbl3");
+
+        LarkDatabaseRecord record = new LarkDatabaseRecord("id1", "name1", whitelist, blacklist);
+
+        assertEquals(whitelist, record.whitelistTableIds());
+        assertEquals(blacklist, record.blacklistTableIds());
     }
 }
