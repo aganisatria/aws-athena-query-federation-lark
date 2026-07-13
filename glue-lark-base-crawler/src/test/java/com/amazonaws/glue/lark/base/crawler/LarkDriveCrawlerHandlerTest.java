@@ -34,6 +34,7 @@ import software.amazon.awssdk.services.glue.model.StorageDescriptor;
 import software.amazon.awssdk.services.glue.model.Table;
 import software.amazon.awssdk.services.glue.model.TableInput;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -107,7 +108,7 @@ public class LarkDriveCrawlerHandlerTest {
         payload.put("larkDriveFolderToken", "folder456");
 
         List<LarkDatabaseRecord> expectedDatabases = Collections.singletonList(
-                new LarkDatabaseRecord("db1", "Database One")
+                new LarkDatabaseRecord("db1", "database_one")
         );
 
         when(mockLarkDriveService.getLarkBases("folder456")).thenReturn(expectedDatabases);
@@ -118,6 +119,28 @@ public class LarkDriveCrawlerHandlerTest {
         List<LarkDatabaseRecord> actualDatabases = larkDriveCrawlerHandler.getLarkDatabases();
 
         assertEquals(expectedDatabases, actualDatabases);
+    }
+
+    @Test
+    public void testGetLarkDatabases_duplicateSanitizedNames_throws() {
+        // Reproduces a real risk: two distinct Drive files (e.g. "Sales Data" and "sales_data") both
+        // sanitize to the same Glue database name. Unlike LarkBaseCrawlerHandler's metadata-table
+        // source, Drive-derived names aren't curated, so this must fail loudly instead of letting
+        // createGlueDatabases silently overwrite one base with the other.
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("larkDriveFolderToken", "folder456");
+
+        when(mockLarkDriveService.getLarkBases("folder456")).thenReturn(Arrays.asList(
+                new LarkDatabaseRecord("db1", "sales_data"),
+                new LarkDatabaseRecord("db2", "sales_data")));
+
+        try {
+            larkDriveCrawlerHandler.handleRequest(payload, mockContext);
+            fail("Expected RuntimeException for duplicate database names");
+        }
+        catch (RuntimeException e) {
+            assertTrue(e.getMessage().contains("Glue database name is not valid"));
+        }
     }
 
     @Test
