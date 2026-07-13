@@ -213,6 +213,8 @@ JAVA_HOME="/path/to/jdk-17" mvn checkstyle:check
 | `ACTIVATE_PARALLEL_SPLIT` | No | Enable parallel split execution |
 | `ENABLE_DEBUG_LOGGING` | No | Enable detailed debug logs |
 | `LARK_LOOKUP_MAX_DEPTH` | No | Max hops followed when resolving a chained LOOKUP field's type (default: 20). Also caps runaway resolution if a Lark Base has a misconfigured circular LOOKUP reference |
+| `WHITELIST_TABLES` | No | Restricts, per schema, which tables the connector exposes. Format: `schemaName:tableName,schemaName:tableName2,...`. A schema with no entries here is unrestricted by this setting |
+| `BLACKLIST_TABLES` | No | Excludes, per schema, specific tables from the connector regardless of `WHITELIST_TABLES`. Same format. A table listed here is never visible or queryable (blocked in both `SHOW TABLES` and direct `SELECT`) |
 
 See [ARCHITECTURE.md#Configuration](./ARCHITECTURE.md#configuration) for complete reference.
 
