@@ -103,7 +103,7 @@ public class BaseRecordHandler extends RecordHandler
         super(SOURCE_TYPE, configOptions);
         ThrottlingInvoker invoker = ThrottlingInvoker.newDefaultBuilder(EXCEPTION_FILTER, configOptions).build();
         this.envVarService = new EnvVarService(configOptions, invoker);
-        this.larkBaseService = new LarkBaseService(envVarService.getLarkAppId(), envVarService.getLarkAppSecret());
+        this.larkBaseService = new LarkBaseService(envVarService.getLarkAppId(), envVarService.getLarkAppSecret(), envVarService.getLookupMaxDepth());
         this.invokerCache = CacheBuilder.newBuilder().build(
                 new CacheLoader<>()
                 {

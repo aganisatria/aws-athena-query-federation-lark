@@ -142,7 +142,7 @@ public class BaseMetadataHandler
         this.invoker = ThrottlingInvoker.newDefaultBuilder(EXCEPTION_FILTER, configOptions).build();
         this.envVarService = new EnvVarService(configOptions, invoker);
         AthenaService athenaService = new AthenaService();
-        this.larkBaseService = new LarkBaseService(envVarService.getLarkAppId(), envVarService.getLarkAppSecret());
+        this.larkBaseService = new LarkBaseService(envVarService.getLarkAppId(), envVarService.getLarkAppSecret(), envVarService.getLookupMaxDepth());
         LarkDriveService larkDriveService = new LarkDriveService(envVarService.getLarkAppId(), envVarService.getLarkAppSecret());
         this.glueCatalogService = new GlueCatalogService(getAwsGlue());
         LarkBaseTableResolver larkBaseTableResolver = new LarkBaseTableResolver(
@@ -405,7 +405,7 @@ public class BaseMetadataHandler
 
         if (envVarService.isActivateExperimentalFeatures()) {
             if (envVarService.isEnableDebugLogging()) {
-                logger.info("doGetTable: Experimental feature is not active (envVarService.isActivateExperimentalFeatures()=false).");
+                logger.info("doGetTable: Attempting to get schema from experimental path (envVarService.isActivateExperimentalFeatures()=true).");
             }
             Optional<TableSchemaResult> schemaResult = experimentalMetadataProvider.getTableSchema(request);
             if (schemaResult.isPresent()) {
@@ -746,7 +746,9 @@ public class BaseMetadataHandler
         boolean hasOrderBy = hasOrderByClause(request);
         String sortExpression = translateSortExpression(request, fieldNameMappings, useParallelSplits, hasOrderBy, tableName);
 
-        if (useParallelSplits && envVarService.isActivateParallelSplit()) {
+        boolean shouldUseParallelSplits = shouldUseParallelSplits(useParallelSplits, baseId, tableId, filterExpression, tableName);
+
+        if (shouldUseParallelSplits) {
             writeParallelPartitions(blockWriter, baseId, tableId, filterExpression, fieldTypeMappingJson,
                     queryLimit, hasOrderBy);
         }
@@ -754,6 +756,49 @@ public class BaseMetadataHandler
             writeSinglePartition(blockWriter, baseId, tableId, filterExpression, sortExpression,
                     fieldTypeMappingJson, queryLimit, useParallelSplits, hasOrderBy);
         }
+    }
+
+    /**
+     * Decides whether to actually use parallel splitting for this query, on top of whether the table
+     * structurally supports it ({@code tableHasParallelSplitKey}) and the feature is enabled.
+     * <p>
+     * Parallel splitting is planned using the table's FULL row count (see {@link #writeParallelPartitions}),
+     * because {@code $reserved_split_key} is a positional index over the whole table, not over filtered
+     * results - a selective filter can match rows anywhere in that key range, so splits must still cover it
+     * entirely to stay correct. That means a highly selective filter (e.g. {@code WHERE id = 'x'}) would
+     * otherwise spawn just as many splits as an unfiltered scan, with nearly all of them returning zero rows.
+     * When a filter is present, this checks its actual selectivity first: if the matching row count already
+     * fits in a single page, parallelizing has no benefit, so this returns false and the caller falls back to
+     * the single-partition path, which applies the filter correctly across the whole table via normal
+     * pagination without needing any positional range math.
+     *
+     * @param tableHasParallelSplitKey whether the table's schema has a {@code $reserved_split_key} column
+     * @param baseId the Lark Base ID
+     * @param tableId the Lark table ID
+     * @param filterExpression the translated filter for this query, or an empty string if there is none
+     * @param tableName used for logging only
+     * @return true if parallel splitting should be used for this query
+     */
+    @VisibleForTesting
+    protected boolean shouldUseParallelSplits(boolean tableHasParallelSplitKey, String baseId, String tableId,
+                                              String filterExpression, TableName tableName)
+    {
+        if (!tableHasParallelSplitKey || !envVarService.isActivateParallelSplit()) {
+            return false;
+        }
+
+        if (filterExpression == null || filterExpression.isEmpty()) {
+            return true;
+        }
+
+        int filteredRowCount = getTotalRowCount(baseId, tableId, filterExpression);
+        if (filteredRowCount <= PAGE_SIZE) {
+            logger.info("getPartitions: Filter for table {} matches only {} row(s), which fits in a single "
+                    + "page. Skipping parallel split planning in favor of a single partition.", tableName, filteredRowCount);
+            return false;
+        }
+
+        return true;
     }
 
     /**
