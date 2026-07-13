@@ -123,6 +123,42 @@ class UtilTest {
     }
 
     @Test
+    void constructColumns_whenTwoFieldNamesSanitizeToSameGlueName_disambiguatesWithFieldId() {
+        // Reproduces a real production failure: two distinct Lark fields named "segment 5" and
+        // "Segment 5" both sanitize to the Glue column name "segment_5". Writing both as-is
+        // produces a Glue table with a duplicate column name, which later breaks the connector's
+        // whole doGetTable Glue fallback (SchemaBuilder rejects duplicate metadata keys) instead
+        // of just affecting the one field.
+        ArrayList<ColumnParameters> params = new ArrayList<>();
+        params.add(
+            ColumnParameters.builder()
+                    .columnName("segment 5")
+                    .columnType("string")
+                    .larkBaseFieldId("fldxdVXbHa")
+                    .larkBaseColumnType("Text")
+                    .larkBaseId("baseId456")
+                    .larkBaseTableId("tableId789")
+                    .build()
+        );
+        params.add(
+            ColumnParameters.builder()
+                    .columnName("Segment 5")
+                    .columnType("string")
+                    .larkBaseFieldId("fldZrayo2s")
+                    .larkBaseColumnType("Text")
+                    .larkBaseId("baseId456")
+                    .larkBaseTableId("tableId789")
+                    .build()
+        );
+
+        List<Column> columnList = new ArrayList<>(Util.constructColumns(params));
+        assertEquals(2, columnList.size());
+        assertEquals("segment_5", columnList.get(0).name());
+        assertEquals("segment_5_fldzrayo2s", columnList.get(1).name());
+        assertNotEquals(columnList.get(0).name(), columnList.get(1).name());
+    }
+
+    @Test
     void doesGlueDatabasesNameValid() {
         assertFalse(Util.doesGlueDatabasesNameValid(List.of("valid_name", "another_valid_123")));
         assertTrue(Util.doesGlueDatabasesNameValid(List.of("invalid-name")));
