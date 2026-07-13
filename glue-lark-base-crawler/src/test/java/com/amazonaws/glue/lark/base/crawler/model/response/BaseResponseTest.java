@@ -19,10 +19,27 @@
  */
 package com.amazonaws.glue.lark.base.crawler.model.response;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class BaseResponseTest {
+
+    @Test
+    public void deserialize_withUnrecognizedTopLevelField_doesNotThrow() throws Exception {
+        // Reproduces a real production failure: Lark's API sometimes returns a response with an unexpected
+        // top-level "error" key (observed on the fields-list endpoint) that isn't part of the normal
+        // code/msg/data shape. Without ignoreUnknown on the Builder that @JsonDeserialize(builder=...)
+        // actually deserializes into, Jackson throws UnrecognizedPropertyException instead of just ignoring
+        // the extra field - crashing lookup-type resolution for every field on the affected table.
+        ObjectMapper objectMapper = new ObjectMapper();
+        String json = "{\"code\":0,\"msg\":\"success\",\"data\":{\"foo\":\"bar\"},\"error\":{\"log_id\":\"abc123\"}}";
+
+        BaseResponse<?> response = objectMapper.readValue(json, BaseResponse.class);
+
+        assertEquals(0, response.getCode());
+        assertEquals("success", response.getMsg());
+    }
 
     @Test
     public void builder_allFieldsSet_shouldCreateObjectCorrectly() {

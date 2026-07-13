@@ -19,6 +19,7 @@
  */
 package com.amazonaws.glue.lark.base.crawler.model.response;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
@@ -29,6 +30,7 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
  *
  * @param <T> The type of the data in the response.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 @JsonDeserialize(builder = BaseResponse.Builder.class)
 public class BaseResponse<T>
 {
@@ -66,6 +68,7 @@ public class BaseResponse<T>
         return new Builder<>();
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Builder<T>
     {
         protected int code;
