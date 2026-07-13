@@ -164,6 +164,44 @@ class CommonUtilTest {
     }
 
     @Test
+    void testExtractFieldTypeFromComment_ChainedLookupType_TwoLevels() {
+        // A LOOKUP field whose target is itself a LOOKUP field is written by the Glue Crawler
+        // (BaseLarkBaseCrawlerHandler.getLarkBaseOriginalColumnType) as a nested string. The terminal type
+        // (Number) must be extracted, not the intermediate "Lookup" level.
+        String comment = "LarkBaseFieldType=Lookup<Lookup<Number>>/LarkBaseFieldName=ChainedLookup";
+
+        NestedUIType result = CommonUtil.extractFieldTypeFromComment(comment);
+
+        assertThat(result).isNotNull();
+        assertThat(result.uiType()).isEqualTo(UITypeEnum.LOOKUP);
+        assertThat(result.childType()).isEqualTo(UITypeEnum.NUMBER);
+    }
+
+    @Test
+    void testExtractFieldTypeFromComment_ChainedLookupType_ThreeLevels() {
+        String comment = "LarkBaseFieldType=Lookup<Lookup<Lookup<DateTime>>>/LarkBaseFieldName=DeepChainedLookup";
+
+        NestedUIType result = CommonUtil.extractFieldTypeFromComment(comment);
+
+        assertThat(result).isNotNull();
+        assertThat(result.uiType()).isEqualTo(UITypeEnum.LOOKUP);
+        assertThat(result.childType()).isEqualTo(UITypeEnum.DATE_TIME);
+    }
+
+    @Test
+    void testExtractFieldTypeFromComment_LookupType_UnresolvedTargetFallsBackToUnknown() {
+        // The crawler writes "Lookup<NULL>" when the lookup target couldn't be resolved
+        // (see BaseLarkBaseCrawlerHandler.getLarkBaseOriginalColumnType's NULL fallback branches).
+        String comment = "LarkBaseFieldType=Lookup<NULL>/LarkBaseFieldName=BrokenLookup";
+
+        NestedUIType result = CommonUtil.extractFieldTypeFromComment(comment);
+
+        assertThat(result).isNotNull();
+        assertThat(result.uiType()).isEqualTo(UITypeEnum.LOOKUP);
+        assertThat(result.childType()).isEqualTo(UITypeEnum.UNKNOWN);
+    }
+
+    @Test
     void testExtractFieldTypeFromComment_Null() {
         // Arrange & Act
         NestedUIType result = CommonUtil.extractFieldTypeFromComment(null);

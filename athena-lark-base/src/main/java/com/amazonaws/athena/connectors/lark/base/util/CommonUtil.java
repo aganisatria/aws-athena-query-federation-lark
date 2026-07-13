@@ -102,13 +102,23 @@ public final class CommonUtil
     private static UITypeEnum extractFormulaOrLookup(String raw)
     {
         // example: LarkBaseFieldType=Formula<FormulaType>
-        String[] parts = raw.split("<");
-        if (parts.length > 1) {
-            String formulaType = parts[1].replace(">", "");
-            return UITypeEnum.fromString(formulaType);
+        // A chained LOOKUP (one LOOKUP field pointing at another LOOKUP field) is written by the Glue Crawler
+        // as a nested string, e.g. "Lookup<Lookup<Number>>" (see BaseLarkBaseCrawlerHandler.getLarkBaseOriginalColumnType,
+        // which recurses when the LOOKUP target is itself a LOOKUP). Splitting on the FIRST '<' and taking
+        // index [1] only ever captures the immediate next level ("Lookup" here), not the terminal type
+        // ("Number") - losing the actual resolved type for any chain of depth >= 2. Extracting from the LAST
+        // '<' instead always yields the innermost/terminal type, regardless of nesting depth.
+        int lastOpenBracket = raw.lastIndexOf('<');
+        if (lastOpenBracket == -1 || lastOpenBracket == raw.length() - 1) {
+            return null;
         }
 
-        return null;
+        String innermostType = raw.substring(lastOpenBracket + 1).replace(">", "");
+        if (innermostType.isEmpty()) {
+            return null;
+        }
+
+        return UITypeEnum.fromString(innermostType);
     }
 
     /**

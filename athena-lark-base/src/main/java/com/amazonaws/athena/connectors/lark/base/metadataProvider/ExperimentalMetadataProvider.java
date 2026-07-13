@@ -86,19 +86,31 @@ public class ExperimentalMetadataProvider
                     String larkFieldName = field.getFieldName();
                     if (larkFieldName != null && !larkFieldName.trim().isEmpty()) {
                         logger.info("Experimental Path: Processing field: {}", larkFieldName);
-                        UITypeEnum childUIType = field.getFormulaGlueCatalogUITypeEnum();
-
-                        if (childUIType.equals(UITypeEnum.LOOKUP)) {
+                        // NOTE: getFormulaGlueCatalogUITypeEnum() only returns a meaningful (non-UNKNOWN) value
+                        // when the field's own UI type is FORMULA, while getTargetFieldAndTableForLookup() only
+                        // returns a usable target when the field's own UI type is LOOKUP. A field cannot be both
+                        // at once, so checking the former for LOOKUP and then calling the latter was dead code -
+                        // a genuine LOOKUP field's child type could never actually be resolved this way. Branch
+                        // on the field's own UI type instead, matching the (correct) logic in
+                        // glue-lark-base-crawler's BaseLarkBaseCrawlerHandler.
+                        UITypeEnum childUIType;
+                        if (field.getUIType().equals(UITypeEnum.LOOKUP)) {
                             try {
                                 Pair<String, String> lookupId = field.getTargetFieldAndTableForLookup();
                                 String newTableId = lookupId.right();
                                 String newFieldId = lookupId.left();
-                                childUIType = larkBaseService.getLookupType(baseId, newTableId, newFieldId);
+                                // getTableFields (called internally by getLookupType on a cache miss) hits the
+                                // Lark API directly; go through the invoker like every other Lark call here so
+                                // it gets the same rate-limit backoff instead of failing raw on a 429.
+                                childUIType = invoker.invoke(() -> larkBaseService.getLookupType(baseId, newTableId, newFieldId));
                             }
                             catch (Exception e) {
                                 logger.warn("Experimental Path: Skipping field {} due to error getting lookup type: {}", field.getFieldName(), e.getMessage());
                                 continue;
                             }
+                        }
+                        else {
+                            childUIType = field.getFormulaGlueCatalogUITypeEnum();
                         }
 
                         NestedUIType nestedUIType = new NestedUIType(field.getUIType(), childUIType);
@@ -200,19 +212,26 @@ public class ExperimentalMetadataProvider
                 String larkFieldName = field.getFieldName();
                 if (larkFieldName != null && !larkFieldName.trim().isEmpty()) {
                     String prestoFieldName = CommonUtil.sanitizeGlueRelatedName(larkFieldName);
-                    UITypeEnum childUIType = field.getFormulaGlueCatalogUITypeEnum();
-
-                    if (childUIType.equals(UITypeEnum.LOOKUP)) {
+                    // See the comment in getTableSchema(): branch on the field's own UI type, not
+                    // getFormulaGlueCatalogUITypeEnum(), which can never actually equal LOOKUP for a genuine
+                    // LOOKUP field and would otherwise leave the child type unresolved (dead code).
+                    UITypeEnum childUIType;
+                    if (field.getUIType().equals(UITypeEnum.LOOKUP)) {
                         try {
                             Pair<String, String> lookupId = field.getTargetFieldAndTableForLookup();
                             String newTableId = lookupId.right();
                             String newFieldId = lookupId.left();
-                            childUIType = larkBaseService.getLookupType(larkBaseId, newTableId, newFieldId);
+                            // See the comment on the equivalent call in getTableSchema(): route through the
+                            // invoker so a cache-miss fetch inside getLookupType gets rate-limit backoff too.
+                            childUIType = invoker.invoke(() -> larkBaseService.getLookupType(larkBaseId, newTableId, newFieldId));
                         }
                         catch (Exception e) {
                             logger.warn("Experimental Path: Skipping field {} due to error getting lookup type: {}", field.getFieldName(), e.getMessage());
                             continue;
                         }
+                    }
+                    else {
+                        childUIType = field.getFormulaGlueCatalogUITypeEnum();
                     }
 
                     NestedUIType nestedUIType = new NestedUIType(field.getUIType(), childUIType);
