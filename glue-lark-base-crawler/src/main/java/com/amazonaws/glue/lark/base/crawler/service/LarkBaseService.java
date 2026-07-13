@@ -36,9 +36,11 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -262,6 +264,8 @@ public class LarkBaseService extends CommonLarkService
 
                             String id = null;
                             String name = null;
+                            Set<String> whitelistTableIds = Collections.emptySet();
+                            Set<String> blacklistTableIds = Collections.emptySet();
 
                             if (fields != null) {
                                 if (fields.containsKey("id")) {
@@ -273,9 +277,15 @@ public class LarkBaseService extends CommonLarkService
                                     Object nameObj = fields.get("name");
                                     name = nameObj != null ? nameObj.toString() : null;
                                 }
+
+                                // Optional columns on the control table: comma-separated Lark table IDs that
+                                // restrict which tables get crawled for this database. Absent/blank means no
+                                // restriction from that list.
+                                whitelistTableIds = parseTableIdList(fields.get("whitelist_tables"));
+                                blacklistTableIds = parseTableIdList(fields.get("blacklist_tables"));
                             }
 
-                            parsedRecords.add(new LarkDatabaseRecord(id, name));
+                            parsedRecords.add(new LarkDatabaseRecord(id, name, whitelistTableIds, blacklistTableIds));
                         }
                     }
 
@@ -297,6 +307,30 @@ public class LarkBaseService extends CommonLarkService
     }
 
     /**
+     * Parses a comma-separated list of Lark table IDs from a raw control-table cell value into a Set.
+     * Returns an empty set (meaning "no restriction from this list") for a null, blank, or unparseable value.
+     *
+     * @param rawValue The raw cell value from the control table (expected to be a String).
+     * @return A set of trimmed, non-empty table IDs.
+     */
+    private Set<String> parseTableIdList(Object rawValue)
+    {
+        if (rawValue == null) {
+            return Collections.emptySet();
+        }
+
+        String rawString = rawValue.toString();
+        if (rawString.isBlank()) {
+            return Collections.emptySet();
+        }
+
+        return Arrays.stream(rawString.split(","))
+                .map(String::trim)
+                .filter(tableId -> !tableId.isEmpty())
+                .collect(Collectors.toSet());
+    }
+
+    /**
      * Sanitize records.
      *
      * @param records The list of records
@@ -308,7 +342,7 @@ public class LarkBaseService extends CommonLarkService
                 .map(record -> {
                     String sanitizedId = record.id();
                     String sanitizedName = Util.sanitizeGlueRelatedName(record.name());
-                    return new LarkDatabaseRecord(sanitizedId, sanitizedName);
+                    return new LarkDatabaseRecord(sanitizedId, sanitizedName, record.whitelistTableIds(), record.blacklistTableIds());
                 })
                 .collect(Collectors.toList());
 

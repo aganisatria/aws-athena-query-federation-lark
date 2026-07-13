@@ -19,9 +19,23 @@
  */
 package com.amazonaws.glue.lark.base.crawler.model;
 
+import java.util.Collections;
+import java.util.Set;
+
 /**
  * Record for Lark Database Record
  * @param id The database ID
  * @param name The database name
+ * @param whitelistTableIds Lark table IDs to exclusively crawl for this database, from the control table's
+ *                          "whitelist_tables" column. If empty, all tables in this database are crawled
+ *                          (subject to blacklistTableIds).
+ * @param blacklistTableIds Lark table IDs to always exclude from crawling for this database, from the control
+ *                          table's "blacklist_tables" column. Takes precedence over whitelistTableIds.
  */
-public record LarkDatabaseRecord(String id, String name) {}
+public record LarkDatabaseRecord(String id, String name, Set<String> whitelistTableIds, Set<String> blacklistTableIds)
+{
+    public LarkDatabaseRecord(String id, String name)
+    {
+        this(id, name, Collections.emptySet(), Collections.emptySet());
+    }
+}
