@@ -19,7 +19,10 @@
  */
 package com.amazonaws.glue.lark.base.crawler.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.glue.GlueClient;
+import software.amazon.awssdk.services.glue.model.AlreadyExistsException;
 import software.amazon.awssdk.services.glue.model.BatchDeleteTableRequest;
 import software.amazon.awssdk.services.glue.model.CreateDatabaseRequest;
 import software.amazon.awssdk.services.glue.model.CreateTableRequest;
@@ -51,6 +54,8 @@ import static java.util.Objects.requireNonNull;
  */
 public class GlueCatalogService
 {
+    private static final Logger logger = LoggerFactory.getLogger(GlueCatalogService.class);
+
     private final GlueClient glueClient;
     private final String catalogId;
 
@@ -94,10 +99,17 @@ public class GlueCatalogService
     public void batchDeleteDatabase(List<String> databaseNames)
     {
         for (String databaseName : databaseNames) {
-            glueClient.deleteDatabase(DeleteDatabaseRequest.builder()
-                    .name(databaseName)
-                    .catalogId(catalogId)
-                    .build());
+            // Isolate one database's delete failure (e.g. a concurrent invocation already deleted it)
+            // instead of aborting deletion of the rest of the batch.
+            try {
+                glueClient.deleteDatabase(DeleteDatabaseRequest.builder()
+                        .name(databaseName)
+                        .catalogId(catalogId)
+                        .build());
+            }
+            catch (Exception e) {
+                logger.error("Failed to delete database {}: {}", databaseName, e.getMessage(), e);
+            }
         }
     }
 
@@ -131,7 +143,22 @@ public class GlueCatalogService
                     .catalogId(catalogId)
                     .build();
 
-            glueClient.createDatabase(request);
+            // Observed in production: a concurrent/overlapping crawler invocation can create the same
+            // database first, so this call throws AlreadyExistsException - which is harmless (the
+            // database is there either way) but, left uncaught, aborted this whole loop before it ever
+            // reached the remaining databases in the batch. Since the caller (createGlueDatabases) goes
+            // on to create tables for every database in this batch regardless of which of these calls
+            // actually succeeded, isolating one database's failure here is enough to let table creation
+            // proceed normally for the rest instead of getting stuck retrying forever with zero tables.
+            try {
+                glueClient.createDatabase(request);
+            }
+            catch (AlreadyExistsException e) {
+                logger.info("Database {} already exists, skipping creation.", databaseNameWithLocationUri.getKey());
+            }
+            catch (Exception e) {
+                logger.error("Failed to create database {}: {}", databaseNameWithLocationUri.getKey(), e.getMessage(), e);
+            }
         }
     }
 
@@ -160,11 +187,17 @@ public class GlueCatalogService
                             )
                     ).build();
 
-            glueClient.updateDatabase(UpdateDatabaseRequest.builder()
-                    .name(databaseNameWithLocationUri.getKey())
-                    .databaseInput(databaseInput)
-                    .catalogId(catalogId)
-                    .build());
+            // Isolate one database's update failure instead of aborting the rest of the batch.
+            try {
+                glueClient.updateDatabase(UpdateDatabaseRequest.builder()
+                        .name(databaseNameWithLocationUri.getKey())
+                        .databaseInput(databaseInput)
+                        .catalogId(catalogId)
+                        .build());
+            }
+            catch (Exception e) {
+                logger.error("Failed to update database {}: {}", databaseNameWithLocationUri.getKey(), e.getMessage(), e);
+            }
         }
     }
 
@@ -203,14 +236,20 @@ public class GlueCatalogService
     public void batchDeleteTable(Map<String, List<Table>> databaseNameAndTables)
     {
         for (Map.Entry<String, List<Table>> dbEntry : databaseNameAndTables.entrySet()) {
-            glueClient.batchDeleteTable(
-                    BatchDeleteTableRequest.builder()
-                            .databaseName(dbEntry.getKey())
-                            .tablesToDelete(dbEntry.getValue().stream()
-                                    .map(Table::name)
-                                    .collect(Collectors.toList()))
-                            .catalogId(catalogId)
-                            .build());
+            // Isolate one database's delete-table batch failure instead of aborting the rest.
+            try {
+                glueClient.batchDeleteTable(
+                        BatchDeleteTableRequest.builder()
+                                .databaseName(dbEntry.getKey())
+                                .tablesToDelete(dbEntry.getValue().stream()
+                                        .map(Table::name)
+                                        .collect(Collectors.toList()))
+                                .catalogId(catalogId)
+                                .build());
+            }
+            catch (Exception e) {
+                logger.error("Failed to delete tables in database {}: {}", dbEntry.getKey(), e.getMessage(), e);
+            }
         }
     }
 
@@ -224,12 +263,23 @@ public class GlueCatalogService
     {
         for (Map.Entry<String, List<TableInput>> databaseNameAndTableInput : databaseNameAndTableInputs.entrySet()) {
             for (TableInput tableInput : databaseNameAndTableInput.getValue()) {
-                glueClient.createTable(
-                        CreateTableRequest.builder()
-                                .databaseName(databaseNameAndTableInput.getKey())
-                                .tableInput(tableInput)
-                                .catalogId(catalogId)
-                                .build());
+                // Isolate one table's create failure (e.g. AlreadyExistsException from a concurrent
+                // invocation, same race condition as batchCreateDatabase above) instead of aborting
+                // creation of every other table across every other database in this same batch.
+                try {
+                    glueClient.createTable(
+                            CreateTableRequest.builder()
+                                    .databaseName(databaseNameAndTableInput.getKey())
+                                    .tableInput(tableInput)
+                                    .catalogId(catalogId)
+                                    .build());
+                }
+                catch (AlreadyExistsException e) {
+                    logger.info("Table {}.{} already exists, skipping creation.", databaseNameAndTableInput.getKey(), tableInput.name());
+                }
+                catch (Exception e) {
+                    logger.error("Failed to create table {}.{}: {}", databaseNameAndTableInput.getKey(), tableInput.name(), e.getMessage(), e);
+                }
             }
         }
     }
@@ -244,12 +294,19 @@ public class GlueCatalogService
     {
         for (Map.Entry<String, List<TableInput>> databaseNameAndTableInput : databaseNameAndTableInputs.entrySet()) {
             for (TableInput tableInput : databaseNameAndTableInput.getValue()) {
-                glueClient.updateTable(
-                        UpdateTableRequest.builder()
-                                .databaseName(databaseNameAndTableInput.getKey())
-                                .tableInput(tableInput)
-                                .catalogId(catalogId)
-                                .build());
+                // Isolate one table's update failure instead of aborting every other table update
+                // across every other database in this same batch.
+                try {
+                    glueClient.updateTable(
+                            UpdateTableRequest.builder()
+                                    .databaseName(databaseNameAndTableInput.getKey())
+                                    .tableInput(tableInput)
+                                    .catalogId(catalogId)
+                                    .build());
+                }
+                catch (Exception e) {
+                    logger.error("Failed to update table {}.{}: {}", databaseNameAndTableInput.getKey(), tableInput.name(), e.getMessage(), e);
+                }
             }
         }
     }

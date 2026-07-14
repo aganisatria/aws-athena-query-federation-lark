@@ -73,6 +73,28 @@ class GlueCatalogServiceTest {
     }
 
     @Test
+    void testBatchCreateDatabase_oneAlreadyExists_othersStillCreated() {
+        // Reproduces a real production incident: a concurrent/overlapping crawler invocation created
+        // one of these databases first, so Glue throws AlreadyExistsException for it. Before this fix,
+        // that exception aborted this whole loop uncaught, so a database earlier in iteration order
+        // (e.g. "mec_reporting_activities") got created but every database after the failing one in
+        // this batch never did - and since createGlueDatabases only calls createTablesForNewDatabases
+        // after this method returns, none of them ever got their tables created either, indefinitely,
+        // since every subsequent crawl run hit the exact same race again.
+        Map<String, String> databaseNamesWithLocationUri = Map.of(
+                "already_exists_db", "s3://test-location-1/",
+                "new_db", "s3://test-location-2/"
+        );
+        when(glueClient.createDatabase(argThat((CreateDatabaseRequest r) ->
+                r.databaseInput().name().equals("already_exists_db"))))
+                .thenThrow(AlreadyExistsException.builder().message("Database already exists.").build());
+
+        glueCatalogService.batchCreateDatabase(databaseNamesWithLocationUri);
+
+        verify(glueClient, times(2)).createDatabase(any(CreateDatabaseRequest.class));
+    }
+
+    @Test
     void testBatchUpdateDatabase() {
         Map<String, String> databaseNamesWithLocationUri = Map.of(
                 "testDatabase1", "s3://test-location-1/",

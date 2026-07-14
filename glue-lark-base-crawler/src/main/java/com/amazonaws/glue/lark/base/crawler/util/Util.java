@@ -21,6 +21,7 @@ package com.amazonaws.glue.lark.base.crawler.util;
 
 import com.amazonaws.glue.lark.base.crawler.model.ColumnParameters;
 import com.amazonaws.glue.lark.base.crawler.model.TableInputParameters;
+import com.amazonaws.glue.lark.base.crawler.model.response.ListAllTableResponse;
 import software.amazon.awssdk.services.glue.model.Column;
 import software.amazon.awssdk.services.glue.model.StorageDescriptor;
 import software.amazon.awssdk.services.glue.model.TableInput;
@@ -322,5 +323,33 @@ public final class Util
     public static String sanitizeGlueRelatedName(String tableName)
     {
         return tableName.toLowerCase().replaceAll("[^a-zA-Z0-9$]", "_");
+    }
+
+    /**
+     * Disambiguate Lark tables whose names collide after sanitization (e.g. "Report A" and "report a"
+     * both -> "report_a"). Same collision class and fix as {@link #constructColumns}: since the Lark
+     * table ID is unique, a colliding table's name is suffixed with it rather than silently dropping
+     * or erroring on one of the two tables.
+     *
+     * @param tables The Lark tables
+     * @return The tables with any name collisions disambiguated
+     */
+    public static List<ListAllTableResponse.BaseItem> disambiguateDuplicateTableNames(List<ListAllTableResponse.BaseItem> tables)
+    {
+        Set<String> seenTableNames = new HashSet<>();
+        List<ListAllTableResponse.BaseItem> disambiguated = new ArrayList<>();
+        for (ListAllTableResponse.BaseItem table : tables) {
+            String tableName = table.getName();
+            if (!seenTableNames.add(tableName)) {
+                tableName = tableName + "_" + sanitizeGlueRelatedName(table.getTableId());
+                seenTableNames.add(tableName);
+            }
+            disambiguated.add(ListAllTableResponse.BaseItem.builder()
+                    .tableId(table.getTableId())
+                    .revision(table.getRevision())
+                    .name(tableName)
+                    .build());
+        }
+        return disambiguated;
     }
 }
