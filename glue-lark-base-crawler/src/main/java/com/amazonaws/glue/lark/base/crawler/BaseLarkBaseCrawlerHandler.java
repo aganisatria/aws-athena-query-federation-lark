@@ -399,24 +399,27 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
             List<TableInput> tableInputs = new ArrayList<>();
 
-            List<ListAllTableResponse.BaseItem> listTables = larkBaseService.listTables(databaseId);
-            LarkDatabaseRecord recordItem = recordsByDatabaseName.get(databaseName);
-            if (recordItem != null) {
-                listTables = filterTablesByAccessControl(listTables, recordItem);
-            }
+            // Listing tables for this database can fail for reasons unrelated to any other database -
+            // e.g. this specific Lark base was deleted or had its permissions changed between
+            // discovery and now. Isolate that failure to this one database instead of letting it crash
+            // table creation for every other new database in the same batch.
+            List<ListAllTableResponse.BaseItem> listTables;
+            try {
+                listTables = larkBaseService.listTables(databaseId);
+                LarkDatabaseRecord recordItem = recordsByDatabaseName.get(databaseName);
+                if (recordItem != null) {
+                    listTables = filterTablesByAccessControl(listTables, recordItem);
+                }
 
-            // Same collision risk as processTablesForDatabase: two distinct Lark tables in this
-            // (brand-new) base can collide after name sanitization (e.g. "Report A" and "report a"
-            // both -> "report_a"). Unlike processTablesForDatabase (which collapses collisions into a
-            // Set before ever reaching Glue, silently keeping only one table), this method builds a
-            // plain list, so without this check Glue's own createTable call would eventually reject
-            // the second one with a confusing AlreadyExistsException - after already partially
-            // creating other tables for this database. Fail fast with a clear message instead.
-            List<String> newTableNamesForValidation = listTables.stream()
-                    .map(item -> item.getName().toLowerCase())
-                    .collect(Collectors.toList());
-            if (new HashSet<>(newTableNamesForValidation).size() != newTableNamesForValidation.size()) {
-                throw new RuntimeException("Duplicate table names found (after sanitization) in Lark base " + databaseId);
+                // Two distinct Lark tables in this (brand-new) base can collide after name
+                // sanitization (e.g. "Report A" and "report a" both -> "report_a"). Disambiguate with
+                // the Lark table ID, same fix as colliding column names in Util.constructColumns,
+                // rather than silently keeping only one or erroring out this whole database.
+                listTables = Util.disambiguateDuplicateTableNames(listTables);
+            }
+            catch (Exception e) {
+                logger.error("Skipping database {} ({}): failed to list tables: {}", databaseName, databaseId, e.getMessage(), e);
+                continue;
             }
 
             for (ListAllTableResponse.BaseItem tableItem : listTables) {
@@ -536,7 +539,18 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
                         logger.info("No changes needed for database: {}", database.name());
                     }
 
-                    UpdateDatabaseProcessResult result = processTablesForDatabase(database, recordItem);
+                    // processTablesForDatabase calls out to both Glue (getTables) and Lark (listTables)
+                    // for this one database, plus the duplicate-name fail-fast check. Isolate a failure
+                    // there to this one database instead of letting it crash the update/create/delete
+                    // diffing for every other database being processed in this same crawl run.
+                    UpdateDatabaseProcessResult result;
+                    try {
+                        result = processTablesForDatabase(database, recordItem);
+                    }
+                    catch (Exception e) {
+                        logger.error("Skipping database {}: failed to process tables: {}", database.name(), e.getMessage(), e);
+                        continue;
+                    }
 
                     if (result.tablesToDelete() != null && !result.tablesToDelete().isEmpty()) {
                         tablesToDelete.put(database.name(), result.tablesToDelete());
@@ -616,14 +630,10 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
         // Two distinct Lark tables in the same base can collide after name sanitization (e.g.
         // "Report A" and "report a" both -> "report_a"). The create/update/delete diffing below is
         // entirely keyed by this lowercased name, so a collision would silently make one of the two
-        // tables invisible to the crawler (never created in Glue) instead of erroring. Fail loudly
-        // here, consistent with how database name collisions are already handled.
-        List<String> larkTableNamesForValidation = larkTables.stream()
-                .map(item -> item.getName().toLowerCase())
-                .collect(Collectors.toList());
-        if (new HashSet<>(larkTableNamesForValidation).size() != larkTableNamesForValidation.size()) {
-            throw new RuntimeException("Duplicate table names found (after sanitization) in Lark base " + recordItem.id());
-        }
+        // tables invisible to the crawler (never created in Glue) instead of erroring. Disambiguate
+        // with the Lark table ID, same fix as colliding column names in Util.constructColumns, rather
+        // than silently dropping one table or erroring out this whole database.
+        larkTables = Util.disambiguateDuplicateTableNames(larkTables);
 
         Map<String, String> larkTableNameMap = new HashMap<>();
         Map<String, String> glueTableNameMap = new HashMap<>();
