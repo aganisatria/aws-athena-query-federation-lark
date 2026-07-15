@@ -463,6 +463,7 @@ public class BaseRecordHandler extends RecordHandler
             private String currentPageToken = null;
             private boolean hasMorePages = true;
             private int currentFetchDataCount = 0;
+            private int emittedCount = 0;
             private final String finalFilterExpression = buildFinalFilter();
             private final String finalSortExpression = isParallelSplit && envVarService.isActivateParallelSplit() ? "" : originalSortExpression;
 
@@ -556,6 +557,14 @@ public class BaseRecordHandler extends RecordHandler
             @Override
             public boolean hasNext()
             {
+                // expectedRowCountForSplit only gates whether fetchNextPage() asks Lark for another
+                // page (checked before/after each fetch) - it never trims the page that pushes the
+                // running total over the limit. A single over-fetched page can carry up to
+                // pageSizeForApi extra records past the target, so the emitted-count cap here is what
+                // actually enforces the boundary regardless of how much this split over-fetched.
+                if (expectedRowCountForSplit > 0 && emittedCount >= expectedRowCountForSplit) {
+                    return false;
+                }
                 if (currentPageIterator != null && currentPageIterator.hasNext()) {
                     return true;
                 }
@@ -572,6 +581,7 @@ public class BaseRecordHandler extends RecordHandler
                     throw new NoSuchElementException("No more records available for this split");
                 }
                 SearchRecordsResponse.RecordItem item = currentPageIterator.next();
+                emittedCount++;
                 Map<String, Object> result = item.getFields() instanceof HashMap ?
                         item.getFields() : new HashMap<>(item.getFields());
                 result.put(RESERVED_RECORD_ID, item.getRecordId());

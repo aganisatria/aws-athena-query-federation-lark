@@ -658,6 +658,11 @@ public class BaseRecordHandlerTest {
 
     @Test
     public void testGetIteratorExceedsExpectedRowCount() throws Exception {
+        // A single page can carry more records than expectedRowCountForSplit asks for (e.g. the split
+        // planner estimated 5 rows for this split, but one page fetch returns 10 because the API
+        // doesn't slice mid-page). The iterator must stop emitting exactly at expectedRowCountForSplit
+        // rather than yielding every record it happened to fetch - otherwise a split can emit more
+        // rows than Athena's split-planning phase accounted for.
         List<SearchRecordsResponse.RecordItem> items = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
             items.add(SearchRecordsResponse.RecordItem.builder()
@@ -696,7 +701,7 @@ public class BaseRecordHandlerTest {
             iterator.next();
             count++;
         }
-        assertEquals(10, count);
+        assertEquals(5, count);
     }
 
     @Test
@@ -1252,15 +1257,15 @@ public class BaseRecordHandlerTest {
                 Collections.emptyMap()
         );
 
-        // Fetch all available in first page (10 items)
+        // First page carries more items (10) than expectedRowCountForSplit asks for (5).
         int count = 0;
         while (iterator.hasNext() && count < 15) {
             iterator.next();
             count++;
         }
 
-        // Should have gotten all 10 items even though expected was 5
-        assertEquals(10, count);
+        // Must stop at the expected count, not at however many the first page happened to carry.
+        assertEquals(5, count);
     }
 
     @Test
