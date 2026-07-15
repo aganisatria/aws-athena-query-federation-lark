@@ -272,6 +272,10 @@ public class BaseRecordHandler extends RecordHandler
      */
     private Constraints stripComplexTypeConstraints(Constraints original, org.apache.arrow.vector.types.pojo.Schema schema)
     {
+        if (original == null) {
+            return null;
+        }
+
         Map<String, ValueSet> filteredSummary = new HashMap<>();
         for (Map.Entry<String, ValueSet> entry : original.getSummary().entrySet()) {
             Field field = schema.findField(entry.getKey());

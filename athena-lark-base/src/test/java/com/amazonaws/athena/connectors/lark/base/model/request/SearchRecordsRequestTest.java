@@ -30,34 +30,19 @@ public class SearchRecordsRequestTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Test
-    public void testBuilder_minimalRequest() throws Exception {
+    public void testBuilder_emptyRequest() throws Exception {
         SearchRecordsRequest request = SearchRecordsRequest.builder()
-            .pageSize(100)
             .build();
 
         assertNotNull(request);
-        assertEquals(Integer.valueOf(100), Integer.valueOf(request.getPageSize()));
-        assertNull(request.getPageToken());
         assertNull(request.getFilter());
         assertNull(request.getSort());
-    }
-
-    @Test
-    public void testBuilder_withPageToken() {
-        SearchRecordsRequest request = SearchRecordsRequest.builder()
-            .pageSize(500)
-            .pageToken("token123")
-            .build();
-
-        assertEquals(Integer.valueOf(500), Integer.valueOf(request.getPageSize()));
-        assertEquals("token123", request.getPageToken());
     }
 
     @Test
     public void testBuilder_withFilter() {
         String filterJson = "{\"conjunction\":\"and\",\"conditions\":[{\"field_name\":\"field1\",\"operator\":\"is\",\"value\":[\"123\"]}]}";
         SearchRecordsRequest request = SearchRecordsRequest.builder()
-            .pageSize(100)
             .filter(filterJson)
             .build();
 
@@ -68,7 +53,6 @@ public class SearchRecordsRequestTest {
     public void testBuilder_withSort() {
         String sortJson = "[{\"field_name\":\"field1\",\"desc\":true}]";
         SearchRecordsRequest request = SearchRecordsRequest.builder()
-            .pageSize(100)
             .sort(sortJson)
             .build();
 
@@ -76,49 +60,34 @@ public class SearchRecordsRequestTest {
     }
 
     @Test
-    public void testBuilder_fullRequest() {
+    public void testBuilder_withFilterAndSort() {
         String filterJson = "{\"conjunction\":\"and\",\"conditions\":[]}";
         String sortJson = "[{\"field_name\":\"field1\",\"desc\":false}]";
 
         SearchRecordsRequest request = SearchRecordsRequest.builder()
-            .pageSize(250)
-            .pageToken("page_2")
             .filter(filterJson)
             .sort(sortJson)
             .build();
 
-        assertEquals(Integer.valueOf(250), Integer.valueOf(request.getPageSize()));
-        assertEquals("page_2", request.getPageToken());
         assertEquals(filterJson, request.getFilter());
         assertEquals(sortJson, request.getSort());
     }
 
     @Test
-    public void testJsonSerialization_withoutFilterAndSort() throws Exception {
+    public void testJsonSerialization_emptyRequest() throws Exception {
+        // page_size/page_token are sent as query parameters (see LarkBaseService.getTableRecords), not
+        // in this body, precisely because Lark's search API never advances past the first page when
+        // page_token is sent in the body - so an empty request must serialize to an empty object.
         SearchRecordsRequest request = SearchRecordsRequest.builder()
-            .pageSize(100)
             .build();
 
         String json = OBJECT_MAPPER.writeValueAsString(request);
         JsonNode jsonNode = OBJECT_MAPPER.readTree(json);
 
-        assertEquals(100, jsonNode.get("page_size").asInt());
+        assertFalse(jsonNode.has("page_size"));
         assertFalse(jsonNode.has("page_token"));
         assertFalse(jsonNode.has("filter"));
         assertFalse(jsonNode.has("sort"));
-    }
-
-    @Test
-    public void testJsonSerialization_withPageToken() throws Exception {
-        SearchRecordsRequest request = SearchRecordsRequest.builder()
-            .pageSize(100)
-            .pageToken("token456")
-            .build();
-
-        String json = OBJECT_MAPPER.writeValueAsString(request);
-        JsonNode jsonNode = OBJECT_MAPPER.readTree(json);
-
-        assertEquals("token456", jsonNode.get("page_token").asText());
     }
 
     @Test
@@ -126,7 +95,6 @@ public class SearchRecordsRequestTest {
         // Critical test: @JsonRawValue should serialize filter as JSON object, not escaped string
         String filterJson = "{\"conjunction\":\"and\",\"conditions\":[{\"field_name\":\"test\",\"operator\":\"is\",\"value\":[\"123\"]}]}";
         SearchRecordsRequest request = SearchRecordsRequest.builder()
-            .pageSize(100)
             .filter(filterJson)
             .build();
 
@@ -144,7 +112,6 @@ public class SearchRecordsRequestTest {
         // Critical test: @JsonRawValue should serialize sort as JSON array, not escaped string
         String sortJson = "[{\"field_name\":\"field1\",\"desc\":true},{\"field_name\":\"field2\",\"desc\":false}]";
         SearchRecordsRequest request = SearchRecordsRequest.builder()
-            .pageSize(100)
             .sort(sortJson)
             .build();
 
@@ -159,13 +126,11 @@ public class SearchRecordsRequestTest {
     }
 
     @Test
-    public void testJsonSerialization_fullRequest() throws Exception {
+    public void testJsonSerialization_filterAndSort() throws Exception {
         String filterJson = "{\"conjunction\":\"and\",\"conditions\":[{\"field_name\":\"num\",\"operator\":\"isGreater\",\"value\":[\"100\"]}]}";
         String sortJson = "[{\"field_name\":\"num\",\"desc\":true}]";
 
         SearchRecordsRequest request = SearchRecordsRequest.builder()
-            .pageSize(500)
-            .pageToken("next_page")
             .filter(filterJson)
             .sort(sortJson)
             .build();
@@ -173,8 +138,8 @@ public class SearchRecordsRequestTest {
         String json = OBJECT_MAPPER.writeValueAsString(request);
         JsonNode jsonNode = OBJECT_MAPPER.readTree(json);
 
-        assertEquals(500, jsonNode.get("page_size").asInt());
-        assertEquals("next_page", jsonNode.get("page_token").asText());
+        assertFalse(jsonNode.has("page_size"));
+        assertFalse(jsonNode.has("page_token"));
 
         // Verify filter is JSON object
         assertTrue(jsonNode.get("filter").isObject());
@@ -192,7 +157,6 @@ public class SearchRecordsRequestTest {
     public void testJsonSerialization_nullFilter() throws Exception {
         // Null filter should not be included in JSON
         SearchRecordsRequest request = SearchRecordsRequest.builder()
-            .pageSize(100)
             .filter(null)
             .build();
 

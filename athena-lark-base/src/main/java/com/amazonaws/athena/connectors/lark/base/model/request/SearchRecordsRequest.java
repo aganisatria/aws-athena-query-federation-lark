@@ -31,12 +31,6 @@ import com.fasterxml.jackson.annotation.JsonRawValue;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public final class SearchRecordsRequest
 {
-    @JsonProperty("page_size")
-    private final Integer pageSize;
-
-    @JsonProperty("page_token")
-    private final String pageToken;
-
     @JsonProperty("filter")
     @JsonRawValue
     private final String filter;
@@ -47,20 +41,8 @@ public final class SearchRecordsRequest
 
     private SearchRecordsRequest(Builder builder)
     {
-        this.pageSize = builder.pageSize;
-        this.pageToken = builder.pageToken;
         this.filter = builder.filter;
         this.sort = builder.sort;
-    }
-
-    public Integer getPageSize()
-    {
-        return pageSize;
-    }
-
-    public String getPageToken()
-    {
-        return pageToken;
     }
 
     public String getFilter()
@@ -80,25 +62,11 @@ public final class SearchRecordsRequest
 
     public static final class Builder
     {
-        private Integer pageSize;
-        private String pageToken;
         private String filter;
         private String sort;
 
         private Builder()
         {
-        }
-
-        public Builder pageSize(Integer pageSize)
-        {
-            this.pageSize = pageSize;
-            return this;
-        }
-
-        public Builder pageToken(String pageToken)
-        {
-            this.pageToken = pageToken;
-            return this;
         }
 
         public Builder filter(String filter)
