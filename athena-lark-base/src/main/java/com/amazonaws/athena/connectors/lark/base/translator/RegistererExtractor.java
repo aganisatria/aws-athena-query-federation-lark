@@ -515,7 +515,10 @@ public class RegistererExtractor
                     Object rawListValue = recordMap.get(fieldName);
 
                     if (rawListValue == null) {
-                        BlockUtils.setComplexValue(vector, rowNum, resolver, null);
+                        // List fields are declared non-nullable (see LarkBaseTypeUtils), so an absent
+                        // value must be written as an empty list, not null - the vector would reject
+                        // a null write here regardless.
+                        BlockUtils.setComplexValue(vector, rowNum, resolver, Collections.emptyList());
                         return true;
                     }
 
@@ -542,9 +545,9 @@ public class RegistererExtractor
                         listValue = List.of(unwrappedValue);
                     }
                     else {
-                        logger.error("FieldWriterFactory for List field '{}': Expected List, Map, or String, got {}. Writing null.",
+                        logger.error("FieldWriterFactory for List field '{}': Expected List, Map, or String, got {}. Writing empty list.",
                                 fieldName, unwrappedValue.getClass().getName());
-                        BlockUtils.setComplexValue(vector, rowNum, resolver, null);
+                        BlockUtils.setComplexValue(vector, rowNum, resolver, Collections.emptyList());
                         return true; // Changed from false to true to not skip the entire row
                     }
 
@@ -571,7 +574,7 @@ public class RegistererExtractor
                     catch (Exception e) {
                         logger.error("FieldWriterFactory for List field '{}': Error writing list. ProcessedList type: {}. Exception: {}",
                                 fieldName, processedList.getClass().getName(), e.getMessage(), e);
-                        BlockUtils.setComplexValue(vector, rowNum, resolver, null);
+                        BlockUtils.setComplexValue(vector, rowNum, resolver, Collections.emptyList());
                         return false;
                     }
                 });
@@ -589,7 +592,10 @@ public class RegistererExtractor
                     Object rawStructValue = recordMap.get(fieldName);
 
                     if (rawStructValue == null) {
-                        BlockUtils.setComplexValue(vector, rowNum, resolver, null);
+                        // Struct fields are declared non-nullable (see LarkBaseTypeUtils), so an absent
+                        // value must be written as an empty map (all-null sub-fields), not null - the
+                        // vector would reject a null write here regardless.
+                        BlockUtils.setComplexValue(vector, rowNum, resolver, Collections.emptyMap());
                         return true;
                     }
 
@@ -597,9 +603,9 @@ public class RegistererExtractor
                     Object unwrappedValue = unwrapFormula(rawStructValue, larkTypeInfo);
 
                     if (!(unwrappedValue instanceof Map)) {
-                        logger.error("FieldWriterFactory for Struct field '{}': Expected Map, got {}. Writing null.",
+                        logger.error("FieldWriterFactory for Struct field '{}': Expected Map, got {}. Writing empty map.",
                                 fieldName, unwrappedValue.getClass().getName());
-                        BlockUtils.setComplexValue(vector, rowNum, resolver, null);
+                        BlockUtils.setComplexValue(vector, rowNum, resolver, Collections.emptyMap());
                         return false;
                     }
 
@@ -610,7 +616,7 @@ public class RegistererExtractor
                     catch (Exception e) {
                         logger.error("FieldWriterFactory for Struct field '{}': Error writing struct. Value type: {}. Exception: {}",
                                 fieldName, unwrappedValue.getClass().getName(), e.getMessage(), e);
-                        BlockUtils.setComplexValue(vector, rowNum, resolver, null);
+                        BlockUtils.setComplexValue(vector, rowNum, resolver, Collections.emptyMap());
                         return false;
                     }
                 });

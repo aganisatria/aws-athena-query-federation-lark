@@ -253,13 +253,24 @@ public final class LarkBaseTypeUtils
 
         switch (requireNonNull(minorType)) {
             case LIST:
+                // Declared non-nullable (and always written as at least an empty list - see
+                // RegistererExtractor.registerListFieldWriterFactory) rather than nullable: Athena's
+                // query engine crashes trying to evaluate IS NOT NULL against a nullable List/Struct
+                // column ("Lists have one child Field. Found: none") regardless of the actual row
+                // data - a platform limitation this connector can't fix by handling constraints
+                // differently on its own side. A non-nullable column lets the engine treat IS NOT NULL
+                // as trivially true without needing that evaluation, avoiding the crash entirely. The
+                // tradeoff: IS NULL can no longer distinguish "no items" from "field absent", but for a
+                // list-shaped value those are the same thing anyway.
                 Field childField = getLarkListChildField(larkField);
                 children = Collections.singletonList(childField);
-                fieldType = new FieldType(isNullable, ArrowType.List.INSTANCE, null, null);
+                fieldType = new FieldType(false, ArrowType.List.INSTANCE, null, null);
                 break;
             case STRUCT:
+                // See the LIST case above - same crash, same fix, same tradeoff (an absent value
+                // becomes an all-null-field struct instead of a null struct).
                 children = getLarkStructChildFields(larkField);
-                fieldType = new FieldType(isNullable, ArrowType.Struct.INSTANCE, null, null);
+                fieldType = new FieldType(false, ArrowType.Struct.INSTANCE, null, null);
                 break;
             case DECIMAL:
                 fieldType = new FieldType(isNullable, new ArrowType.Decimal(38, 18, 128), null, null);
