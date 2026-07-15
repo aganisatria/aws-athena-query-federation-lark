@@ -189,18 +189,27 @@ public class LarkBaseService extends CommonLarkService
         refreshTenantAccessToken();
 
         try {
-            URI uri = new URIBuilder(LARK_BASE_URL + "/" + request.getBaseId() + "/tables/" + request.getTableId() + "/records/search").build();
+            // page_size/page_token MUST be query parameters, not body fields: sending page_token in
+            // the JSON body causes the Lark API to never advance past the first page - has_more stays
+            // true and the same page_token/records get returned forever, regardless of how many times
+            // you re-request "the next page". Confirmed by direct comparison: identical page_token and
+            // request body, only difference being query-param vs body placement, and only the
+            // query-param form actually reaches has_more=false. filter/sort remain in the body since
+            // they're structured objects, not scalars.
+            URIBuilder uriBuilder = new URIBuilder(LARK_BASE_URL + "/" + request.getBaseId() + "/tables/" + request.getTableId() + "/records/search")
+                    .addParameter("page_size", String.valueOf(request.getPageSize()));
+
+            if (request.getPageToken() != null && !request.getPageToken().isEmpty()) {
+                uriBuilder.addParameter("page_token", request.getPageToken());
+            }
+
+            URI uri = uriBuilder.build();
 
             logger.info("Fetching records from Lark Base Search API, url: {}", uri);
 
             // Build request body
             com.amazonaws.athena.connectors.lark.base.model.request.SearchRecordsRequest.Builder requestBuilder =
-                    com.amazonaws.athena.connectors.lark.base.model.request.SearchRecordsRequest.builder()
-                            .pageSize((int) request.getPageSize());
-
-            if (request.getPageToken() != null && !request.getPageToken().isEmpty()) {
-                requestBuilder.pageToken(request.getPageToken());
-            }
+                    com.amazonaws.athena.connectors.lark.base.model.request.SearchRecordsRequest.builder();
 
             if (request.getFilterJson() != null && !request.getFilterJson().isEmpty()) {
                 requestBuilder.filter(request.getFilterJson());

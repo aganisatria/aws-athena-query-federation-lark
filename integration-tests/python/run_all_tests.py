@@ -94,6 +94,20 @@ ALL_TESTS = {
         "migrated": True,
         "modes": ["mock", "aws"]  # Athena not in LocalStack Community
     },
+    "row_count_and_null_handling": {
+        "name": "Row Count & Null-Field Handling Test",
+        "script": "integration-tests/python/tests/regression/test_row_count_and_null_handling.py",
+        "migrated": True,
+        "modes": ["aws"],  # cross-checks Athena against the real Lark API - no mock equivalent
+        "note": "Regression coverage for the split row-count-overshoot and null-field NPE incidents"
+    },
+    "comprehensive_nullability": {
+        "name": "Comprehensive Field Type Nullability Test",
+        "script": "integration-tests/python/tests/regression/test_comprehensive_nullability.py",
+        "migrated": True,
+        "modes": ["aws"],  # hardcoded AWS-only, no mock/hybrid branching in the file itself
+        "note": "IS NULL / IS NOT NULL pushdown across all Lark field types - existed but was never registered here"
+    },
 }
 
 
