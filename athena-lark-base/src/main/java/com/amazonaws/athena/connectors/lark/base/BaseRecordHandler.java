@@ -242,7 +242,8 @@ public class BaseRecordHandler extends RecordHandler
             Iterator<Map<String, Object>> itemIterator,
             RegistererExtractor registererExtractor)
     {
-        GeneratedRowWriter.RowWriterBuilder rowWriterBuilder = GeneratedRowWriter.newBuilder(recordsRequest.getConstraints());
+        Constraints constraintsForWriter = stripComplexTypeConstraints(recordsRequest.getConstraints(), recordsRequest.getSchema());
+        GeneratedRowWriter.RowWriterBuilder rowWriterBuilder = GeneratedRowWriter.newBuilder(constraintsForWriter);
         registererExtractor.registerExtractorsForSchema(rowWriterBuilder, recordsRequest.getSchema());
 
         try {
@@ -256,6 +257,40 @@ public class BaseRecordHandler extends RecordHandler
             logger.error("Error building/using row writer: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to write items to block: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * GeneratedRowWriter.newBuilder() eagerly materializes a comparison value for every constrained
+     * column via the SDK's own MarkerFactory/BlockUtils.newEmptyBlock, which builds a bare childless
+     * Field for container types (List/Struct). Arrow's ListVector then rejects that Field ("Lists have
+     * one child Field. Found: none") - this happens purely from having e.g. an IS NOT NULL constraint
+     * on a List/Struct column, regardless of whether our own field-writer factories ever consult the
+     * constraint. It's a gap in the SDK, not something fixable in this connector's schema-building code.
+     * Drop constraints on List/Struct columns before handing them to the SDK so it never attempts this;
+     * Athena's own query engine re-applies the WHERE clause against the full (unfiltered on these
+     * columns) rows we return, so results stay correct - we're just not pushing the filter down.
+     */
+    private Constraints stripComplexTypeConstraints(Constraints original, org.apache.arrow.vector.types.pojo.Schema schema)
+    {
+        Map<String, ValueSet> filteredSummary = new HashMap<>();
+        for (Map.Entry<String, ValueSet> entry : original.getSummary().entrySet()) {
+            Field field = schema.findField(entry.getKey());
+            ArrowType fieldType = field != null ? field.getType() : null;
+            if (fieldType instanceof ArrowType.List || fieldType instanceof ArrowType.Struct) {
+                logger.debug("Dropping constraint on complex-type column '{}' to avoid a known SDK crash "
+                        + "(MarkerFactory can't build a comparison value for List/Struct types); "
+                        + "Athena will re-apply this filter itself.", entry.getKey());
+                continue;
+            }
+            filteredSummary.put(entry.getKey(), entry.getValue());
+        }
+
+        if (filteredSummary.size() == original.getSummary().size()) {
+            return original;
+        }
+
+        return new Constraints(filteredSummary, original.getExpression(), original.getOrderByClause(),
+                original.getLimit(), original.getQueryPassthroughArguments(), original.getQueryPlan());
     }
 
     /**
