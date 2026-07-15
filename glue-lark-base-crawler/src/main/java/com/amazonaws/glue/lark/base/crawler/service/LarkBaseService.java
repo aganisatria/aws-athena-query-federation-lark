@@ -229,15 +229,23 @@ public class LarkBaseService extends CommonLarkService
 
         do {
             try {
-                URI uri = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables/" + tableId + "/records/search").build();
-
-                com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.Builder requestBuilder =
-                        com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.builder()
-                                .pageSize(pageSize);
+                // page_size/page_token MUST be query parameters, not body fields: sending page_token in
+                // the JSON body causes the Lark API to never advance past the first page - has_more
+                // stays true and the same page_token/records get returned forever, no matter how many
+                // times "the next page" is requested. Confirmed by direct comparison against the same
+                // endpoint: identical request otherwise, only the query-param form actually reaches
+                // has_more=false. See the same fix in athena-lark-base's LarkBaseService.
+                URIBuilder uriBuilder = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables/" + tableId + "/records/search")
+                        .addParameter("page_size", String.valueOf(pageSize));
 
                 if (!pageToken.isEmpty()) {
-                    requestBuilder.pageToken(pageToken);
+                    uriBuilder.addParameter("page_token", pageToken);
                 }
+
+                URI uri = uriBuilder.build();
+
+                com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.Builder requestBuilder =
+                        com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.builder();
 
                 String requestBody = objectMapper.writeValueAsString(requestBuilder.build());
 
