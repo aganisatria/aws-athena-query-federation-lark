@@ -244,10 +244,9 @@ public class LarkBaseService extends CommonLarkService
 
                 URI uri = uriBuilder.build();
 
-                com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.Builder requestBuilder =
-                        com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.builder();
-
-                String requestBody = objectMapper.writeValueAsString(requestBuilder.build());
+                // page_size/page_token now live entirely in the query string above, and this method
+                // has no filter/sort to send, so the body is always empty.
+                String requestBody = "{}";
 
                 logger.info("Search API request for table {}: {}", tableId, requestBody);
 
