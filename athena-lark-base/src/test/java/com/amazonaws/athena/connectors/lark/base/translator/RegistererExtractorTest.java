@@ -1331,6 +1331,86 @@ public class RegistererExtractorTest {
         }
     }
 
+    @Test
+    public void testListFieldWriterFactory_withStringValue_nestedListSchema() throws Exception {
+        // A chained LOOKUP (e.g. Lookup<Lookup<MultiSelect>>) produces a doubly-nested Arrow schema:
+        // List<List<Utf8>>. Lark collapses a single-linked-record LOOKUP to a bare String though, so the
+        // writer must wrap it twice (once per List level), not once, to match the schema.
+        ArgumentCaptor<FieldWriterFactory> factoryCaptor = ArgumentCaptor.forClass(FieldWriterFactory.class);
+        Field innerListField = new Field("item", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(new Field("item", FieldType.nullable(new ArrowType.Utf8()), null)));
+        Field outerListField = new Field("nested_list_field", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(innerListField));
+        Schema schema = new Schema(Collections.singletonList(outerListField));
+
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, schema);
+        verify(mockRowWriterBuilder).withFieldWriterFactory(eq("nested_list_field"), factoryCaptor.capture());
+
+        FieldWriterFactory factory = factoryCaptor.getValue();
+        FieldVector mockVector = mock(FieldVector.class);
+        Extractor mockExtractor = mock(Extractor.class);
+
+        try (MockedStatic<BlockUtils> blockUtilsMock = mockStatic(BlockUtils.class)) {
+            FieldWriter writer = factory.create(mockVector, mockExtractor, null);
+
+            Map<String, Object> context = new HashMap<>();
+            context.put("nested_list_field", "single string value");
+
+            boolean result = writer.write(context, 0);
+
+            assertTrue(result);
+            // Expect [["single string value"]] - wrapped twice to match List<List<Utf8>>
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), argThat(arg -> {
+                if (!(arg instanceof List) || ((List<?>) arg).size() != 1) {
+                    return false;
+                }
+                Object inner = ((List<?>) arg).get(0);
+                return inner instanceof List && ((List<?>) inner).size() == 1
+                        && "single string value".equals(((List<?>) inner).get(0));
+            })));
+        }
+    }
+
+    @Test
+    public void testListFieldWriterFactory_withMapValue_nestedListSchema() throws Exception {
+        // A chained LOOKUP<User> (e.g. Lookup<Lookup<User>>) produces List<List<Struct>>. Lark collapses a
+        // single-linked-record LOOKUP to a bare Map (LinkedHashMap) though, so the writer must wrap it twice.
+        ArgumentCaptor<FieldWriterFactory> factoryCaptor = ArgumentCaptor.forClass(FieldWriterFactory.class);
+        Field innerListField = new Field("item", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(new Field("item", FieldType.nullable(new ArrowType.Utf8()), null)));
+        Field outerListField = new Field("nested_map_field", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(innerListField));
+        Schema schema = new Schema(Collections.singletonList(outerListField));
+
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, schema);
+        verify(mockRowWriterBuilder).withFieldWriterFactory(eq("nested_map_field"), factoryCaptor.capture());
+
+        FieldWriterFactory factory = factoryCaptor.getValue();
+        FieldVector mockVector = mock(FieldVector.class);
+        Extractor mockExtractor = mock(Extractor.class);
+
+        try (MockedStatic<BlockUtils> blockUtilsMock = mockStatic(BlockUtils.class)) {
+            FieldWriter writer = factory.create(mockVector, mockExtractor, null);
+
+            Map<String, Object> mapValue = new HashMap<>();
+            mapValue.put("id", "ou_12345");
+            Map<String, Object> context = new HashMap<>();
+            context.put("nested_map_field", mapValue);
+
+            boolean result = writer.write(context, 0);
+
+            assertTrue(result);
+            // Expect [[mapValue]] - wrapped twice to match List<List<Struct>>
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), argThat(arg -> {
+                if (!(arg instanceof List) || ((List<?>) arg).size() != 1) {
+                    return false;
+                }
+                Object inner = ((List<?>) arg).get(0);
+                return inner instanceof List && ((List<?>) inner).size() == 1 && mapValue.equals(((List<?>) inner).get(0));
+            })));
+        }
+    }
+
     // Tests for Struct field writer factory
     @Test
     public void testStructFieldWriterFactory_withNullValue() throws Exception {

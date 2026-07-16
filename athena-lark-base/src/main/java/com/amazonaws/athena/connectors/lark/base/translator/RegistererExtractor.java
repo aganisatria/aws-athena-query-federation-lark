@@ -503,6 +503,27 @@ public class RegistererExtractor
         });
     }
 
+    /**
+     * A chained LOOKUP (e.g. Lookup&lt;Lookup&lt;MultiSelect&gt;&gt;) produces an Arrow schema nested one
+     * List level deeper per chain hop (List&lt;List&lt;Utf8&gt;&gt;, List&lt;List&lt;Struct&gt;&gt;, ...), but
+     * Lark's API collapses a single-linked-record LOOKUP down to a bare scalar (String/Map) instead of
+     * wrapping it in the full chain of Lists. Wrapping such a scalar exactly once (as this method's callers
+     * do for the outermost level) leaves any inner List levels holding a raw scalar where a List was
+     * expected, which is what threw the "String/LinkedHashMap cannot be cast to List" writer exceptions.
+     * This walks the field's child-List chain below the outermost level and wraps once per level found,
+     * so the final single-element structure matches the schema's actual nesting depth.
+     */
+    private static Object wrapScalarToMatchNestedListDepth(Object scalarValue, Field listField)
+    {
+        Object wrapped = scalarValue;
+        Field current = listField;
+        while (!current.getChildren().isEmpty() && current.getChildren().get(0).getType() instanceof ArrowType.List) {
+            wrapped = List.of(wrapped);
+            current = current.getChildren().get(0);
+        }
+        return wrapped;
+    }
+
     private void registerListFieldWriterFactory(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field)
     {
         LarkBaseFieldResolver resolver = new LarkBaseFieldResolver();
@@ -532,14 +553,14 @@ public class RegistererExtractor
                         // Wrap it in a List to match the expected array schema
                         logger.debug("FieldWriterFactory for List field '{}': Got Map instead of List (likely LINK field). Wrapping in List.",
                                 fieldName);
-                        listValue = List.of(unwrappedValue);
+                        listValue = List.of(wrapScalarToMatchNestedListDepth(unwrappedValue, field));
                     }
                     else if (unwrappedValue instanceof String) {
                         // LOOKUP fields may return as String instead of List
                         // Wrap it in a List to match the expected array schema
                         logger.debug("FieldWriterFactory for List field '{}': Got String instead of List (likely LOOKUP field). Wrapping in List.",
                                 fieldName);
-                        listValue = List.of(unwrappedValue);
+                        listValue = List.of(wrapScalarToMatchNestedListDepth(unwrappedValue, field));
                     }
                     else {
                         logger.error("FieldWriterFactory for List field '{}': Expected List, Map, or String, got {}. Writing null.",
