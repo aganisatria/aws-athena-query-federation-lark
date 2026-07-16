@@ -24,6 +24,8 @@ class JSONFilterTester(BaseRegressionTest):
     def __init__(self, verbose: bool = False):
         super().__init__(verbose)
         self.lark_api_base = get_lark_api_base_url()
+        self.lark_base_token = os.getenv("LARK_BASE_APP_TOKEN", "test_base_token")
+        self.lark_table_id = os.getenv("LARK_BASE_TABLE_ID", "test_table_id")
         self.access_token = None
 
     def setup(self):

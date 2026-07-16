@@ -229,32 +229,38 @@ class ComprehensiveNullabilityTest(BaseRegressionTest):
         return self.run_field_test("USER IS NOT NULL", "field_user", "IS NOT NULL", expected_to_fail=True)
 
     def test_user_field_is_null(self):
-        """Test USER field with IS NULL."""
-        return self.run_field_test("USER IS NULL", "field_user", "IS NULL", expected_to_fail=True)
+        """Test USER field with IS NULL.
+
+        Unlike IS NOT NULL, this doesn't need MarkerFactory to materialize a comparable
+        value for the List-typed column - same reason MULTI_SELECT/GROUP_CHAT/ATTACHMENT's
+        IS NULL succeeds below. All of these share the same Arrow LIST MinorType (see
+        LarkBaseTypeUtils), so there's no mechanical reason USER would behave differently.
+        """
+        return self.run_field_test("USER IS NULL", "field_user", "IS NULL", expected_to_fail=False)
 
     def test_lookup_field_is_not_null(self):
         """Test LOOKUP field with IS NOT NULL."""
         return self.run_field_test("LOOKUP IS NOT NULL", "field_lookup", "IS NOT NULL", expected_to_fail=True)
 
     def test_lookup_field_is_null(self):
-        """Test LOOKUP field with IS NULL."""
-        return self.run_field_test("LOOKUP IS NULL", "field_lookup", "IS NULL", expected_to_fail=True)
+        """Test LOOKUP field with IS NULL. See test_user_field_is_null for why this succeeds."""
+        return self.run_field_test("LOOKUP IS NULL", "field_lookup", "IS NULL", expected_to_fail=False)
 
     def test_created_user_field_is_not_null(self):
         """Test CREATED_USER field with IS NOT NULL."""
         return self.run_field_test("CREATED_USER IS NOT NULL", "field_created_user", "IS NOT NULL", expected_to_fail=True)
 
     def test_created_user_field_is_null(self):
-        """Test CREATED_USER field with IS NULL."""
-        return self.run_field_test("CREATED_USER IS NULL", "field_created_user", "IS NULL", expected_to_fail=True)
+        """Test CREATED_USER field with IS NULL. See test_user_field_is_null for why this succeeds."""
+        return self.run_field_test("CREATED_USER IS NULL", "field_created_user", "IS NULL", expected_to_fail=False)
 
     def test_modified_user_field_is_not_null(self):
         """Test MODIFIED_USER field with IS NOT NULL."""
         return self.run_field_test("MODIFIED_USER IS NOT NULL", "field_modified_user", "IS NOT NULL", expected_to_fail=True)
 
     def test_modified_user_field_is_null(self):
-        """Test MODIFIED_USER field with IS NULL."""
-        return self.run_field_test("MODIFIED_USER IS NULL", "field_modified_user", "IS NULL", expected_to_fail=True)
+        """Test MODIFIED_USER field with IS NULL. See test_user_field_is_null for why this succeeds."""
+        return self.run_field_test("MODIFIED_USER IS NULL", "field_modified_user", "IS NULL", expected_to_fail=False)
 
     # Array type tests
     def test_multi_select_field_is_not_null(self):
