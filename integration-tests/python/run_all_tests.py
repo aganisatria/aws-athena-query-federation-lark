@@ -36,31 +36,31 @@ ALL_TESTS = {
     # Migrated tests (in integration-tests module)
     "glue_crawler": {
         "name": "Glue Crawler Test",
-        "script": "integration-tests/python/tests/regression/test_glue_crawler.py",
+        "script": "integration-tests/python/tests/crawlers/test_glue_crawler.py",
         "migrated": True,
         "modes": ["mock", "hybrid", "aws"]
     },
     "glue_regression": {
         "name": "Glue Provider Regression Test",
-        "script": "integration-tests/python/tests/regression/test_glue_regression.py",
+        "script": "integration-tests/python/tests/regression/test_comprehensive_queries.py",
         "migrated": True,
         "modes": ["mock", "aws"]
     },
     "lark_base_source_regression": {
         "name": "Lark Base Source Regression Test",
-        "script": "integration-tests/python/tests/regression/test_lark_base_source.py",
+        "script": "integration-tests/python/tests/providers/test_lark_base_source.py",
         "migrated": True,
         "modes": ["mock", "aws"]
     },
     "lark_drive_source_regression": {
         "name": "Lark Drive Source Regression Test",
-        "script": "integration-tests/python/tests/regression/test_lark_drive_source_regression.py",
+        "script": "integration-tests/python/tests/providers/test_lark_drive_source.py",
         "migrated": True,
         "modes": ["mock", "aws"]
     },
     "experimental_provider_regression": {
         "name": "Experimental Provider Regression Test",
-        "script": "integration-tests/python/tests/regression/test_experimental_provider.py",
+        "script": "integration-tests/python/tests/providers/test_experimental_provider.py",
         "migrated": True,
         "modes": ["mock", "aws"]
     },

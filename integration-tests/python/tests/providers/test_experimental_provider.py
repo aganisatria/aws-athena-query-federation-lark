@@ -39,7 +39,7 @@ class ExperimentalProviderTest(BaseRegressionTest):
         # Experimental provider uses base_id.table_id format
         # Format: database = base_id, table = table_id
         self.test_base_id = os.getenv("TEST_BASE_ID", "EEMGbnS87a2W1IsaJKhjds3fpwe")
-        self.test_table_id = os.getenv("TEST_TABLE_ID", "tblCGeqbqp03ivAY")
+        self.test_table_id = os.getenv("TEST_TABLE_ID", "tblehzVRm83N1vOX")
 
         # Experimental uses base_id as database and table_id as table name
         self.test_database = self.test_base_id
