@@ -1129,9 +1129,7 @@ public class RegistererExtractorTest {
             boolean result = writer.write(context, 0);
 
             assertTrue(result);
-            // List fields are non-nullable now (see LarkBaseTypeUtils) - an absent value writes an
-            // empty list, not null, since the vector would reject a null write.
-            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(Collections.emptyList())));
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(null)));
         }
     }
 
@@ -1219,9 +1217,9 @@ public class RegistererExtractorTest {
 
             boolean result = writer.write(context, 0);
 
-            // Should write an empty list (List fields are non-nullable) but return true to not skip the row
+            // Should write null but return true to not skip the row
             assertTrue(result);
-            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(Collections.emptyList())));
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(null)));
         }
     }
 
@@ -1313,10 +1311,10 @@ public class RegistererExtractorTest {
         Extractor mockExtractor = mock(Extractor.class);
 
         try (MockedStatic<BlockUtils> blockUtilsMock = mockStatic(BlockUtils.class)) {
-            // Make BlockUtils throw exception on first call (with list), succeed on second call (with the empty-list fallback)
-            blockUtilsMock.when(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), argThat(arg -> arg instanceof List && !((List<?>) arg).isEmpty())))
+            // Make BlockUtils throw exception on first call (with list), succeed on second call (with null)
+            blockUtilsMock.when(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), argThat(arg -> arg instanceof List)))
                     .thenThrow(new RuntimeException("Simulated exception"));
-            blockUtilsMock.when(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(Collections.emptyList())))
+            blockUtilsMock.when(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(null)))
                     .then(invocation -> null);
 
             FieldWriter writer = factory.create(mockVector, mockExtractor, null);
@@ -1328,8 +1326,7 @@ public class RegistererExtractorTest {
             boolean result = writer.write(context, 0);
 
             assertFalse(result);
-            // Verify it tried twice - once with the list (threw exception), once with the empty-list
-            // fallback (List fields are non-nullable, so this can't be null)
+            // Verify it tried twice - once with the list (threw exception), once with null (succeeded)
             blockUtilsMock.verify(() -> BlockUtils.setComplexValue(any(), anyInt(), any(), any()), times(2));
         }
     }
@@ -1361,9 +1358,7 @@ public class RegistererExtractorTest {
             boolean result = writer.write(context, 0);
 
             assertTrue(result);
-            // Struct fields are non-nullable now (see LarkBaseTypeUtils) - an absent value writes an
-            // empty map (all-null sub-fields), not null, since the vector would reject a null write.
-            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(Collections.emptyMap())));
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(null)));
         }
     }
 
@@ -1393,8 +1388,7 @@ public class RegistererExtractorTest {
             boolean result = writer.write(context, 0);
 
             assertFalse(result);
-            // Struct fields are non-nullable, so the fallback is an empty map, not null.
-            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(Collections.emptyMap())));
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(null)));
         }
     }
 
@@ -1450,12 +1444,10 @@ public class RegistererExtractorTest {
         Extractor mockExtractor = mock(Extractor.class);
 
         try (MockedStatic<BlockUtils> blockUtilsMock = mockStatic(BlockUtils.class)) {
-            // Make BlockUtils throw exception on first call (with the non-empty struct), succeed on
-            // second call (with the empty-map fallback - Struct fields are non-nullable, so this can't
-            // be null; note the fallback map must be matched separately since it's also a Map)
-            blockUtilsMock.when(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), argThat(arg -> arg instanceof Map && !((Map<?, ?>) arg).isEmpty())))
+            // Make BlockUtils throw exception on first call (with map), succeed on second call (with null)
+            blockUtilsMock.when(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), argThat(arg -> arg instanceof Map)))
                     .thenThrow(new RuntimeException("Simulated exception"));
-            blockUtilsMock.when(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(Collections.emptyMap())))
+            blockUtilsMock.when(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(null)))
                     .then(invocation -> null);
 
             FieldWriter writer = factory.create(mockVector, mockExtractor, null);
@@ -1470,7 +1462,7 @@ public class RegistererExtractorTest {
             boolean result = writer.write(context, 0);
 
             assertFalse(result);
-            // Verify it tried twice - once with the struct (threw exception), once with the empty-map fallback (succeeded)
+            // Verify it tried twice - once with the struct (threw exception), once with null (succeeded)
             blockUtilsMock.verify(() -> BlockUtils.setComplexValue(any(), anyInt(), any(), any()), times(2));
         }
     }
