@@ -344,15 +344,21 @@ public final class SearchApiFilterTranslator
     {
         Marker low = range.getLow();
         Marker high = range.getHigh();
+        // Confirmed against Lark's Search Records API directly: a DATE_TIME-family field rejects
+        // isGreaterEqual/isLessEqual outright ("fieldType '5' not support isGreaterEqual"), so a BETWEEN's
+        // normally-inclusive bounds must fall back to the strict isGreater/isLess instead - the boundary
+        // instant itself won't match, which is an accepted platform limitation (Lark's own filter guide
+        // notes date comparisons are truncated to day granularity anyway).
+        boolean isDateTime = isDateTimeUiType(fieldUiType);
 
         if (!low.isLowerUnbounded()) {
-            String operator = (low.getBound() == Marker.Bound.EXACTLY) ? "isGreaterEqual" : "isGreater";
+            String operator = (!isDateTime && low.getBound() == Marker.Bound.EXACTLY) ? "isGreaterEqual" : "isGreater";
             Object value = convertValueForSearchApi(low.getValue(), fieldUiType);
             conditions.add(createCondition(fieldName, operator, value));
         }
 
         if (!high.isUpperUnbounded()) {
-            String operator = (high.getBound() == Marker.Bound.EXACTLY) ? "isLessEqual" : "isLess";
+            String operator = (!isDateTime && high.getBound() == Marker.Bound.EXACTLY) ? "isLessEqual" : "isLess";
             Object value = convertValueForSearchApi(high.getValue(), fieldUiType);
             conditions.add(createCondition(fieldName, operator, value));
         }

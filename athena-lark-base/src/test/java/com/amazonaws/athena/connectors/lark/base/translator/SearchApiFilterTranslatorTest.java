@@ -1432,4 +1432,49 @@ public class SearchApiFilterTranslatorTest {
         assertEquals("ExactDate", value.get(0).asText());
         assertEquals("1735689600000", value.get(1).asText());
     }
+
+    @Test
+    public void testToFilterJson_withDateTimeBetween_usesStrictOperators() throws Exception {
+        // WHERE field_date_time BETWEEN t1 AND t2 has both bounds Marker.Bound.EXACTLY (normally inclusive,
+        // which addRangeBoundConditions maps to isGreaterEqual/isLessEqual). Confirmed directly against
+        // Lark's Search Records API: a DATE_TIME-family field rejects those outright ("fieldType '5' not
+        // support isGreaterEqual"). It must fall back to the strict isGreater/isLess instead - the exact
+        // boundary instant won't match, an accepted platform limitation.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Timestamp(org.apache.arrow.vector.types.TimeUnit.MILLISECOND, "UTC"));
+
+        Ranges ranges = mock(Ranges.class);
+        Range between = mock(Range.class);
+        Marker low = mock(Marker.class);
+        Marker high = mock(Marker.class);
+        when(low.isLowerUnbounded()).thenReturn(false);
+        when(low.getBound()).thenReturn(Marker.Bound.EXACTLY);
+        when(low.getValue()).thenReturn(java.time.LocalDateTime.of(1990, 1, 1, 0, 0, 0));
+        when(high.isUpperUnbounded()).thenReturn(false);
+        when(high.getBound()).thenReturn(Marker.Bound.EXACTLY);
+        when(high.getValue()).thenReturn(java.time.LocalDateTime.of(2000, 1, 1, 0, 0, 0));
+        when(between.getLow()).thenReturn(low);
+        when(between.getHigh()).thenReturn(high);
+
+        when(ranges.getOrderedRanges()).thenReturn(Collections.singletonList(between));
+        when(valueSet.getRanges()).thenReturn(ranges);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_date_time", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_date_time", "Date Time Field",
+                new NestedUIType(UITypeEnum.DATE_TIME, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(2, conditions.size());
+        assertEquals("isGreater", conditions.get(0).get("operator").asText());
+        assertEquals("isLess", conditions.get(1).get("operator").asText());
+    }
 }
