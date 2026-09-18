@@ -253,13 +253,22 @@ public final class SearchApiFilterTranslator
     {
         List<Map<String, Object>> conditions = new ArrayList<>();
 
-        // Handle single value (equality)
+        // Handle single value (equality). A SortedRangeSet with zero ranges and nullAllowed=true is a pure
+        // "IS NULL" constraint - the domain's only satisfying value is null, so isSingleValue() is true with
+        // getSingleValue() == null. Checkbox has no separate empty state so NULL maps to "is false"; every
+        // other type must use "isEmpty" - falling through to convertValueForSearchApi/"is" would otherwise
+        // turn null into the literal empty string "" (convertValueForSearchApi's null branch), which Lark's
+        // Search API treats as "equals empty string" and matches zero rows instead of the actual NULL rows.
         if (rangeSet.isSingleValue()) {
             Object value = rangeSet.getSingleValue();
 
-            // Special handling for checkbox NULL -> false
-            if (value == null && fieldUiType == UITypeEnum.CHECKBOX) {
-                conditions.add(createCondition(fieldName, "is", false));
+            if (value == null) {
+                if (fieldUiType == UITypeEnum.CHECKBOX) {
+                    conditions.add(createCondition(fieldName, "is", false));
+                }
+                else {
+                    conditions.add(createCondition(fieldName, "isEmpty", null));
+                }
                 return conditions;
             }
 

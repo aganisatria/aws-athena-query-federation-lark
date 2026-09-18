@@ -277,6 +277,36 @@ public class SearchApiFilterTranslatorTest {
     }
 
     @Test
+    public void testToFilterJson_withSortedRangeSet_singleValue_nonCheckbox_null() throws Exception {
+        // A pure "IS NULL" constraint on a non-checkbox column arrives as a SortedRangeSet with zero ranges
+        // and nullAllowed=true, which makes isSingleValue() true with getSingleValue() == null. This must be
+        // pushed down as "isEmpty", not "is ''" (which Lark's Search API treats as equals-empty-string and
+        // matches zero rows instead of the actual NULL rows).
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(true);
+        when(valueSet.getSingleValue()).thenReturn(null);
+        when(valueSet.isNullAllowed()).thenReturn(true);
+        when(valueSet.getType()).thenReturn(new ArrowType.Utf8());
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_single_select", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_single_select", "Single Select Field",
+                new NestedUIType(UITypeEnum.SINGLE_SELECT, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(1, conditions.size());
+        assertEquals("Single Select Field", conditions.get(0).get("field_name").asText());
+        assertEquals("isEmpty", conditions.get(0).get("operator").asText());
+        assertEquals(0, conditions.get(0).get("value").size());
+    }
+
+    @Test
     public void testToFilterJson_withSortedRangeSet_isNotNull_checkbox() throws Exception {
         // Mock SortedRangeSet for IS NOT NULL pattern with checkbox
         SortedRangeSet valueSet = mock(SortedRangeSet.class);
@@ -1113,8 +1143,11 @@ public class SearchApiFilterTranslatorTest {
         assertNotNull(filterJson);
         JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
         JsonNode conditions = filter.get("conditions");
-        // Null value should be converted to empty string for non-checkbox
-        assertEquals("", conditions.get(0).get("value").get(0).asText());
+        // A single-value domain of null is a pure IS NULL constraint; for non-checkbox fields this must be
+        // "isEmpty", not "is ''" (which Lark's Search API treats as equals-empty-string, matching zero rows
+        // instead of the actual NULL rows - see testToFilterJson_withSortedRangeSet_singleValue_nonCheckbox_null).
+        assertEquals("isEmpty", conditions.get(0).get("operator").asText());
+        assertEquals(0, conditions.get(0).get("value").size());
     }
 
     @Test
