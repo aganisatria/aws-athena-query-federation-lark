@@ -627,6 +627,65 @@ public class SearchApiFilterTranslatorTest {
     }
 
     @Test
+    public void testToFilterJson_withSortedRangeSet_notEqualPattern_singleSelect_pushesAsIsNot() throws Exception {
+        // WHERE field_single_select != 'Option A' (or NOT IN with one value) - a column with a natural
+        // ordering represents this as two ranges excluding the single point "Option A": (-inf, 'Option A')
+        // union ('Option A', +inf), same shape as the range-union case above but with identical boundary
+        // values on both ranges. Routing this through the generic range-union path would emit
+        // isLess/isGreater, which Lark's Search API doesn't support for a categorical SINGLE_SELECT field
+        // (it has no meaningful ordering there) and silently matches zero rows. It must become "isNot"
+        // instead, which works for every equality-capable type.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Utf8());
+
+        Ranges ranges = mock(Ranges.class);
+
+        Range belowOptionA = mock(Range.class);
+        Marker belowLow = mock(Marker.class);
+        Marker belowHigh = mock(Marker.class);
+        when(belowLow.isLowerUnbounded()).thenReturn(true);
+        when(belowHigh.isUpperUnbounded()).thenReturn(false);
+        when(belowHigh.getBound()).thenReturn(Marker.Bound.BELOW);
+        when(belowHigh.getValue()).thenReturn("Option A");
+        when(belowOptionA.getLow()).thenReturn(belowLow);
+        when(belowOptionA.getHigh()).thenReturn(belowHigh);
+
+        Range aboveOptionA = mock(Range.class);
+        Marker aboveLow = mock(Marker.class);
+        Marker aboveHigh = mock(Marker.class);
+        when(aboveLow.isLowerUnbounded()).thenReturn(false);
+        when(aboveLow.getBound()).thenReturn(Marker.Bound.ABOVE);
+        when(aboveLow.getValue()).thenReturn("Option A");
+        when(aboveHigh.isUpperUnbounded()).thenReturn(true);
+        when(aboveOptionA.getLow()).thenReturn(aboveLow);
+        when(aboveOptionA.getHigh()).thenReturn(aboveHigh);
+
+        when(ranges.getOrderedRanges()).thenReturn(Arrays.asList(belowOptionA, aboveOptionA));
+        when(valueSet.getRanges()).thenReturn(ranges);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_single_select", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_single_select", "Single Select Field",
+                new NestedUIType(UITypeEnum.SINGLE_SELECT, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        // Must be a flat top-level condition, not an OR-group under "children".
+        assertNull(filter.get("children"));
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(2, conditions.size());
+        assertEquals("isNot", conditions.get(0).get("operator").asText());
+        assertEquals("Option A", conditions.get(0).get("value").get(0).asText());
+        assertEquals("isNotEmpty", conditions.get(1).get("operator").asText());
+    }
+
+    @Test
     public void testToFilterJson_withSortedRangeSet_multiRangeUnionWithDoubleBoundedRange_skipsPushdown() throws Exception {
         // A union containing a range that needs BOTH bounds (e.g. one BETWEEN-shaped range OR'd with a
         // single-bounded range) can't be expressed within Lark's one-level-of-nesting filter API (it would
@@ -827,9 +886,12 @@ public class SearchApiFilterTranslatorTest {
         assertNotNull(filterJson);
         JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
         JsonNode conditions = filter.get("conditions");
-        assertEquals(1, conditions.size());
+        // A second "isNotEmpty" condition excludes NULL rows: per SQL's three-valued logic a NULL column
+        // never satisfies "!=", but Lark's "isNot" alone would let an empty field leak into the result.
+        assertEquals(2, conditions.size());
         assertEquals("isNot", conditions.get(0).get("operator").asText());
         assertEquals("excluded", conditions.get(0).get("value").get(0).asText());
+        assertEquals("isNotEmpty", conditions.get(1).get("operator").asText());
     }
 
     @Test
@@ -858,9 +920,11 @@ public class SearchApiFilterTranslatorTest {
 
         JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
         JsonNode conditions = filter.get("conditions");
-        assertEquals(2, conditions.size());
+        // Plus the trailing "isNotEmpty" that excludes NULL rows (see the blacklist single-value test).
+        assertEquals(3, conditions.size());
         assertEquals("isNot", conditions.get(0).get("operator").asText());
         assertEquals("isNot", conditions.get(1).get("operator").asText());
+        assertEquals("isNotEmpty", conditions.get(2).get("operator").asText());
         assertNull(filter.get("children"));
     }
 
@@ -1266,5 +1330,31 @@ public class SearchApiFilterTranslatorTest {
         // toPlainString() keeps the scale (unlike toString()'s "0E-18"), which is fine - Lark parses a
         // plain decimal string regardless of trailing zeros; the point is it must never be scientific notation.
         assertEquals("0.000000000000000000", conditions.get(0).get("value").get(0).asText());
+    }
+
+    @Test
+    public void testToFilterJson_withDateTimeValue_convertsToEpochMillis() throws Exception {
+        // DATE_TIME/CREATED_TIME/MODIFIED_TIME markers arrive as java.time.LocalDateTime. Sending
+        // LocalDateTime.toString() ("2025-01-01T00:00") to Lark's Search API instead of epoch milliseconds
+        // made every date range/equality filter silently match zero rows.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(true);
+        when(valueSet.getSingleValue()).thenReturn(java.time.LocalDateTime.of(2025, 1, 1, 0, 0, 0));
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Timestamp(org.apache.arrow.vector.types.TimeUnit.MILLISECOND, "UTC"));
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_date_time", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_date_time", "Date Time Field",
+                new NestedUIType(UITypeEnum.DATE_TIME, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        JsonNode conditions = filter.get("conditions");
+        assertEquals("1735689600000", conditions.get(0).get("value").get(0).asText());
     }
 }

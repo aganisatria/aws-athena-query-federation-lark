@@ -33,11 +33,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RESERVED_SPLIT_KEY;
 
@@ -115,6 +118,27 @@ public final class SearchApiFilterTranslator
             else if (valueSet instanceof SortedRangeSet rangeSet && !isSingleValueSafe(rangeSet)
                     && getOrderedRangesSafe(rangeSet, fieldName).size() > 1) {
                 List<Range> ranges = getOrderedRangesSafe(rangeSet, fieldName);
+
+                // A column with a natural ordering (e.g. VARCHAR) represents "col != X" as two disjoint
+                // ranges excluding the single point X: (-inf, X) union (X, +inf). Routing that through the
+                // generic range-union path below would emit isLess/isGreater, which only makes sense for
+                // types Lark actually orders (free TEXT); a categorical type like SINGLE_SELECT has no
+                // meaningful ordering in Lark's Search API and silently matches zero rows for those
+                // operators. Recognize this specific shape and emit a single "isNot" instead, which is safe
+                // for every equality-capable type regardless of whether Lark orders it.
+                Object notEqualValue = tryGetNotEqualExcludedValue(ranges);
+                if (notEqualValue != NOT_A_NOT_EQUAL_PATTERN) {
+                    Object convertedValue = convertValueForSearchApi(notEqualValue, fieldUiType);
+                    allConditions.add(createCondition(fieldName, "isNot", convertedValue));
+                    // Same 3-valued-logic gap as the NOT IN blacklist case (see translateEquatableValueSet):
+                    // "col != X" never matches NULL in SQL, but Lark's "isNot" treats an empty field as
+                    // trivially not-equal-to-X, so it leaks in unless explicitly excluded.
+                    if (!rangeSet.isNullAllowed() && fieldUiType != UITypeEnum.CHECKBOX) {
+                        allConditions.add(createCondition(fieldName, "isNotEmpty", null));
+                    }
+                    continue;
+                }
+
                 List<Map<String, Object>> orConditions = buildRangeUnionOrGroup(fieldName, ranges, fieldUiType);
                 if (orConditions != null) {
                     Map<String, Object> orGroup = new HashMap<>();
@@ -331,6 +355,42 @@ public final class SearchApiFilterTranslator
         }
     }
 
+    /** Sentinel returned by {@link #tryGetNotEqualExcludedValue} when the ranges aren't a "!=" pattern. */
+    private static final Object NOT_A_NOT_EQUAL_PATTERN = new Object();
+
+    /**
+     * Detects the two-range shape a column with a natural ordering uses to represent {@code col != X}:
+     * {@code (-inf, X) union (X, +inf)}, both bounds exclusive at the same excluded value X.
+     *
+     * @return The excluded value X, or {@link #NOT_A_NOT_EQUAL_PATTERN} if {@code ranges} isn't this shape.
+     */
+    private static Object tryGetNotEqualExcludedValue(List<Range> ranges)
+    {
+        if (ranges.size() != 2) {
+            return NOT_A_NOT_EQUAL_PATTERN;
+        }
+
+        Range lower = ranges.get(0);
+        Range upper = ranges.get(1);
+
+        boolean lowerShapeMatches = lower.getLow().isLowerUnbounded()
+                && !lower.getHigh().isUpperUnbounded() && lower.getHigh().getBound() == Marker.Bound.BELOW;
+        boolean upperShapeMatches = upper.getHigh().isUpperUnbounded()
+                && !upper.getLow().isLowerUnbounded() && upper.getLow().getBound() == Marker.Bound.ABOVE;
+
+        if (!lowerShapeMatches || !upperShapeMatches) {
+            return NOT_A_NOT_EQUAL_PATTERN;
+        }
+
+        Object excludedByLower = lower.getHigh().getValue();
+        Object excludedByUpper = upper.getLow().getValue();
+        if (!Objects.equals(excludedByLower, excludedByUpper)) {
+            return NOT_A_NOT_EQUAL_PATTERN;
+        }
+
+        return excludedByLower;
+    }
+
     /**
      * Builds the conditions for an OR-group representing a union of multiple ranges on one column (e.g.
      * {@code x < 5 OR x > 100}, or {@code x != 5} modeled as two disjoint ranges excluding a single point).
@@ -377,6 +437,16 @@ public final class SearchApiFilterTranslator
             conditions.add(createCondition(fieldName, operator, convertedValue));
         }
 
+        // A blacklist (NOT IN) that doesn't allow null is "col NOT IN (...)" with no "OR col IS NULL" - per
+        // SQL's three-valued logic, a NULL column never satisfies "!=" (the comparison is UNKNOWN, not TRUE),
+        // so NULL rows must NOT be in the result. But Lark's "isNot" operator treats an empty/unset field as
+        // satisfying "isNot X" (it's trivially not equal to X), so without this, empty-field rows leak into
+        // every NOT IN result. CHECKBOX has no "isNotEmpty" operator (see translateRangeSet's IS NOT NULL
+        // handling) and Lark always returns a concrete true/false for it, so it's excluded here too.
+        if (!isWhiteList && !valueSet.isNullAllowed() && fieldUiType != UITypeEnum.CHECKBOX) {
+            conditions.add(createCondition(fieldName, "isNotEmpty", null));
+        }
+
         return conditions;
     }
 
@@ -416,7 +486,20 @@ public final class SearchApiFilterTranslator
             return value;
         }
 
+        // DATE_TIME/CREATED_TIME/MODIFIED_TIME markers arrive as a java.time.LocalDateTime (the column's
+        // Arrow type is Timestamp(MILLISECOND, "UTC")). Lark's Search API expects epoch milliseconds, not
+        // LocalDateTime's default ISO-8601 toString() (e.g. "2025-01-01T00:00"), which Lark can't parse as
+        // a date - every date range/equality filter on these fields silently matched zero rows without this.
+        if (isDateTimeUiType(fieldUiType) && value instanceof LocalDateTime localDateTime) {
+            return localDateTime.toInstant(ZoneOffset.UTC).toEpochMilli();
+        }
+
         return value;
+    }
+
+    private static boolean isDateTimeUiType(UITypeEnum uiType)
+    {
+        return uiType == UITypeEnum.DATE_TIME || uiType == UITypeEnum.CREATED_TIME || uiType == UITypeEnum.MODIFIED_TIME;
     }
 
     private static String convertToString(Object value)
