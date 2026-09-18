@@ -686,6 +686,76 @@ public class SearchApiFilterTranslatorTest {
     }
 
     @Test
+    public void testToFilterJson_withSortedRangeSet_notInPattern_multipleValues_pushesAsMultipleIsNot() throws Exception {
+        // WHERE field_text NOT IN ('a', 'b') on an orderable type is modeled as THREE ranges excluding two
+        // points: (-inf, 'a') union ('a', 'b') union ('b', +inf) - the middle range needs both bounds, so
+        // buildRangeUnionOrGroup's single-bound requirement would reject it and skip pushdown entirely
+        // (falling back to an unfiltered fetch). tryGetExcludedValues must recognize this N-point shape too,
+        // not just the single-point "!=" case, and emit one "isNot" per excluded value.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Utf8());
+
+        Ranges ranges = mock(Ranges.class);
+
+        Range belowA = mock(Range.class);
+        Marker belowALow = mock(Marker.class);
+        Marker belowAHigh = mock(Marker.class);
+        when(belowALow.isLowerUnbounded()).thenReturn(true);
+        when(belowAHigh.isUpperUnbounded()).thenReturn(false);
+        when(belowAHigh.getBound()).thenReturn(Marker.Bound.BELOW);
+        when(belowAHigh.getValue()).thenReturn("a");
+        when(belowA.getLow()).thenReturn(belowALow);
+        when(belowA.getHigh()).thenReturn(belowAHigh);
+
+        Range betweenAAndB = mock(Range.class);
+        Marker betweenLow = mock(Marker.class);
+        Marker betweenHigh = mock(Marker.class);
+        when(betweenLow.isLowerUnbounded()).thenReturn(false);
+        when(betweenLow.getBound()).thenReturn(Marker.Bound.ABOVE);
+        when(betweenLow.getValue()).thenReturn("a");
+        when(betweenHigh.isUpperUnbounded()).thenReturn(false);
+        when(betweenHigh.getBound()).thenReturn(Marker.Bound.BELOW);
+        when(betweenHigh.getValue()).thenReturn("b");
+        when(betweenAAndB.getLow()).thenReturn(betweenLow);
+        when(betweenAAndB.getHigh()).thenReturn(betweenHigh);
+
+        Range aboveB = mock(Range.class);
+        Marker aboveBLow = mock(Marker.class);
+        Marker aboveBHigh = mock(Marker.class);
+        when(aboveBLow.isLowerUnbounded()).thenReturn(false);
+        when(aboveBLow.getBound()).thenReturn(Marker.Bound.ABOVE);
+        when(aboveBLow.getValue()).thenReturn("b");
+        when(aboveBHigh.isUpperUnbounded()).thenReturn(true);
+        when(aboveB.getLow()).thenReturn(aboveBLow);
+        when(aboveB.getHigh()).thenReturn(aboveBHigh);
+
+        when(ranges.getOrderedRanges()).thenReturn(Arrays.asList(belowA, betweenAAndB, aboveB));
+        when(valueSet.getRanges()).thenReturn(ranges);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_text", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_text", "Text Field",
+                new NestedUIType(UITypeEnum.TEXT, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        assertNull(filter.get("children"));
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(3, conditions.size());
+        assertEquals("isNot", conditions.get(0).get("operator").asText());
+        assertEquals("a", conditions.get(0).get("value").get(0).asText());
+        assertEquals("isNot", conditions.get(1).get("operator").asText());
+        assertEquals("b", conditions.get(1).get("value").get(0).asText());
+        assertEquals("isNotEmpty", conditions.get(2).get("operator").asText());
+    }
+
+    @Test
     public void testToFilterJson_withSortedRangeSet_multiRangeUnionWithDoubleBoundedRange_skipsPushdown() throws Exception {
         // A union containing a range that needs BOTH bounds (e.g. one BETWEEN-shaped range OR'd with a
         // single-bounded range) can't be expressed within Lark's one-level-of-nesting filter API (it would

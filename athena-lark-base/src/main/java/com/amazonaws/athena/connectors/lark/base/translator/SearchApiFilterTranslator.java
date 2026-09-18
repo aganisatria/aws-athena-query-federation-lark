@@ -119,17 +119,20 @@ public final class SearchApiFilterTranslator
                     && getOrderedRangesSafe(rangeSet, fieldName).size() > 1) {
                 List<Range> ranges = getOrderedRangesSafe(rangeSet, fieldName);
 
-                // A column with a natural ordering (e.g. VARCHAR) represents "col != X" as two disjoint
-                // ranges excluding the single point X: (-inf, X) union (X, +inf). Routing that through the
-                // generic range-union path below would emit isLess/isGreater, which only makes sense for
-                // types Lark actually orders (free TEXT); a categorical type like SINGLE_SELECT has no
-                // meaningful ordering in Lark's Search API and silently matches zero rows for those
-                // operators. Recognize this specific shape and emit a single "isNot" instead, which is safe
-                // for every equality-capable type regardless of whether Lark orders it.
-                Object notEqualValue = tryGetNotEqualExcludedValue(ranges);
-                if (notEqualValue != NOT_A_NOT_EQUAL_PATTERN) {
-                    Object convertedValue = convertValueForSearchApi(notEqualValue, fieldUiType);
-                    allConditions.add(createCondition(fieldName, "isNot", convertedValue));
+                // A column with a natural ordering (e.g. VARCHAR) represents "col != X" / "col NOT IN
+                // (x1, x2, ...)" as N+1 disjoint ranges excluding N points: (-inf, x1) union (x1, x2) union
+                // ... union (xN, +inf). Routing that through the generic range-union path below would emit
+                // isLess/isGreater (which Lark doesn't support for a categorical type like SINGLE_SELECT -
+                // silently zero rows) and would fail buildRangeUnionOrGroup's single-bound check entirely
+                // for N>1 (every interior range needs both bounds), skipping pushdown altogether. Recognize
+                // this shape and emit one "isNot" per excluded point ANDed together instead, which needs no
+                // ordering support and works for every equality-capable type.
+                List<Object> excludedValues = tryGetExcludedValues(ranges);
+                if (excludedValues != null) {
+                    for (Object excludedValue : excludedValues) {
+                        Object convertedValue = convertValueForSearchApi(excludedValue, fieldUiType);
+                        allConditions.add(createCondition(fieldName, "isNot", convertedValue));
+                    }
                     // Same 3-valued-logic gap as the NOT IN blacklist case (see translateEquatableValueSet):
                     // "col != X" never matches NULL in SQL, but Lark's "isNot" treats an empty field as
                     // trivially not-equal-to-X, so it leaks in unless explicitly excluded.
@@ -355,40 +358,35 @@ public final class SearchApiFilterTranslator
         }
     }
 
-    /** Sentinel returned by {@link #tryGetNotEqualExcludedValue} when the ranges aren't a "!=" pattern. */
-    private static final Object NOT_A_NOT_EQUAL_PATTERN = new Object();
-
     /**
-     * Detects the two-range shape a column with a natural ordering uses to represent {@code col != X}:
-     * {@code (-inf, X) union (X, +inf)}, both bounds exclusive at the same excluded value X.
+     * Detects the N+1-range shape a column with a natural ordering uses to represent {@code col != X} /
+     * {@code col NOT IN (x1, ..., xN)}: {@code (-inf, x1) union (x1, x2) union ... union (xN, +inf)} - every
+     * range single-bounded except the interior ones, which share their excluded value with both neighbors.
      *
-     * @return The excluded value X, or {@link #NOT_A_NOT_EQUAL_PATTERN} if {@code ranges} isn't this shape.
+     * @return The excluded values in order, or {@code null} if {@code ranges} isn't this shape.
      */
-    private static Object tryGetNotEqualExcludedValue(List<Range> ranges)
+    private static List<Object> tryGetExcludedValues(List<Range> ranges)
     {
-        if (ranges.size() != 2) {
-            return NOT_A_NOT_EQUAL_PATTERN;
+        if (!ranges.get(0).getLow().isLowerUnbounded()
+                || !ranges.get(ranges.size() - 1).getHigh().isUpperUnbounded()) {
+            return null;
         }
 
-        Range lower = ranges.get(0);
-        Range upper = ranges.get(1);
+        List<Object> excludedValues = new ArrayList<>();
+        for (int i = 0; i < ranges.size() - 1; i++) {
+            Marker high = ranges.get(i).getHigh();
+            Marker low = ranges.get(i + 1).getLow();
 
-        boolean lowerShapeMatches = lower.getLow().isLowerUnbounded()
-                && !lower.getHigh().isUpperUnbounded() && lower.getHigh().getBound() == Marker.Bound.BELOW;
-        boolean upperShapeMatches = upper.getHigh().isUpperUnbounded()
-                && !upper.getLow().isLowerUnbounded() && upper.getLow().getBound() == Marker.Bound.ABOVE;
-
-        if (!lowerShapeMatches || !upperShapeMatches) {
-            return NOT_A_NOT_EQUAL_PATTERN;
+            boolean adjoins = !high.isUpperUnbounded() && high.getBound() == Marker.Bound.BELOW
+                    && !low.isLowerUnbounded() && low.getBound() == Marker.Bound.ABOVE
+                    && Objects.equals(high.getValue(), low.getValue());
+            if (!adjoins) {
+                return null;
+            }
+            excludedValues.add(high.getValue());
         }
 
-        Object excludedByLower = lower.getHigh().getValue();
-        Object excludedByUpper = upper.getLow().getValue();
-        if (!Objects.equals(excludedByLower, excludedByUpper)) {
-            return NOT_A_NOT_EQUAL_PATTERN;
-        }
-
-        return excludedByLower;
+        return excludedValues;
     }
 
     /**
