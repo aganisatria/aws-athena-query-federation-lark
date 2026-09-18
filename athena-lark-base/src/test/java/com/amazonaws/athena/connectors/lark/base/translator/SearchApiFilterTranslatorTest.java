@@ -1239,4 +1239,32 @@ public class SearchApiFilterTranslatorTest {
         JsonNode conditions = filter.get("conditions");
         assertEquals("42.5", conditions.get(0).get("value").get(0).asText());
     }
+
+    @Test
+    public void testConvertToString_withBigDecimalZero_avoidsScientificNotation() throws Exception {
+        // Decimal(38, 18) columns (NUMBER/CURRENCY/PROGRESS) hand a BigDecimal with scale 18 to the
+        // translator. BigDecimal.toString() renders a zero at that scale as "0E-18" (scientific notation),
+        // which Lark's Search API can't parse as a number - it must come out as a plain "0".
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(true);
+        when(valueSet.getSingleValue()).thenReturn(new java.math.BigDecimal("0.000000000000000000"));
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Decimal(38, 18, 128));
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_currency", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_currency", "Currency Field",
+                new NestedUIType(UITypeEnum.CURRENCY, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        JsonNode conditions = filter.get("conditions");
+        // toPlainString() keeps the scale (unlike toString()'s "0E-18"), which is fine - Lark parses a
+        // plain decimal string regardless of trailing zeros; the point is it must never be scientific notation.
+        assertEquals("0.000000000000000000", conditions.get(0).get("value").get(0).asText());
+    }
 }

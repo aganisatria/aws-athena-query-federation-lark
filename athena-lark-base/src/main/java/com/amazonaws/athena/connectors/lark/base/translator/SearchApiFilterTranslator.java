@@ -32,6 +32,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -425,6 +426,13 @@ public final class SearchApiFilterTranslator
         }
         if (value instanceof Boolean) {
             return value.toString();
+        }
+        // BigDecimal.toString() switches to scientific notation for values with a small adjusted exponent
+        // (e.g. a Decimal(38,18) zero prints as "0E-18"), which Lark's Search API cannot parse as a number,
+        // silently dropping matching rows for equality/range filters on NUMBER/CURRENCY/PROGRESS/RATING
+        // fields whose value is zero or otherwise near-zero. toPlainString() never uses scientific notation.
+        if (value instanceof BigDecimal) {
+            return ((BigDecimal) value).toPlainString();
         }
         if (value instanceof Number) {
             return value.toString();
