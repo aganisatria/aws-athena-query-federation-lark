@@ -129,6 +129,20 @@ public final class SearchApiFilterTranslator
                 // ordering support and works for every equality-capable type.
                 List<Object> excludedValues = tryGetExcludedValues(ranges);
                 if (excludedValues != null) {
+                    // CHECKBOX (Boolean has an ordering - false < true - so "!=" reaches this SortedRangeSet
+                    // path too, not just EquatableValueSet) supports only "is", not "isNot" at all (confirmed
+                    // live: `field_checkbox != true` returned zero rows instead of the real 280 false rows -
+                    // see translateEquatableValueSet's blacklist case for the same fix on that code path).
+                    // Negate the excluded boolean and push "is" with the opposite instead.
+                    if (fieldUiType == UITypeEnum.CHECKBOX) {
+                        for (Object excludedValue : excludedValues) {
+                            if (excludedValue instanceof Boolean booleanValue) {
+                                allConditions.add(createCondition(fieldName, "is", !booleanValue));
+                            }
+                        }
+                        continue;
+                    }
+
                     for (Object excludedValue : excludedValues) {
                         Object convertedValue = convertValueForSearchApi(excludedValue, fieldUiType);
                         allConditions.add(createCondition(fieldName, "isNot", convertedValue));
@@ -136,7 +150,7 @@ public final class SearchApiFilterTranslator
                     // Same 3-valued-logic gap as the NOT IN blacklist case (see translateEquatableValueSet):
                     // "col != X" never matches NULL in SQL, but Lark's "isNot" treats an empty field as
                     // trivially not-equal-to-X, so it leaks in unless explicitly excluded.
-                    if (!rangeSet.isNullAllowed() && fieldUiType != UITypeEnum.CHECKBOX) {
+                    if (!rangeSet.isNullAllowed()) {
                         allConditions.add(createCondition(fieldName, "isNotEmpty", null));
                     }
                     continue;

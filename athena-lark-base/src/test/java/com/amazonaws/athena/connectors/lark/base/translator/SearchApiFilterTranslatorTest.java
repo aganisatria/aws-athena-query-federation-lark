@@ -1548,4 +1548,58 @@ public class SearchApiFilterTranslatorTest {
         assertEquals("is", conditions.get(0).get("operator").asText());
         assertEquals("false", conditions.get(0).get("value").get(0).asText());
     }
+
+    @Test
+    public void testToFilterJson_withSortedRangeSet_checkbox_notEqualPattern_negatesToIs() throws Exception {
+        // Boolean has an ordering (false < true) in Presto/Trino, so "field_checkbox != true" reaches
+        // toFilterJson's SortedRangeSet "!=" detection too, not just the EquatableValueSet blacklist path
+        // covered by testToFilterJson_withEquatableValueSet_checkbox_blacklist_negatesToIs. Confirmed live:
+        // without this, it pushed the unsupported "isNot" and returned zero rows instead of the real 280.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Bool());
+
+        Ranges ranges = mock(Ranges.class);
+
+        Range belowTrue = mock(Range.class);
+        Marker belowLow = mock(Marker.class);
+        Marker belowHigh = mock(Marker.class);
+        when(belowLow.isLowerUnbounded()).thenReturn(true);
+        when(belowHigh.isUpperUnbounded()).thenReturn(false);
+        when(belowHigh.getBound()).thenReturn(Marker.Bound.BELOW);
+        when(belowHigh.getValue()).thenReturn(true);
+        when(belowTrue.getLow()).thenReturn(belowLow);
+        when(belowTrue.getHigh()).thenReturn(belowHigh);
+
+        Range aboveTrue = mock(Range.class);
+        Marker aboveLow = mock(Marker.class);
+        Marker aboveHigh = mock(Marker.class);
+        when(aboveLow.isLowerUnbounded()).thenReturn(false);
+        when(aboveLow.getBound()).thenReturn(Marker.Bound.ABOVE);
+        when(aboveLow.getValue()).thenReturn(true);
+        when(aboveHigh.isUpperUnbounded()).thenReturn(true);
+        when(aboveTrue.getLow()).thenReturn(aboveLow);
+        when(aboveTrue.getHigh()).thenReturn(aboveHigh);
+
+        when(ranges.getOrderedRanges()).thenReturn(Arrays.asList(belowTrue, aboveTrue));
+        when(valueSet.getRanges()).thenReturn(ranges);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_checkbox", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_checkbox", "Checkbox Field",
+                new NestedUIType(UITypeEnum.CHECKBOX, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        assertNull(filter.get("children"));
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(1, conditions.size());
+        assertEquals("is", conditions.get(0).get("operator").asText());
+        assertEquals("false", conditions.get(0).get("value").get(0).asText());
+    }
 }
