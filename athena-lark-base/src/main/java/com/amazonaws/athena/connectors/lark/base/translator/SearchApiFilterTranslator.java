@@ -142,6 +142,15 @@ public final class SearchApiFilterTranslator
                     continue;
                 }
 
+                // A genuine range union (e.g. "x < 5 OR x > 100", not a "!=" exclusion) needs isGreater/isLess,
+                // which - same as the single-range case in translateRangeSet - only NUMBER/CURRENCY/PROGRESS/
+                // RATING/DATE_TIME-family fields support in Lark's Search API.
+                if (!isOrderableUiType(fieldUiType)) {
+                    logger.info("Skipping pushdown for column '{}': UI type {} has no ordering operators in "
+                            + "Lark's Search API. Falling back to client-side filtering.", fieldName, fieldUiType);
+                    continue;
+                }
+
                 List<Map<String, Object>> orConditions = buildRangeUnionOrGroup(fieldName, ranges, fieldUiType);
                 if (orConditions != null) {
                     Map<String, Object> orGroup = new HashMap<>();
@@ -322,6 +331,19 @@ public final class SearchApiFilterTranslator
         // Handle a single range (>, <, >=, <=, or BETWEEN via both bounds set). Callers (toFilterJson) route
         // SortedRangeSets with more than one Range to buildRangeUnionOrGroup instead, since multiple ranges
         // are a union (OR) that a flat AND list here would translate incorrectly - see toFilterJson.
+        //
+        // Per Lark's record-filter-guide, isGreater/isGreaterEqual/isLess/isLessEqual are only supported for
+        // NUMBER/CURRENCY/PROGRESS/RATING and the DATE_TIME family - TEXT/BARCODE/PHONE/EMAIL/SINGLE_SELECT
+        // have no ordering operators at all (confirmed live: `field_text > 'M'` and
+        // `field_single_select > 'Option A'` both returned zero rows instead of the real match count).
+        // A genuine range constraint on one of those types can't be pushed down at all; skip it and let
+        // Athena's engine filter client-side instead of sending an operator Lark rejects.
+        if (!isOrderableUiType(fieldUiType)) {
+            logger.info("Skipping pushdown for column '{}': UI type {} has no ordering operators in Lark's "
+                    + "Search API. Falling back to client-side filtering.", fieldName, fieldUiType);
+            return conditions;
+        }
+
         try {
             List<Range> ranges = rangeSet.getRanges().getOrderedRanges();
             if (ranges != null && ranges.size() == 1) {
@@ -333,6 +355,18 @@ public final class SearchApiFilterTranslator
         }
 
         return conditions;
+    }
+
+    /**
+     * Per Lark's record-filter-guide, only these UI types support isGreater/isGreaterEqual/isLess/isLessEqual
+     * (the DATE_TIME family further restricts this to isGreater/isLess only - see addRangeBoundConditions).
+     * Every other pushdown-eligible type (TEXT, BARCODE, PHONE, EMAIL, SINGLE_SELECT) supports only equality,
+     * "contains", and empty-checks - no ordering at all.
+     */
+    private static boolean isOrderableUiType(UITypeEnum uiType)
+    {
+        return uiType == UITypeEnum.NUMBER || uiType == UITypeEnum.CURRENCY || uiType == UITypeEnum.PROGRESS
+                || uiType == UITypeEnum.RATING || isDateTimeUiType(uiType);
     }
 
     /**
@@ -432,6 +466,23 @@ public final class SearchApiFilterTranslator
     {
         List<Map<String, Object>> conditions = new ArrayList<>();
         boolean isWhiteList = valueSet.isWhiteList();
+
+        // Per Lark's record-filter-guide, CHECKBOX supports only the "is" operator - no "isNot" at all
+        // (confirmed live: `field_checkbox != true` returned zero rows instead of the real 280 false rows).
+        // A boolean blacklist excludes exactly one of its two possible values, so negate it and push "is"
+        // with the opposite value instead of the unsupported "isNot".
+        if (fieldUiType == UITypeEnum.CHECKBOX) {
+            int valueCount = valueSet.getValueBlock().getRowCount();
+            for (int i = 0; i < valueCount; i++) {
+                Object value = valueSet.getValue(i);
+                if (value instanceof Boolean booleanValue) {
+                    boolean targetValue = isWhiteList == booleanValue;
+                    conditions.add(createCondition(fieldName, "is", targetValue));
+                }
+            }
+            return conditions;
+        }
+
         String operator = isWhiteList ? "is" : "isNot";
 
         int valueCount = valueSet.getValueBlock().getRowCount();

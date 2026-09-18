@@ -1477,4 +1477,75 @@ public class SearchApiFilterTranslatorTest {
         assertEquals("isGreater", conditions.get(0).get("operator").asText());
         assertEquals("isLess", conditions.get(1).get("operator").asText());
     }
+
+    @Test
+    public void testToFilterJson_withSortedRangeSet_range_nonOrderableType_skipsPushdown() throws Exception {
+        // Per Lark's record-filter-guide, TEXT/BARCODE/PHONE/EMAIL/SINGLE_SELECT have NO ordering operators
+        // at all (only is/isNot/contains/doesNotContain/isEmpty/isNotEmpty) - confirmed live:
+        // `field_text > 'M'` and `field_single_select > 'Option A'` both returned zero rows instead of the
+        // real match counts. A genuine range constraint on one of these types must be skipped entirely
+        // (falling back to client-side filtering), not pushed down as an unsupported isGreater/isLess.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Utf8());
+
+        Ranges ranges = mock(Ranges.class);
+        Range greaterThanM = mock(Range.class);
+        Marker low = mock(Marker.class);
+        Marker high = mock(Marker.class);
+        when(low.isLowerUnbounded()).thenReturn(false);
+        when(low.getBound()).thenReturn(Marker.Bound.ABOVE);
+        when(low.getValue()).thenReturn("M");
+        when(high.isUpperUnbounded()).thenReturn(true);
+        when(greaterThanM.getLow()).thenReturn(low);
+        when(greaterThanM.getHigh()).thenReturn(high);
+
+        when(ranges.getOrderedRanges()).thenReturn(Collections.singletonList(greaterThanM));
+        when(valueSet.getRanges()).thenReturn(ranges);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_text", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_text", "Text Field",
+                new NestedUIType(UITypeEnum.TEXT, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        // No condition pushed for this field at all - not isGreater, not anything.
+        assertEquals("", filterJson);
+    }
+
+    @Test
+    public void testToFilterJson_withEquatableValueSet_checkbox_blacklist_negatesToIs() throws Exception {
+        // Per Lark's record-filter-guide, CHECKBOX supports only "is" - no "isNot" at all (confirmed live:
+        // `field_checkbox != true` returned zero rows instead of the real 280 false rows). A boolean
+        // blacklist must negate the excluded value and push "is" with the opposite instead.
+        EquatableValueSet valueSet = mock(EquatableValueSet.class);
+        when(valueSet.isWhiteList()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Bool());
+
+        Block block = mock(Block.class);
+        when(block.getRowCount()).thenReturn(1);
+        when(valueSet.getValueBlock()).thenReturn(block);
+        when(valueSet.getValue(0)).thenReturn(true);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_checkbox", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_checkbox", "Checkbox Field",
+                new NestedUIType(UITypeEnum.CHECKBOX, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(1, conditions.size());
+        assertEquals("is", conditions.get(0).get("operator").asText());
+        assertEquals("false", conditions.get(0).get("value").get(0).asText());
+    }
 }
