@@ -1403,10 +1403,12 @@ public class SearchApiFilterTranslatorTest {
     }
 
     @Test
-    public void testToFilterJson_withDateTimeValue_convertsToEpochMillis() throws Exception {
-        // DATE_TIME/CREATED_TIME/MODIFIED_TIME markers arrive as java.time.LocalDateTime. Sending
-        // LocalDateTime.toString() ("2025-01-01T00:00") to Lark's Search API instead of epoch milliseconds
-        // made every date range/equality filter silently match zero rows.
+    public void testToFilterJson_withDateTimeValue_convertsToExactDateEpochMillis() throws Exception {
+        // DATE_TIME/CREATED_TIME/MODIFIED_TIME markers arrive as java.time.LocalDateTime. Confirmed directly
+        // against Lark's Search Records API: a bare epoch-millis value ("1735689600000") is rejected
+        // outright ("InvalidFilter ... not support this keyword"), and LocalDateTime.toString()
+        // ("2025-01-01T00:00") fails the same way. Every comparison operator on a date field requires the
+        // two-element value array {"ExactDate", "<epoch millis>"}.
         SortedRangeSet valueSet = mock(SortedRangeSet.class);
         when(valueSet.isSingleValue()).thenReturn(true);
         when(valueSet.getSingleValue()).thenReturn(java.time.LocalDateTime.of(2025, 1, 1, 0, 0, 0));
@@ -1425,6 +1427,9 @@ public class SearchApiFilterTranslatorTest {
         assertNotNull(filterJson);
         JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
         JsonNode conditions = filter.get("conditions");
-        assertEquals("1735689600000", conditions.get(0).get("value").get(0).asText());
+        JsonNode value = conditions.get(0).get("value");
+        assertEquals(2, value.size());
+        assertEquals("ExactDate", value.get(0).asText());
+        assertEquals("1735689600000", value.get(1).asText());
     }
 }

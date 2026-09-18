@@ -460,6 +460,14 @@ public final class SearchApiFilterTranslator
                 // These operators don't need values
                 condition.put("value", Collections.emptyList());
             }
+            else if (value instanceof ExactDateValue exactDateValue) {
+                // Confirmed against Lark's Search Records API directly: every comparison operator on a
+                // DATE_TIME-family field (is/isNot/isGreater/isGreaterEqual/isLess/isLessEqual) requires a
+                // TWO-element value array {"ExactDate", "<epoch millis>"} - a bare epoch-millis value is
+                // rejected outright with "InvalidFilter ... not support this keyword". See
+                // https://open.larksuite.com/document/.../record-filter-guide.
+                condition.put("value", List.of("ExactDate", String.valueOf(exactDateValue.epochMillis())));
+            }
             else {
                 List<Object> valueArray = new ArrayList<>();
                 valueArray.add(convertToString(value));
@@ -471,6 +479,14 @@ public final class SearchApiFilterTranslator
         }
 
         return condition;
+    }
+
+    /**
+     * Marker wrapping a DATE_TIME-family value's epoch milliseconds so {@link #createCondition} can build
+     * Lark's required {@code ["ExactDate", "<epoch millis>"]} two-element value array for it.
+     */
+    private record ExactDateValue(long epochMillis)
+    {
     }
 
     private static Object convertValueForSearchApi(Object value, UITypeEnum fieldUiType)
@@ -485,11 +501,12 @@ public final class SearchApiFilterTranslator
         }
 
         // DATE_TIME/CREATED_TIME/MODIFIED_TIME markers arrive as a java.time.LocalDateTime (the column's
-        // Arrow type is Timestamp(MILLISECOND, "UTC")). Lark's Search API expects epoch milliseconds, not
-        // LocalDateTime's default ISO-8601 toString() (e.g. "2025-01-01T00:00"), which Lark can't parse as
-        // a date - every date range/equality filter on these fields silently matched zero rows without this.
+        // Arrow type is Timestamp(MILLISECOND, "UTC")). Wrap the epoch millis in ExactDateValue so
+        // createCondition can build Lark's required {"ExactDate", "<epoch millis>"} value array - a bare
+        // value (whether LocalDateTime's ISO-8601 toString() or a plain millis number) is rejected outright,
+        // so every date range/equality filter on these fields silently matched zero rows without this.
         if (isDateTimeUiType(fieldUiType) && value instanceof LocalDateTime localDateTime) {
-            return localDateTime.toInstant(ZoneOffset.UTC).toEpochMilli();
+            return new ExactDateValue(localDateTime.toInstant(ZoneOffset.UTC).toEpochMilli());
         }
 
         return value;
