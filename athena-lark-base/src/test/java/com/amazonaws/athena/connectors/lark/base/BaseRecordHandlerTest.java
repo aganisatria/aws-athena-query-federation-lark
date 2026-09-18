@@ -967,6 +967,10 @@ public class BaseRecordHandlerTest {
 
     @Test
     public void testProcessRecordsWithMissingFieldsAndConstraints() throws Exception {
+        // A missing field is always written as null regardless of whether the active constraint on it
+        // allows null - the SDK's own ConstraintProjector correctly evaluates null against the constraint
+        // (see BaseRecordHandler.processRecords), so this must not crash even when the constraint (here,
+        // nullAllowed=false) would reject the row.
         Schema schema = SchemaBuilder.newBuilder()
                 .addStringField("name")
                 .addIntField("age")
@@ -982,7 +986,6 @@ public class BaseRecordHandlerTest {
 
         Map<String, ValueSet> summary = new HashMap<>();
         ValueSet ageValueSet = mock(ValueSet.class);
-        when(ageValueSet.isNullAllowed()).thenReturn(false);
         summary.put("age", ageValueSet);
         when(constraints.getSummary()).thenReturn(summary);
         when(request.getSchema()).thenReturn(schema);
@@ -1025,11 +1028,9 @@ public class BaseRecordHandlerTest {
 
         Map<String, ValueSet> summary = new HashMap<>();
         ValueSet nameValueSet = mock(ValueSet.class);
-        when(nameValueSet.isNullAllowed()).thenReturn(true);
         summary.put("name", nameValueSet);
 
         ValueSet flagValueSet = mock(ValueSet.class);
-        when(flagValueSet.isNullAllowed()).thenReturn(true);
         summary.put("flag", flagValueSet);
 
         when(constraints.getSummary()).thenReturn(summary);
