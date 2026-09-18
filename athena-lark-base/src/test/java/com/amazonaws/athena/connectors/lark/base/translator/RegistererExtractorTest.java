@@ -318,8 +318,8 @@ public class RegistererExtractorTest {
 
         extractor.extract(context, holder);
 
-        assertEquals(0, holder.value);
-        assertEquals(1, holder.isSet);
+        // RATING can be genuinely unset in Lark; a null source value must stay SQL NULL, not become 0.
+        assertEquals(0, holder.isSet);
     }
 
     @Test
@@ -337,8 +337,8 @@ public class RegistererExtractorTest {
 
         extractor.extract(context, holder);
 
-        assertEquals(0, holder.value);
-        assertEquals(1, holder.isSet);
+        // An unparseable string is a conversion failure, not a value - stays SQL NULL rather than a fake 0.
+        assertEquals(0, holder.isSet);
     }
 
     @Test
@@ -394,8 +394,8 @@ public class RegistererExtractorTest {
 
         extractor.extract(context, holder);
 
-        assertEquals(0, holder.value);
-        assertEquals(1, holder.isSet);
+        // CHECKBOX can be genuinely unset in Lark; a null source value must stay SQL NULL, not become false.
+        assertEquals(0, holder.isSet);
     }
 
     @Test
@@ -635,8 +635,8 @@ public class RegistererExtractorTest {
 
         extractor.extract(context, holder);
 
-        assertEquals(BigDecimal.ZERO, holder.value);
-        assertEquals(1, holder.isSet);
+        // An empty string is not a numeric value - stays SQL NULL rather than a fake 0.
+        assertEquals(0, holder.isSet);
     }
 
     @Test
@@ -654,8 +654,9 @@ public class RegistererExtractorTest {
 
         extractor.extract(context, holder);
 
-        assertEquals(BigDecimal.ZERO, holder.value);
-        assertEquals(1, holder.isSet);
+        // NUMBER/CURRENCY/PROGRESS can be genuinely unset in Lark; a null source value must stay SQL NULL,
+        // not become a fake 0 - see the Bitable API confirmation in registerDecimalExtractor's javadoc.
+        assertEquals(0, holder.isSet);
     }
 
     @Test
@@ -673,8 +674,8 @@ public class RegistererExtractorTest {
 
         extractor.extract(context, holder);
 
-        assertEquals(BigDecimal.ZERO, holder.value);
-        assertEquals(1, holder.isSet);
+        // An unparseable string is a conversion failure, not a value - stays SQL NULL rather than a fake 0.
+        assertEquals(0, holder.isSet);
     }
 
     @Test
@@ -865,9 +866,8 @@ public class RegistererExtractorTest {
 
         extractor.extract(nonMapContext, holder);
 
-        // Should default to 0 and isSet=1 (as if value was null)
-        assertEquals(0, holder.value);
-        assertEquals(1, holder.isSet);
+        // Should stay SQL NULL (as if value was null)
+        assertEquals(0, holder.isSet);
     }
 
     // Tests for VarChar extractor edge cases

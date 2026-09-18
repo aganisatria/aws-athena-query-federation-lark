@@ -192,7 +192,9 @@ public class RegistererExtractor
     /**
      * Registers an extractor for Arrow TinyInt type.
      * Handles conversion from Boolean, Number, or String ("true"/"false"/numeric) to byte (0 or 1).
-     * Sets value to 0 and isSet to 1 if input is null or conversion fails.
+     * Leaves the value as SQL NULL (isSet=0) if input is null or conversion fails - RATING fields can be
+     * genuinely unset in Lark, and defaulting that to 0 made it indistinguishable from an explicit zero
+     * rating and made "IS NULL" pushdown/queries always return zero rows.
      *
      * @param rowWriterBuilder The builder for the GeneratedRowWriter.
      * @param field The Arrow field definition (TinyInt).
@@ -200,8 +202,7 @@ public class RegistererExtractor
     private void registerTinyIntExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field)
     {
         rowWriterBuilder.withExtractor(field.getName(), (TinyIntExtractor) (Object context, NullableTinyIntHolder dst) -> {
-            dst.value = 0;
-            dst.isSet = 1;
+            dst.isSet = 0;
             String fieldName = field.getName();
             Map<String, Object> item = getContextMap(context);
             Object value = item.get(fieldName);
@@ -213,25 +214,29 @@ public class RegistererExtractor
             try {
                 if (value instanceof Boolean) {
                     dst.value = (byte) (((Boolean) value) ? 1 : 0);
+                    dst.isSet = 1;
                 }
                 else if (value instanceof Number) {
                     dst.value = ((Number) value).byteValue();
+                    dst.isSet = 1;
                 }
                 else if (value instanceof String strValue) {
                     if ("true".equalsIgnoreCase(strValue)) {
                         dst.value = (byte) 1;
+                        dst.isSet = 1;
                     }
                     else if ("false".equalsIgnoreCase(strValue)) {
                         dst.value = (byte) 0;
+                        dst.isSet = 1;
                     }
-                    else {
+                    else if (!strValue.isEmpty()) {
                         dst.value = Byte.parseByte(strValue);
+                        dst.isSet = 1;
                     }
                 }
             }
             catch (Exception e) {
-                dst.value = 0;
-                dst.isSet = 1;
+                dst.isSet = 0;
             }
         });
     }
@@ -239,7 +244,9 @@ public class RegistererExtractor
     /**
      * Registers an extractor for Arrow Bit type (boolean).
      * Handles conversion from Boolean, Number (non-zero is true), or String ("true").
-     * Sets value to 0 (false) and isSet to 1 if input is null or conversion fails.
+     * Leaves the value as SQL NULL (isSet=0) if input is null - CHECKBOX fields can be genuinely unset in
+     * Lark, and defaulting that to false made it indistinguishable from an explicit unchecked box and made
+     * "IS NULL" pushdown/queries always return zero rows.
      *
      * @param rowWriterBuilder The builder for the GeneratedRowWriter.
      * @param field The Arrow field definition (Bit).
@@ -250,14 +257,13 @@ public class RegistererExtractor
             Map<String, Object> item = getContextMap(context);
             Object value = item.get(field.getName());
 
-            dst.isSet = 1;
+            if (value == null) {
+                dst.isSet = 0;
+                return;
+            }
 
-            if (value instanceof Boolean && ((Boolean) value)) {
-                dst.value = 1;
-            }
-            else {
-                dst.value = 0;
-            }
+            dst.isSet = 1;
+            dst.value = (value instanceof Boolean && ((Boolean) value)) ? 1 : 0;
         });
     }
 
@@ -338,7 +344,10 @@ public class RegistererExtractor
     /**
      * Registers an extractor for Arrow Decimal type.
      * Handles conversion from BigDecimal, Number, or String.
-     * Sets value to 0 and isSet to 1 if input is null or conversion fails.
+     * Leaves the value as SQL NULL (isSet=0) if input is null or conversion fails - NUMBER/CURRENCY/PROGRESS
+     * fields can be genuinely unset in Lark, and defaulting that to 0 made it indistinguishable from an
+     * explicit zero and made "IS NULL" pushdown/queries always return zero rows even when Lark's own data
+     * has the field set to null (confirmed via a direct Bitable API read of a Lark Base test record).
      * Note: Precision/scale from the Field definition are used by the writer, not explicitly checked here.
      *
      * @param rowWriterBuilder The builder for the GeneratedRowWriter.
@@ -347,8 +356,7 @@ public class RegistererExtractor
     private void registerDecimalExtractor(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field)
     {
         rowWriterBuilder.withExtractor(field.getName(), (DecimalExtractor) (Object context, NullableDecimalHolder dst) -> {
-            dst.value = BigDecimal.ZERO;
-            dst.isSet = 1;
+            dst.isSet = 0;
             String fieldName = field.getName();
             Map<String, Object> item = getContextMap(context);
             Object rawValue = item.get(fieldName);
@@ -364,19 +372,21 @@ public class RegistererExtractor
 
                 if (value instanceof BigDecimal) {
                     dst.value = (BigDecimal) value;
+                    dst.isSet = 1;
                 }
                 else if (value instanceof Number) {
                     dst.value = new BigDecimal(value.toString());
+                    dst.isSet = 1;
                 }
                 else if (value instanceof String strValue) {
                     if (!strValue.isEmpty()) {
                         dst.value = new BigDecimal(strValue);
+                        dst.isSet = 1;
                     }
                 }
             }
             catch (Exception e) {
-                dst.value = BigDecimal.ZERO;
-                dst.isSet = 1;
+                dst.isSet = 0;
             }
         });
     }
