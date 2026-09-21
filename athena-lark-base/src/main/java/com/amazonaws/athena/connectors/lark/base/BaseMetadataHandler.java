@@ -630,9 +630,9 @@ public class BaseMetadataHandler
     }
 
     private String translateSortExpression(GetTableLayoutRequest request, List<AthenaFieldLarkBaseMapping> fieldNameMappings,
-                                           boolean useParallelSplits, boolean hasOrderBy, TableName tableName)
+                                           boolean willUseParallelSplits, boolean hasOrderBy, TableName tableName)
     {
-        if (fieldNameMappings == null || useParallelSplits || !hasOrderBy || fieldNameMappings.isEmpty()) {
+        if (fieldNameMappings == null || willUseParallelSplits || !hasOrderBy || fieldNameMappings.isEmpty()) {
             return "";
         }
 
@@ -701,10 +701,10 @@ public class BaseMetadataHandler
 
     private void writeSinglePartition(BlockWriter blockWriter, String baseId, String tableId,
                                       String filterExpression, String sortExpression, String fieldTypeMappingJson,
-                                      String fieldNameMappingJson, long queryLimit, boolean useParallelSplits, boolean hasOrderBy)
+                                      String fieldNameMappingJson, long queryLimit, boolean hasOrderBy)
     {
         int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression);
-        long effectiveRowCount = calculateEffectiveRowCount(totalRowCount, queryLimit, useParallelSplits && hasOrderBy);
+        long effectiveRowCount = calculateEffectiveRowCount(totalRowCount, queryLimit, hasOrderBy);
 
         if (effectiveRowCount == 0 && totalRowCount > 0) {
             logger.info("getPartitions: Effective row count is 0 due to LIMIT, writing no partitions.");
@@ -796,11 +796,14 @@ public class BaseMetadataHandler
         String fieldNameMappingJson = buildFieldNameMappingJson(fieldNameMappings, tableName);
         String filterExpression = translateFilterExpression(request, fieldNameMappings, tableName);
 
-        boolean useParallelSplits = hasParallelSplitKey(fieldNameMappings);
+        boolean tableHasParallelSplitKey = hasParallelSplitKey(fieldNameMappings);
         boolean hasOrderBy = hasOrderByClause(request);
-        String sortExpression = translateSortExpression(request, fieldNameMappings, useParallelSplits, hasOrderBy, tableName);
+        boolean shouldUseParallelSplits = shouldUseParallelSplits(tableHasParallelSplitKey, baseId, tableId, filterExpression, hasOrderBy, tableName);
 
-        boolean shouldUseParallelSplits = shouldUseParallelSplits(useParallelSplits, baseId, tableId, filterExpression, tableName);
+        // Must be built from the actual parallel-split decision, not just the table's raw capability: only
+        // writeSinglePartition ever pushes a sort expression to Lark, so building one for a query that ends
+        // up in writeParallelPartitions would be silently discarded and misleadingly logged as applied.
+        String sortExpression = translateSortExpression(request, fieldNameMappings, shouldUseParallelSplits, hasOrderBy, tableName);
 
         if (shouldUseParallelSplits) {
             writeParallelPartitions(blockWriter, baseId, tableId, filterExpression, fieldTypeMappingJson,
@@ -808,7 +811,7 @@ public class BaseMetadataHandler
         }
         else {
             writeSinglePartition(blockWriter, baseId, tableId, filterExpression, sortExpression,
-                    fieldTypeMappingJson, fieldNameMappingJson, queryLimit, useParallelSplits, hasOrderBy);
+                    fieldTypeMappingJson, fieldNameMappingJson, queryLimit, hasOrderBy);
         }
     }
 
@@ -826,18 +829,28 @@ public class BaseMetadataHandler
      * the single-partition path, which applies the filter correctly across the whole table via normal
      * pagination without needing any positional range math.
      *
+     * Also disabled whenever the query has an ORDER BY: {@code writeParallelPartitions} splits by positional
+     * index and pushes no sort expression to Lark at all (each split's rows come back in arbitrary order),
+     * while this connector advertises {@code SUPPORTS_TOP_N_PUSHDOWN} unconditionally - Athena's engine
+     * trusts that claim and skips its own re-sort, so a parallel-split ORDER BY silently returns rows in the
+     * wrong order (confirmed live: {@code ORDER BY field_currency ASC LIMIT 3} returned the 4th-smallest
+     * value first and dropped the true minimum entirely). The single-partition path
+     * ({@code writeSinglePartition}) is the only one that actually pushes a sort expression to Lark, so
+     * ORDER BY queries must always take it.
+     *
      * @param tableHasParallelSplitKey whether the table's schema has a {@code $reserved_split_key} column
      * @param baseId the Lark Base ID
      * @param tableId the Lark table ID
      * @param filterExpression the translated filter for this query, or an empty string if there is none
+     * @param hasOrderBy whether the query has an ORDER BY clause
      * @param tableName used for logging only
      * @return true if parallel splitting should be used for this query
      */
     @VisibleForTesting
     protected boolean shouldUseParallelSplits(boolean tableHasParallelSplitKey, String baseId, String tableId,
-                                              String filterExpression, TableName tableName)
+                                              String filterExpression, boolean hasOrderBy, TableName tableName)
     {
-        if (!tableHasParallelSplitKey || !envVarService.isActivateParallelSplit()) {
+        if (!tableHasParallelSplitKey || !envVarService.isActivateParallelSplit() || hasOrderBy) {
             return false;
         }
 

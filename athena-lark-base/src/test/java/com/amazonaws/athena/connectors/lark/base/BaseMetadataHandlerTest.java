@@ -238,7 +238,7 @@ public class BaseMetadataHandlerTest {
             new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
 
         // Absence of the split key must short-circuit before even checking the activation flag.
-        boolean result = handler.shouldUseParallelSplits(false, "base1", "tbl1", "", tableName);
+        boolean result = handler.shouldUseParallelSplits(false, "base1", "tbl1", "", false, tableName);
 
         assertFalse(result);
     }
@@ -249,7 +249,7 @@ public class BaseMetadataHandlerTest {
             new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
         when(mockEnvVarService.isActivateParallelSplit()).thenReturn(false);
 
-        boolean result = handler.shouldUseParallelSplits(true, "base1", "tbl1", "", tableName);
+        boolean result = handler.shouldUseParallelSplits(true, "base1", "tbl1", "", false, tableName);
 
         assertFalse(result);
     }
@@ -260,7 +260,7 @@ public class BaseMetadataHandlerTest {
             new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
         when(mockEnvVarService.isActivateParallelSplit()).thenReturn(true);
 
-        boolean result = handler.shouldUseParallelSplits(true, "base1", "tbl1", "", tableName);
+        boolean result = handler.shouldUseParallelSplits(true, "base1", "tbl1", "", false, tableName);
 
         assertTrue(result);
         // No filter means no selectivity check is needed, so the row-count lookup must never fire.
@@ -284,7 +284,7 @@ public class BaseMetadataHandlerTest {
                 .build();
         when(mockInvoker.invoke(any())).thenReturn(response);
 
-        boolean result = handler.shouldUseParallelSplits(true, "base1", "tbl1", "{\"conditions\":[]}", tableName);
+        boolean result = handler.shouldUseParallelSplits(true, "base1", "tbl1", "{\"conditions\":[]}", false, tableName);
 
         assertFalse(result);
     }
@@ -304,8 +304,27 @@ public class BaseMetadataHandlerTest {
                 .build();
         when(mockInvoker.invoke(any())).thenReturn(response);
 
-        boolean result = handler.shouldUseParallelSplits(true, "base1", "tbl1", "{\"conditions\":[]}", tableName);
+        boolean result = handler.shouldUseParallelSplits(true, "base1", "tbl1", "{\"conditions\":[]}", false, tableName);
 
         assertTrue(result);
+    }
+
+    @Test
+    public void testShouldUseParallelSplits_falseWhenHasOrderBy() throws Exception {
+        // writeParallelPartitions splits by positional index and pushes no sort expression to Lark at all -
+        // each split's rows come back in arbitrary order. This connector advertises SUPPORTS_TOP_N_PUSHDOWN
+        // unconditionally, so Athena's engine trusts that claim and skips its own re-sort; a parallel-split
+        // ORDER BY would silently return rows in the wrong order (confirmed live: `ORDER BY field_currency
+        // ASC LIMIT 3` returned the 4th-smallest value first and dropped the true minimum entirely). Only
+        // writeSinglePartition ever pushes a real sort expression, so ORDER BY must force that path even
+        // when the table supports parallel splits and there's no filter (which would otherwise return true).
+        com.amazonaws.athena.connector.lambda.domain.TableName tableName =
+            new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
+        when(mockEnvVarService.isActivateParallelSplit()).thenReturn(true);
+
+        boolean result = handler.shouldUseParallelSplits(true, "base1", "tbl1", "", true, tableName);
+
+        assertFalse(result);
+        verify(mockInvoker, never()).invoke(any());
     }
 }
