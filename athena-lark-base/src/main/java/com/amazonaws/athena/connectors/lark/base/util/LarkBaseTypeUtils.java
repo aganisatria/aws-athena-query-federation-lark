@@ -163,9 +163,40 @@ public final class LarkBaseTypeUtils
             // Glue: array<{target field's type}> -> Arrow Child: derived from the resolved LOOKUP target type
             // (nestedUIType().childType(), already resolved to a terminal, non-LOOKUP type by
             // LarkBaseService.getLookupType, which follows chained LOOKUPs to their final target).
-            case LOOKUP -> Field.nullable("item", scalarArrowTypeForLookupTarget(larkField.nestedUIType().childType()));
+            case LOOKUP -> lookupListItemField(larkField.nestedUIType().childType());
 
             default -> Field.nullable("item", ArrowType.Utf8.INSTANCE);
+        };
+    }
+
+    /**
+     * Builds the "item" Field for a LOOKUP list's child element from its resolved target type. The
+     * target is already guaranteed terminal (not LOOKUP/FORMULA - LarkBaseService.getLookupType follows
+     * chained LOOKUPs/FORMULAs to their final target before this ever runs), but it can still be
+     * LIST-shaped (MULTI_SELECT, USER, ...) or STRUCT-shaped (URL, LOCATION, ...) itself, not just a
+     * scalar. Matches the crawler's nesting for the same case: a LOOKUP aggregates one target-shaped
+     * value per linked record, so a LIST-shaped target doubly-nests ("array&lt;array&lt;...&gt;&gt;" -
+     * crawler's UITypeEnum.LOOKUP wraps the target's own "array&lt;...&gt;" Glue type in another array),
+     * while a STRUCT-shaped target nests once ("array&lt;struct&lt;...&gt;&gt;"). Before this, only the
+     * scalar case was handled - a Lookup&lt;User&gt; got a flat List&lt;Utf8&gt; instead of
+     * List&lt;List&lt;Struct&lt;...&gt;&gt;&gt;, silently discarding the target's real shape entirely.
+     */
+    private static Field lookupListItemField(UITypeEnum targetUiType)
+    {
+        if (targetUiType == null) {
+            return Field.nullable("item", ArrowType.Utf8.INSTANCE);
+        }
+
+        AthenaFieldLarkBaseMapping targetField = new AthenaFieldLarkBaseMapping(
+                "item", "item", new NestedUIType(targetUiType, UITypeEnum.UNKNOWN));
+        Types.MinorType targetMinorType = larkFieldToArrowMinorType(targetField);
+
+        return switch (targetMinorType) {
+            case LIST -> new Field("item", FieldType.nullable(ArrowType.List.INSTANCE),
+                    Collections.singletonList(getLarkListChildField(targetField)));
+            case STRUCT -> new Field("item", FieldType.nullable(ArrowType.Struct.INSTANCE),
+                    getLarkStructChildFields(targetField));
+            default -> Field.nullable("item", scalarArrowTypeForLookupTarget(targetUiType));
         };
     }
 

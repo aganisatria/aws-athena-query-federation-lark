@@ -439,6 +439,44 @@ class LarkBaseTypeUtilsTest {
         assertThat(result.getType()).isEqualTo(ArrowType.Utf8.INSTANCE);
     }
 
+    // A LOOKUP whose target is itself LIST-shaped (USER, ATTACHMENT, MULTI_SELECT, ...) must doubly-nest
+    // - matches the crawler's Glue type for the same field: UITypeEnum.LOOKUP wraps the target's own
+    // "array<...>" Glue type in another array ("array<array<struct<...>>>" for Lookup<User>), since a
+    // LOOKUP aggregates one target-shaped value per linked record and the target itself is already a
+    // list. Before this fix, only scalar LOOKUP targets were handled - a Lookup<User> silently collapsed
+    // to a flat List<Utf8> instead of List<List<Struct<...>>>, discarding the target's real shape.
+    @Test
+    void testGetLarkListChildField_LookupWithUserTarget_doublyNestsListOfUserStruct() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.USER));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getName()).isEqualTo("item");
+        assertThat(result.getType()).isEqualTo(ArrowType.List.INSTANCE);
+        assertThat(result.getChildren()).hasSize(1);
+        Field innerListChild = result.getChildren().get(0);
+        assertThat(innerListChild.getType()).isEqualTo(ArrowType.Struct.INSTANCE);
+        assertThat(innerListChild.getChildren()).extracting(Field::getName)
+                .containsExactly("avatar_url", "email", "en_name", "id", "name");
+    }
+
+    // A LOOKUP whose target is STRUCT-shaped (URL, LOCATION, ...) nests once - matches the crawler's
+    // "array<struct<...>>" Glue type for the same field, since URL/LOCATION aren't list-shaped
+    // themselves the way USER/ATTACHMENT are.
+    @Test
+    void testGetLarkListChildField_LookupWithUrlTarget_nestsStructOnce() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.URL));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getName()).isEqualTo("item");
+        assertThat(result.getType()).isEqualTo(ArrowType.Struct.INSTANCE);
+        assertThat(result.getChildren()).extracting(Field::getName)
+                .containsExactly("link", "text", "type");
+    }
+
     // getLarkListChildField/getLarkStructChildFields must unwrap FORMULA the same way
     // larkFieldToArrowMinorType already does - matches the crawler path, which builds a FORMULA's Glue
     // type by calling the *target* UI type's own getGlueCatalogType (e.g. Formula<User> gets the same
