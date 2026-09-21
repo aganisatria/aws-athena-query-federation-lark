@@ -308,4 +308,82 @@ public class BaseMetadataHandlerTest {
 
         assertTrue(result);
     }
+
+    // ========== Tests for tryResolveFromCrawledSchemaMetadata (skip wasted Lark source/experimental
+    // resolution attempts for a table the crawler already populated - see resolvePartitionInfo) ==========
+
+    @Test
+    public void testTryResolveFromCrawledSchemaMetadata_metadataPresent_returnsResultWithoutIdLookup() throws Exception {
+        com.amazonaws.athena.connector.lambda.domain.TableName tableName =
+            new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
+        GetTableLayoutRequest request = mock(GetTableLayoutRequest.class);
+
+        Map<String, String> schemaMetadata = new HashMap<>();
+        schemaMetadata.put("larkBaseId", "base123");
+        schemaMetadata.put("larkTableId", "tbl456");
+        org.apache.arrow.vector.types.pojo.Schema schema = new org.apache.arrow.vector.types.pojo.Schema(
+            Collections.emptyList(), schemaMetadata);
+        when(request.getSchema()).thenReturn(schema);
+
+        List<com.amazonaws.athena.connectors.lark.base.model.AthenaFieldLarkBaseMapping> mappings =
+            Collections.singletonList(new com.amazonaws.athena.connectors.lark.base.model.AthenaFieldLarkBaseMapping(
+                "field_a", "Field A", new com.amazonaws.athena.connectors.lark.base.model.NestedUIType(
+                    com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum.TEXT, null)));
+        when(mockGlueCatalogService.getFieldNameMappings("test_schema", "test_table")).thenReturn(mappings);
+
+        java.util.Optional<com.amazonaws.athena.connectors.lark.base.model.PartitionInfoResult> result =
+            handler.tryResolveFromCrawledSchemaMetadata(tableName, request);
+
+        assertTrue(result.isPresent());
+        assertEquals("base123", result.get().baseId());
+        assertEquals("tbl456", result.get().tableId());
+        assertEquals(mappings, result.get().fieldNameMappings());
+        // The whole point: the IDs came from the schema itself, never from a fresh Glue ID lookup.
+        verify(mockGlueCatalogService, never()).getLarkBaseAndTableIdFromTable(any(), any());
+    }
+
+    @Test
+    public void testTryResolveFromCrawledSchemaMetadata_nullSchema_returnsEmpty() {
+        com.amazonaws.athena.connector.lambda.domain.TableName tableName =
+            new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
+        GetTableLayoutRequest request = mock(GetTableLayoutRequest.class);
+        when(request.getSchema()).thenReturn(null);
+
+        assertFalse(handler.tryResolveFromCrawledSchemaMetadata(tableName, request).isPresent());
+    }
+
+    @Test
+    public void testTryResolveFromCrawledSchemaMetadata_missingIds_returnsEmpty() {
+        // A table resolved through the "direct"/Lark-source path (not crawler-populated) has no
+        // larkBaseId/larkTableId on its schema - this must fall through to the normal provider chain,
+        // not silently produce a bogus empty-string ID pair.
+        com.amazonaws.athena.connector.lambda.domain.TableName tableName =
+            new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
+        GetTableLayoutRequest request = mock(GetTableLayoutRequest.class);
+        org.apache.arrow.vector.types.pojo.Schema schema = new org.apache.arrow.vector.types.pojo.Schema(
+            Collections.emptyList(), Collections.emptyMap());
+        when(request.getSchema()).thenReturn(schema);
+
+        assertFalse(handler.tryResolveFromCrawledSchemaMetadata(tableName, request).isPresent());
+    }
+
+    @Test
+    public void testTryResolveFromCrawledSchemaMetadata_glueFieldMappingLookupFails_returnsEmpty() throws Exception {
+        com.amazonaws.athena.connector.lambda.domain.TableName tableName =
+            new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
+        GetTableLayoutRequest request = mock(GetTableLayoutRequest.class);
+
+        Map<String, String> schemaMetadata = new HashMap<>();
+        schemaMetadata.put("larkBaseId", "base123");
+        schemaMetadata.put("larkTableId", "tbl456");
+        org.apache.arrow.vector.types.pojo.Schema schema = new org.apache.arrow.vector.types.pojo.Schema(
+            Collections.emptyList(), schemaMetadata);
+        when(request.getSchema()).thenReturn(schema);
+        when(mockGlueCatalogService.getFieldNameMappings("test_schema", "test_table"))
+            .thenThrow(new RuntimeException("Glue unavailable"));
+
+        // Falls back to the normal provider chain rather than throwing - a transient Glue error here
+        // shouldn't take down the whole request when the existing chain might still succeed.
+        assertFalse(handler.tryResolveFromCrawledSchemaMetadata(tableName, request).isPresent());
+    }
 }
