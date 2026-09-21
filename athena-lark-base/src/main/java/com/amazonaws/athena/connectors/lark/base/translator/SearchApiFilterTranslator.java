@@ -280,6 +280,50 @@ public final class SearchApiFilterTranslator
         }
     }
 
+    /**
+     * Adds an "isEmpty"/"isNotEmpty" condition on {@code larkFieldName} to an existing (possibly blank)
+     * top-level AND filter, ANDing it with whatever conditions/OR-groups are already there. Used to split
+     * a single ORDER BY ... NULLS FIRST fetch into two Lark requests - one for the null rows, one for the
+     * Lark-sorted non-null rows - since Lark's own sort has no null-positioning control (see
+     * {@code BaseMetadataHandler#findNullsFirstOriginalFieldName} and its use in {@code doGetSplits}).
+     */
+    @SuppressWarnings("unchecked")
+    public static String addEmptinessCondition(String filterJson, String larkFieldName, boolean wantEmpty)
+    {
+        Map<String, Object> filter;
+        if (filterJson == null || filterJson.isEmpty()) {
+            filter = new HashMap<>();
+            filter.put("conjunction", "and");
+            filter.put("conditions", new ArrayList<Map<String, Object>>());
+        }
+        else {
+            try {
+                filter = OBJECT_MAPPER.readValue(filterJson, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() { });
+                filter.putIfAbsent("conjunction", "and");
+                filter.putIfAbsent("conditions", new ArrayList<Map<String, Object>>());
+            }
+            catch (Exception e) {
+                logger.warn("Failed to parse existing filter JSON while adding {} condition for '{}': {}. "
+                        + "Discarding the existing filter.", wantEmpty ? "isEmpty" : "isNotEmpty", larkFieldName, e.getMessage(), e);
+                filter = new HashMap<>();
+                filter.put("conjunction", "and");
+                filter.put("conditions", new ArrayList<Map<String, Object>>());
+            }
+        }
+
+        List<Map<String, Object>> conditions = (List<Map<String, Object>>) filter.get("conditions");
+        conditions.add(createCondition(larkFieldName, wantEmpty ? "isEmpty" : "isNotEmpty", null));
+
+        try {
+            return OBJECT_MAPPER.writeValueAsString(filter);
+        }
+        catch (Exception e) {
+            logger.error("Failed to serialize filter with {} condition to JSON: {}",
+                    wantEmpty ? "isEmpty" : "isNotEmpty", e.getMessage(), e);
+            return filterJson != null ? filterJson : "";
+        }
+    }
+
     private static List<Map<String, Object>> translateValueSetToConditions(String fieldName, ValueSet valueSet, UITypeEnum fieldUiType)
     {
         List<Map<String, Object>> conditions = new ArrayList<>();

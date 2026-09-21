@@ -1602,4 +1602,74 @@ public class SearchApiFilterTranslatorTest {
         assertEquals("is", conditions.get(0).get("operator").asText());
         assertEquals("false", conditions.get(0).get("value").get(0).asText());
     }
+
+    // ========== Tests for addEmptinessCondition (ORDER BY ... NULLS FIRST two-phase fetch) ==========
+
+    @Test
+    public void testAddEmptinessCondition_blankFilter_createsNewAndFilterWithIsEmpty() throws Exception {
+        String result = SearchApiFilterTranslator.addEmptinessCondition("", "Currency Field", true);
+
+        JsonNode filter = OBJECT_MAPPER.readTree(result);
+        assertEquals("and", filter.get("conjunction").asText());
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(1, conditions.size());
+        assertEquals("Currency Field", conditions.get(0).get("field_name").asText());
+        assertEquals("isEmpty", conditions.get(0).get("operator").asText());
+    }
+
+    @Test
+    public void testAddEmptinessCondition_nullFilter_createsNewAndFilter() throws Exception {
+        String result = SearchApiFilterTranslator.addEmptinessCondition(null, "Currency Field", false);
+
+        JsonNode filter = OBJECT_MAPPER.readTree(result);
+        assertEquals("isNotEmpty", filter.get("conditions").get(0).get("operator").asText());
+    }
+
+    @Test
+    public void testAddEmptinessCondition_wantEmptyFalse_usesIsNotEmptyOperator() throws Exception {
+        String result = SearchApiFilterTranslator.addEmptinessCondition("", "Currency Field", false);
+
+        JsonNode filter = OBJECT_MAPPER.readTree(result);
+        assertEquals("isNotEmpty", filter.get("conditions").get(0).get("operator").asText());
+    }
+
+    @Test
+    public void testAddEmptinessCondition_existingFilter_preservesConditionsAndAppendsNewOne() throws Exception {
+        // The nulls-first two-phase fetch must AND its isEmpty/isNotEmpty condition onto whatever WHERE
+        // clause was already pushed down (e.g. "field_status is 'active'"), not replace it.
+        String existingFilter = "{\"conjunction\":\"and\",\"conditions\":"
+                + "[{\"field_name\":\"Status\",\"operator\":\"is\",\"value\":[\"active\"]}]}";
+
+        String result = SearchApiFilterTranslator.addEmptinessCondition(existingFilter, "Currency Field", true);
+
+        JsonNode filter = OBJECT_MAPPER.readTree(result);
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(2, conditions.size());
+        assertEquals("Status", conditions.get(0).get("field_name").asText());
+        assertEquals("Currency Field", conditions.get(1).get("field_name").asText());
+        assertEquals("isEmpty", conditions.get(1).get("operator").asText());
+    }
+
+    @Test
+    public void testAddEmptinessCondition_existingFilterWithOrGroups_preservesChildren() throws Exception {
+        String existingFilter = "{\"conjunction\":\"and\",\"conditions\":[],"
+                + "\"children\":[{\"conjunction\":\"or\",\"conditions\":"
+                + "[{\"field_name\":\"Category\",\"operator\":\"is\",\"value\":[\"a\"]}]}]}";
+
+        String result = SearchApiFilterTranslator.addEmptinessCondition(existingFilter, "Currency Field", false);
+
+        JsonNode filter = OBJECT_MAPPER.readTree(result);
+        assertEquals(1, filter.get("conditions").size());
+        assertEquals(1, filter.get("children").size());
+        assertEquals("Category", filter.get("children").get(0).get("conditions").get(0).get("field_name").asText());
+    }
+
+    @Test
+    public void testAddEmptinessCondition_malformedExistingFilter_discardsItAndStillAddsCondition() throws Exception {
+        String result = SearchApiFilterTranslator.addEmptinessCondition("{not valid json", "Currency Field", true);
+
+        JsonNode filter = OBJECT_MAPPER.readTree(result);
+        assertEquals(1, filter.get("conditions").size());
+        assertEquals("Currency Field", filter.get("conditions").get(0).get("field_name").asText());
+    }
 }

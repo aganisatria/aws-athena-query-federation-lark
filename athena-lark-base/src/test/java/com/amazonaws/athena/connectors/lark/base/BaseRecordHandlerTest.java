@@ -1394,6 +1394,163 @@ public class BaseRecordHandlerTest {
         verify(spiller, atLeastOnce()).writeRows(any());
     }
 
+    // ========== Tests for NullsFirstIterator (ORDER BY ... NULLS FIRST two-phase fetch) ==========
+
+    @Test
+    public void testNullsFirstIterator_emitsNullsBeforeNonNulls() {
+        Map<String, Object> nullRow = Map.of("id", "null1");
+        Map<String, Object> nonNullRow = Map.of("id", "nonnull1");
+
+        BaseRecordHandler.NullsFirstIterator iterator = new BaseRecordHandler.NullsFirstIterator(
+                List.of(nullRow).iterator(), List.of(nonNullRow).iterator(), 0);
+
+        assertTrue(iterator.hasNext());
+        assertEquals(nullRow, iterator.next());
+        assertTrue(iterator.hasNext());
+        assertEquals(nonNullRow, iterator.next());
+        assertFalse(iterator.hasNext());
+    }
+
+    @Test
+    public void testNullsFirstIterator_enforcesCombinedCapAcrossBothPhases() {
+        // Each inner iterator carries its own copy of expectedRowCountForSplit (see getIterator), so
+        // without its own counter this wrapper would let both phases emit up to the full cap each -
+        // overshooting by up to 2x. The wrapper's own `emitted` count is what must actually bound the
+        // total.
+        List<Map<String, Object>> nullRows = List.of(Map.of("id", "n1"), Map.of("id", "n2"));
+        List<Map<String, Object>> nonNullRows = List.of(Map.of("id", "v1"), Map.of("id", "v2"));
+
+        BaseRecordHandler.NullsFirstIterator iterator = new BaseRecordHandler.NullsFirstIterator(
+                nullRows.iterator(), nonNullRows.iterator(), 3);
+
+        List<Object> emitted = new ArrayList<>();
+        while (iterator.hasNext()) {
+            emitted.add(iterator.next().get("id"));
+        }
+
+        assertEquals(List.of("n1", "n2", "v1"), emitted);
+    }
+
+    @Test
+    public void testNullsFirstIterator_nullsAloneReachCap_neverConsultsNonNullIterator() {
+        List<Map<String, Object>> nullRows = List.of(Map.of("id", "n1"), Map.of("id", "n2"), Map.of("id", "n3"));
+        @SuppressWarnings("unchecked")
+        Iterator<Map<String, Object>> nonNulls = mock(Iterator.class);
+
+        BaseRecordHandler.NullsFirstIterator iterator = new BaseRecordHandler.NullsFirstIterator(
+                nullRows.iterator(), nonNulls, 2);
+
+        assertEquals("n1", iterator.next().get("id"));
+        assertEquals("n2", iterator.next().get("id"));
+        assertFalse(iterator.hasNext());
+        verifyNoInteractions(nonNulls);
+    }
+
+    @Test
+    public void testNullsFirstIterator_zeroExpectedRowCount_meansUnbounded() {
+        // expectedRowCountForSplit <= 0 means "no cap" everywhere else in this class (see getIterator's
+        // own hasNext()), so NullsFirstIterator must honor the same convention rather than treating 0 as
+        // "emit nothing".
+        List<Map<String, Object>> nullRows = List.of(Map.of("id", "n1"));
+        List<Map<String, Object>> nonNullRows = List.of(Map.of("id", "v1"), Map.of("id", "v2"));
+
+        BaseRecordHandler.NullsFirstIterator iterator = new BaseRecordHandler.NullsFirstIterator(
+                nullRows.iterator(), nonNullRows.iterator(), 0);
+
+        List<Object> emitted = new ArrayList<>();
+        while (iterator.hasNext()) {
+            emitted.add(iterator.next().get("id"));
+        }
+        assertEquals(List.of("n1", "v1", "v2"), emitted);
+    }
+
+    @Test
+    public void testNullsFirstIterator_nextThrowsWhenExhausted() {
+        BaseRecordHandler.NullsFirstIterator iterator = new BaseRecordHandler.NullsFirstIterator(
+                Collections.emptyIterator(), Collections.emptyIterator(), 0);
+
+        assertThrows(NoSuchElementException.class, iterator::next);
+    }
+
+    @Test
+    public void testReadWithConstraint_nullsFirstField_runsTwoPhaseFetchAndMergesResults() throws Exception {
+        // End-to-end proof that NULLS_FIRST_FIELD_PROPERTY on the split actually routes readWithConstraint
+        // into the two-phase fetch instead of a single plain getIterator call: one row from the
+        // nulls-only phase and one from the Lark-sorted non-null phase must both reach the spiller.
+        Schema schema = SchemaBuilder.newBuilder()
+                .addStringField("col1")
+                .build();
+
+        Split split = Split.newBuilder(
+                mock(S3SpillLocation.class),
+                mock(EncryptionKey.class))
+                .add(BASE_ID_PROPERTY, "testBase")
+                .add(TABLE_ID_PROPERTY, "testTable")
+                .add(FILTER_EXPRESSION_PROPERTY, "")
+                .add(SORT_EXPRESSION_PROPERTY, "[{\"field_name\":\"Currency Field\",\"desc\":false}]")
+                .add(NULLS_FIRST_FIELD_PROPERTY, "Currency Field")
+                .add(PAGE_SIZE_PROPERTY, "100")
+                .add(EXPECTED_ROW_COUNT_PROPERTY, "10")
+                .add(IS_PARALLEL_SPLIT_PROPERTY, "false")
+                .add(SPLIT_START_INDEX_PROPERTY, "0")
+                .add(SPLIT_END_INDEX_PROPERTY, "0")
+                .add(LARK_FIELD_TYPE_MAPPING_PROPERTY, "{}")
+                .build();
+
+        ReadRecordsRequest request = mock(ReadRecordsRequest.class);
+        Constraints constraints = mock(Constraints.class);
+        when(request.getConstraints()).thenReturn(constraints);
+        when(constraints.isQueryPassThrough()).thenReturn(false);
+        when(constraints.getSummary()).thenReturn(Collections.emptyMap());
+        when(request.getSplit()).thenReturn(split);
+        when(request.getSchema()).thenReturn(schema);
+
+        SearchRecordsResponse.RecordItem nullRowItem = SearchRecordsResponse.RecordItem.builder()
+                .recordId("null-rec")
+                .fields(new HashMap<>())
+                .build();
+        SearchRecordsResponse nullsPhaseResponse = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
+                        .items(List.of(nullRowItem))
+                        .hasMore(false)
+                        .total(1)
+                        .build())
+                .build();
+
+        SearchRecordsResponse.RecordItem nonNullRowItem = SearchRecordsResponse.RecordItem.builder()
+                .recordId("non-null-rec")
+                .fields(Map.of("col1", "value"))
+                .build();
+        SearchRecordsResponse nonNullsPhaseResponse = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
+                        .items(List.of(nonNullRowItem))
+                        .hasMore(false)
+                        .total(1)
+                        .build())
+                .build();
+
+        when(mockInvoker.invoke(any())).thenReturn(nullsPhaseResponse, nonNullsPhaseResponse);
+        when(mockEnvVarService.isEnableDebugLogging()).thenReturn(false);
+
+        BlockSpiller spiller = mock(BlockSpiller.class);
+        QueryStatusChecker queryStatusChecker = mock(QueryStatusChecker.class);
+        when(queryStatusChecker.isQueryRunning()).thenReturn(true);
+
+        BaseRecordHandler realHandler = new BaseRecordHandler(
+                mockS3Client,
+                mockSecretsManagerClient,
+                mockAthenaClient,
+                Collections.emptyMap(),
+                mockEnvVarService,
+                mockLarkBaseService,
+                mockInvokerCache
+        );
+
+        realHandler.readWithConstraint(spiller, request, queryStatusChecker);
+
+        verify(spiller, times(2)).writeRows(any());
+    }
+
     private static class TestRecordHandler extends BaseRecordHandler {
         private Iterator<Map<String, Object>> customIterator;
 

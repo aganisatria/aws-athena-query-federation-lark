@@ -68,6 +68,7 @@ import static com.amazonaws.athena.connectors.lark.base.BaseConstants.FILTER_EXP
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.IS_PARALLEL_SPLIT_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_NAME_MAPPING_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_TYPE_MAPPING_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.NULLS_FIRST_FIELD_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RESERVED_BASE_ID;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RESERVED_RECORD_ID;
@@ -192,6 +193,7 @@ public class BaseRecordHandler extends RecordHandler
             String tableId = split.getProperty(TABLE_ID_PROPERTY);
             String originalFilterExpression = split.getProperty(FILTER_EXPRESSION_PROPERTY);
             String originalSortExpression = split.getProperties().getOrDefault(SORT_EXPRESSION_PROPERTY, "");
+            String nullsFirstFieldName = split.getProperties().getOrDefault(NULLS_FIRST_FIELD_PROPERTY, "");
             int pageSizeForApi = Integer.parseInt(split.getProperty(PAGE_SIZE_PROPERTY));
             int expectedRowCountForSplit = Integer.parseInt(split.getProperty(EXPECTED_ROW_COUNT_PROPERTY));
             boolean isParallelSplit = Boolean.parseBoolean(split.getProperties().getOrDefault(IS_PARALLEL_SPLIT_PROPERTY, "false"));
@@ -200,17 +202,38 @@ public class BaseRecordHandler extends RecordHandler
 
             invokerCache.get(tableId).setBlockSpiller(spiller);
 
-            Iterator<Map<String, Object>> recordIterator = getIterator(
-                    baseId,
-                    tableId,
-                    pageSizeForApi,
-                    expectedRowCountForSplit,
-                    isParallelSplit,
-                    splitStartIndex,
-                    splitEndIndex,
-                    originalFilterExpression,
-                    originalSortExpression,
-                    larkFieldNameMap);
+            Iterator<Map<String, Object>> recordIterator;
+            if (!nullsFirstFieldName.isEmpty()) {
+                // Lark's sort has no null-positioning control and always puts nulls last, so an
+                // ORDER BY ... NULLS FIRST can't be satisfied by a single sorted request. Fetch the
+                // null rows first (via an added "isEmpty" filter condition, sort is a no-op among them
+                // since they all tie on this column) and then the Lark-sorted non-null rows (via
+                // "isNotEmpty", excluding nulls so they aren't emitted twice at the end).
+                Iterator<Map<String, Object>> nullsIterator = getIterator(
+                        baseId, tableId, pageSizeForApi, expectedRowCountForSplit, isParallelSplit,
+                        splitStartIndex, splitEndIndex,
+                        SearchApiFilterTranslator.addEmptinessCondition(originalFilterExpression, nullsFirstFieldName, true),
+                        originalSortExpression, larkFieldNameMap);
+                Iterator<Map<String, Object>> nonNullsIterator = getIterator(
+                        baseId, tableId, pageSizeForApi, expectedRowCountForSplit, isParallelSplit,
+                        splitStartIndex, splitEndIndex,
+                        SearchApiFilterTranslator.addEmptinessCondition(originalFilterExpression, nullsFirstFieldName, false),
+                        originalSortExpression, larkFieldNameMap);
+                recordIterator = new NullsFirstIterator(nullsIterator, nonNullsIterator, expectedRowCountForSplit);
+            }
+            else {
+                recordIterator = getIterator(
+                        baseId,
+                        tableId,
+                        pageSizeForApi,
+                        expectedRowCountForSplit,
+                        isParallelSplit,
+                        splitStartIndex,
+                        splitEndIndex,
+                        originalFilterExpression,
+                        originalSortExpression,
+                        larkFieldNameMap);
+            }
 
             writeItemsToBlock(spiller, recordsRequest, queryStatusChecker, recordIterator, localRegistererExtractor);
         }
@@ -553,5 +576,50 @@ public class BaseRecordHandler extends RecordHandler
                 return result;
             }
         };
+    }
+
+    /**
+     * Concatenates a nulls-only iterator and a Lark-sorted non-null iterator into a single ordered
+     * stream, enforcing the combined {@code expectedRowCountForSplit} cap itself. Each inner iterator
+     * also carries its own copy of that same cap (see {@link #getIterator}), which is harmless: it only
+     * means the nulls-only iterator alone stops early if null rows already reach the cap, so the
+     * non-null iterator is never consulted, and otherwise it exhausts naturally once real pagination
+     * runs out - either way this wrapper's own count is what actually bounds total emissions.
+     */
+    @VisibleForTesting
+    protected static final class NullsFirstIterator implements Iterator<Map<String, Object>>
+    {
+        private final Iterator<Map<String, Object>> nullsIterator;
+        private final Iterator<Map<String, Object>> nonNullsIterator;
+        private final int expectedRowCountForSplit;
+        private int emitted = 0;
+
+        NullsFirstIterator(Iterator<Map<String, Object>> nullsIterator, Iterator<Map<String, Object>> nonNullsIterator,
+                            int expectedRowCountForSplit)
+        {
+            this.nullsIterator = nullsIterator;
+            this.nonNullsIterator = nonNullsIterator;
+            this.expectedRowCountForSplit = expectedRowCountForSplit;
+        }
+
+        @Override
+        public boolean hasNext()
+        {
+            if (expectedRowCountForSplit > 0 && emitted >= expectedRowCountForSplit) {
+                return false;
+            }
+            return nullsIterator.hasNext() || nonNullsIterator.hasNext();
+        }
+
+        @Override
+        public Map<String, Object> next()
+        {
+            if (!hasNext()) {
+                throw new NoSuchElementException("No more records available for this split");
+            }
+            Map<String, Object> result = nullsIterator.hasNext() ? nullsIterator.next() : nonNullsIterator.next();
+            emitted++;
+            return result;
+        }
     }
 }
