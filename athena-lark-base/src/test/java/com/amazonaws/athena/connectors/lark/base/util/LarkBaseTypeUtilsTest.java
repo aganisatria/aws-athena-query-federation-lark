@@ -391,13 +391,17 @@ class LarkBaseTypeUtilsTest {
 
     @Test
     void testGetLarkListChildField_LookupWithDateTime() {
+        // Must match the top-level DATE_TIME mapping (DATEMILLI/Date, not Timestamp) - a table resolved
+        // via the direct/experimental path and the same table crawled into Glue must agree on this LOOKUP
+        // field's Arrow type, or predicates/serialization would behave differently depending on which
+        // metadata-resolution path served the query (confirmed disagreement, now fixed).
         AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
                 "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.DATE_TIME));
 
         Field result = LarkBaseTypeUtils.getLarkListChildField(field);
 
         assertThat(result.getName()).isEqualTo("item");
-        assertThat(result.getType()).isEqualTo(new ArrowType.Timestamp(org.apache.arrow.vector.types.TimeUnit.MILLISECOND, "UTC"));
+        assertThat(result.getType()).isEqualTo(Types.MinorType.DATEMILLI.getType());
     }
 
     @Test
@@ -603,5 +607,21 @@ class LarkBaseTypeUtilsTest {
         assertThat(result.getType()).isInstanceOf(ArrowType.Int.class);
         ArrowType.Int intType = (ArrowType.Int) result.getType();
         assertThat(intType.getBitWidth()).isEqualTo(8);
+    }
+
+    // Test larkFieldToArrowField for a top-level DATE_TIME field. larkFieldToArrowMinorType never
+    // returns null (it falls back to VARCHAR by default), so this must fall through to the DATEMILLI
+    // default case rather than any dead "minorType == null" special-casing - locks in the type that
+    // RegistererExtractor's DATEMILLI extractor (and the Glue-crawler path's "timestamp" column, which
+    // the SDK also resolves to DATEMILLI) actually expect.
+    @Test
+    void testLarkFieldToArrowField_DateTime() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "created_at", "Created At", new NestedUIType(UITypeEnum.DATE_TIME, UITypeEnum.UNKNOWN));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field);
+
+        assertThat(result.getName()).isEqualTo("Created At");
+        assertThat(result.getType()).isEqualTo(Types.MinorType.DATEMILLI.getType());
     }
 }

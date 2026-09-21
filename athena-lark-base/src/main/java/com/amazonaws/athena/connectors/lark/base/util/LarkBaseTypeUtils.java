@@ -22,7 +22,6 @@ package com.amazonaws.athena.connectors.lark.base.util;
 import com.amazonaws.athena.connectors.lark.base.model.AthenaFieldLarkBaseMapping;
 import com.amazonaws.athena.connectors.lark.base.model.NestedUIType;
 import com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum;
-import org.apache.arrow.vector.types.TimeUnit;
 import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
@@ -172,7 +171,13 @@ public final class LarkBaseTypeUtils
             case NUMBER, PROGRESS, CURRENCY -> new ArrowType.Decimal(38, 18, 128);
             case RATING -> Types.MinorType.TINYINT.getType();
             case CHECKBOX -> ArrowType.Bool.INSTANCE;
-            case DATE_TIME, CREATED_TIME, MODIFIED_TIME -> new ArrowType.Timestamp(TimeUnit.MILLISECOND, "UTC");
+            // Matches the top-level DATE_TIME/CREATED_TIME/MODIFIED_TIME mapping in larkFieldToArrowField
+            // (DATEMILLI, i.e. Arrow Date(MILLISECOND)) rather than a Timestamp - this used to diverge from
+            // it, and from the Glue-crawler path's "array<timestamp>" column (which the SDK's own
+            // Glue-type parser also resolves to DATEMILLI/Date, not Timestamp), so the same Lark field
+            // reported a different Arrow type for its LOOKUP-wrapped list child depending on which
+            // metadata-resolution path served the request.
+            case DATE_TIME, CREATED_TIME, MODIFIED_TIME -> Types.MinorType.DATEMILLI.getType();
             // TEXT, BARCODE, SINGLE_SELECT, PHONE, AUTO_NUMBER, EMAIL, and any type not yet supported as a
             // LOOKUP target (MULTI_SELECT, USER, ATTACHMENT, URL, LOCATION, LINK, UNKNOWN, ...) fall back to a
             // plain string representation, matching the Glue Crawler path's "array<string>" fallback.
@@ -235,21 +240,13 @@ public final class LarkBaseTypeUtils
     public static Field larkFieldToArrowField(AthenaFieldLarkBaseMapping larkField)
     {
         String fieldName = larkField.larkBaseFieldName();
+        // larkFieldToArrowMinorType always returns a non-null MinorType (it falls back to VARCHAR by
+        // default), so DATE_TIME/CREATED_TIME/MODIFIED_TIME fields always resolve through the DATEMILLI
+        // case below - there is no minorType==null case to special-case here.
         Types.MinorType minorType = larkFieldToArrowMinorType(larkField);
         boolean isNullable = true;
         List<Field> children = Collections.emptyList();
         FieldType fieldType;
-
-        // Handle timestamp fields (when minorType is null)
-        if (minorType == null) {
-            UITypeEnum uiType = larkField.nestedUIType().uiType();
-            if (uiType == UITypeEnum.DATE_TIME || uiType == UITypeEnum.CREATED_TIME || uiType == UITypeEnum.MODIFIED_TIME) {
-                // Create Timestamp with millisecond precision and UTC timezone
-                ArrowType timestampType = new ArrowType.Timestamp(TimeUnit.MILLISECOND, "UTC");
-                fieldType = new FieldType(isNullable, timestampType, null, null);
-                return new Field(fieldName, fieldType, children);
-            }
-        }
 
         switch (requireNonNull(minorType)) {
             case LIST:
