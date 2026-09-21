@@ -277,6 +277,36 @@ public class SearchApiFilterTranslatorTest {
     }
 
     @Test
+    public void testToFilterJson_withSortedRangeSet_singleValue_nonCheckbox_null() throws Exception {
+        // A pure "IS NULL" constraint on a non-checkbox column arrives as a SortedRangeSet with zero ranges
+        // and nullAllowed=true, which makes isSingleValue() true with getSingleValue() == null. This must be
+        // pushed down as "isEmpty", not "is ''" (which Lark's Search API treats as equals-empty-string and
+        // matches zero rows instead of the actual NULL rows).
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(true);
+        when(valueSet.getSingleValue()).thenReturn(null);
+        when(valueSet.isNullAllowed()).thenReturn(true);
+        when(valueSet.getType()).thenReturn(new ArrowType.Utf8());
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_single_select", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_single_select", "Single Select Field",
+                new NestedUIType(UITypeEnum.SINGLE_SELECT, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(1, conditions.size());
+        assertEquals("Single Select Field", conditions.get(0).get("field_name").asText());
+        assertEquals("isEmpty", conditions.get(0).get("operator").asText());
+        assertEquals(0, conditions.get(0).get("value").size());
+    }
+
+    @Test
     public void testToFilterJson_withSortedRangeSet_isNotNull_checkbox() throws Exception {
         // Mock SortedRangeSet for IS NOT NULL pattern with checkbox
         SortedRangeSet valueSet = mock(SortedRangeSet.class);
@@ -597,6 +627,135 @@ public class SearchApiFilterTranslatorTest {
     }
 
     @Test
+    public void testToFilterJson_withSortedRangeSet_notEqualPattern_singleSelect_pushesAsIsNot() throws Exception {
+        // WHERE field_single_select != 'Option A' (or NOT IN with one value) - a column with a natural
+        // ordering represents this as two ranges excluding the single point "Option A": (-inf, 'Option A')
+        // union ('Option A', +inf), same shape as the range-union case above but with identical boundary
+        // values on both ranges. Routing this through the generic range-union path would emit
+        // isLess/isGreater, which Lark's Search API doesn't support for a categorical SINGLE_SELECT field
+        // (it has no meaningful ordering there) and silently matches zero rows. It must become "isNot"
+        // instead, which works for every equality-capable type.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Utf8());
+
+        Ranges ranges = mock(Ranges.class);
+
+        Range belowOptionA = mock(Range.class);
+        Marker belowLow = mock(Marker.class);
+        Marker belowHigh = mock(Marker.class);
+        when(belowLow.isLowerUnbounded()).thenReturn(true);
+        when(belowHigh.isUpperUnbounded()).thenReturn(false);
+        when(belowHigh.getBound()).thenReturn(Marker.Bound.BELOW);
+        when(belowHigh.getValue()).thenReturn("Option A");
+        when(belowOptionA.getLow()).thenReturn(belowLow);
+        when(belowOptionA.getHigh()).thenReturn(belowHigh);
+
+        Range aboveOptionA = mock(Range.class);
+        Marker aboveLow = mock(Marker.class);
+        Marker aboveHigh = mock(Marker.class);
+        when(aboveLow.isLowerUnbounded()).thenReturn(false);
+        when(aboveLow.getBound()).thenReturn(Marker.Bound.ABOVE);
+        when(aboveLow.getValue()).thenReturn("Option A");
+        when(aboveHigh.isUpperUnbounded()).thenReturn(true);
+        when(aboveOptionA.getLow()).thenReturn(aboveLow);
+        when(aboveOptionA.getHigh()).thenReturn(aboveHigh);
+
+        when(ranges.getOrderedRanges()).thenReturn(Arrays.asList(belowOptionA, aboveOptionA));
+        when(valueSet.getRanges()).thenReturn(ranges);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_single_select", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_single_select", "Single Select Field",
+                new NestedUIType(UITypeEnum.SINGLE_SELECT, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        // Must be a flat top-level condition, not an OR-group under "children".
+        assertNull(filter.get("children"));
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(2, conditions.size());
+        assertEquals("isNot", conditions.get(0).get("operator").asText());
+        assertEquals("Option A", conditions.get(0).get("value").get(0).asText());
+        assertEquals("isNotEmpty", conditions.get(1).get("operator").asText());
+    }
+
+    @Test
+    public void testToFilterJson_withSortedRangeSet_notInPattern_multipleValues_pushesAsMultipleIsNot() throws Exception {
+        // WHERE field_text NOT IN ('a', 'b') on an orderable type is modeled as THREE ranges excluding two
+        // points: (-inf, 'a') union ('a', 'b') union ('b', +inf) - the middle range needs both bounds, so
+        // buildRangeUnionOrGroup's single-bound requirement would reject it and skip pushdown entirely
+        // (falling back to an unfiltered fetch). tryGetExcludedValues must recognize this N-point shape too,
+        // not just the single-point "!=" case, and emit one "isNot" per excluded value.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Utf8());
+
+        Ranges ranges = mock(Ranges.class);
+
+        Range belowA = mock(Range.class);
+        Marker belowALow = mock(Marker.class);
+        Marker belowAHigh = mock(Marker.class);
+        when(belowALow.isLowerUnbounded()).thenReturn(true);
+        when(belowAHigh.isUpperUnbounded()).thenReturn(false);
+        when(belowAHigh.getBound()).thenReturn(Marker.Bound.BELOW);
+        when(belowAHigh.getValue()).thenReturn("a");
+        when(belowA.getLow()).thenReturn(belowALow);
+        when(belowA.getHigh()).thenReturn(belowAHigh);
+
+        Range betweenAAndB = mock(Range.class);
+        Marker betweenLow = mock(Marker.class);
+        Marker betweenHigh = mock(Marker.class);
+        when(betweenLow.isLowerUnbounded()).thenReturn(false);
+        when(betweenLow.getBound()).thenReturn(Marker.Bound.ABOVE);
+        when(betweenLow.getValue()).thenReturn("a");
+        when(betweenHigh.isUpperUnbounded()).thenReturn(false);
+        when(betweenHigh.getBound()).thenReturn(Marker.Bound.BELOW);
+        when(betweenHigh.getValue()).thenReturn("b");
+        when(betweenAAndB.getLow()).thenReturn(betweenLow);
+        when(betweenAAndB.getHigh()).thenReturn(betweenHigh);
+
+        Range aboveB = mock(Range.class);
+        Marker aboveBLow = mock(Marker.class);
+        Marker aboveBHigh = mock(Marker.class);
+        when(aboveBLow.isLowerUnbounded()).thenReturn(false);
+        when(aboveBLow.getBound()).thenReturn(Marker.Bound.ABOVE);
+        when(aboveBLow.getValue()).thenReturn("b");
+        when(aboveBHigh.isUpperUnbounded()).thenReturn(true);
+        when(aboveB.getLow()).thenReturn(aboveBLow);
+        when(aboveB.getHigh()).thenReturn(aboveBHigh);
+
+        when(ranges.getOrderedRanges()).thenReturn(Arrays.asList(belowA, betweenAAndB, aboveB));
+        when(valueSet.getRanges()).thenReturn(ranges);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_text", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_text", "Text Field",
+                new NestedUIType(UITypeEnum.TEXT, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        assertNull(filter.get("children"));
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(3, conditions.size());
+        assertEquals("isNot", conditions.get(0).get("operator").asText());
+        assertEquals("a", conditions.get(0).get("value").get(0).asText());
+        assertEquals("isNot", conditions.get(1).get("operator").asText());
+        assertEquals("b", conditions.get(1).get("value").get(0).asText());
+        assertEquals("isNotEmpty", conditions.get(2).get("operator").asText());
+    }
+
+    @Test
     public void testToFilterJson_withSortedRangeSet_multiRangeUnionWithDoubleBoundedRange_skipsPushdown() throws Exception {
         // A union containing a range that needs BOTH bounds (e.g. one BETWEEN-shaped range OR'd with a
         // single-bounded range) can't be expressed within Lark's one-level-of-nesting filter API (it would
@@ -797,9 +956,12 @@ public class SearchApiFilterTranslatorTest {
         assertNotNull(filterJson);
         JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
         JsonNode conditions = filter.get("conditions");
-        assertEquals(1, conditions.size());
+        // A second "isNotEmpty" condition excludes NULL rows: per SQL's three-valued logic a NULL column
+        // never satisfies "!=", but Lark's "isNot" alone would let an empty field leak into the result.
+        assertEquals(2, conditions.size());
         assertEquals("isNot", conditions.get(0).get("operator").asText());
         assertEquals("excluded", conditions.get(0).get("value").get(0).asText());
+        assertEquals("isNotEmpty", conditions.get(1).get("operator").asText());
     }
 
     @Test
@@ -828,9 +990,11 @@ public class SearchApiFilterTranslatorTest {
 
         JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
         JsonNode conditions = filter.get("conditions");
-        assertEquals(2, conditions.size());
+        // Plus the trailing "isNotEmpty" that excludes NULL rows (see the blacklist single-value test).
+        assertEquals(3, conditions.size());
         assertEquals("isNot", conditions.get(0).get("operator").asText());
         assertEquals("isNot", conditions.get(1).get("operator").asText());
+        assertEquals("isNotEmpty", conditions.get(2).get("operator").asText());
         assertNull(filter.get("children"));
     }
 
@@ -1113,8 +1277,11 @@ public class SearchApiFilterTranslatorTest {
         assertNotNull(filterJson);
         JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
         JsonNode conditions = filter.get("conditions");
-        // Null value should be converted to empty string for non-checkbox
-        assertEquals("", conditions.get(0).get("value").get(0).asText());
+        // A single-value domain of null is a pure IS NULL constraint; for non-checkbox fields this must be
+        // "isEmpty", not "is ''" (which Lark's Search API treats as equals-empty-string, matching zero rows
+        // instead of the actual NULL rows - see testToFilterJson_withSortedRangeSet_singleValue_nonCheckbox_null).
+        assertEquals("isEmpty", conditions.get(0).get("operator").asText());
+        assertEquals(0, conditions.get(0).get("value").size());
     }
 
     @Test
@@ -1205,5 +1372,234 @@ public class SearchApiFilterTranslatorTest {
         JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
         JsonNode conditions = filter.get("conditions");
         assertEquals("42.5", conditions.get(0).get("value").get(0).asText());
+    }
+
+    @Test
+    public void testConvertToString_withBigDecimalZero_avoidsScientificNotation() throws Exception {
+        // Decimal(38, 18) columns (NUMBER/CURRENCY/PROGRESS) hand a BigDecimal with scale 18 to the
+        // translator. BigDecimal.toString() renders a zero at that scale as "0E-18" (scientific notation),
+        // which Lark's Search API can't parse as a number - it must come out as a plain "0".
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(true);
+        when(valueSet.getSingleValue()).thenReturn(new java.math.BigDecimal("0.000000000000000000"));
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Decimal(38, 18, 128));
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_currency", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_currency", "Currency Field",
+                new NestedUIType(UITypeEnum.CURRENCY, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        JsonNode conditions = filter.get("conditions");
+        // toPlainString() keeps the scale (unlike toString()'s "0E-18"), which is fine - Lark parses a
+        // plain decimal string regardless of trailing zeros; the point is it must never be scientific notation.
+        assertEquals("0.000000000000000000", conditions.get(0).get("value").get(0).asText());
+    }
+
+    @Test
+    public void testToFilterJson_withDateTimeValue_convertsToExactDateEpochMillis() throws Exception {
+        // DATE_TIME/CREATED_TIME/MODIFIED_TIME markers arrive as java.time.LocalDateTime. Confirmed directly
+        // against Lark's Search Records API: a bare epoch-millis value ("1735689600000") is rejected
+        // outright ("InvalidFilter ... not support this keyword"), and LocalDateTime.toString()
+        // ("2025-01-01T00:00") fails the same way. Every comparison operator on a date field requires the
+        // two-element value array {"ExactDate", "<epoch millis>"}.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(true);
+        when(valueSet.getSingleValue()).thenReturn(java.time.LocalDateTime.of(2025, 1, 1, 0, 0, 0));
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Timestamp(org.apache.arrow.vector.types.TimeUnit.MILLISECOND, "UTC"));
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_date_time", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_date_time", "Date Time Field",
+                new NestedUIType(UITypeEnum.DATE_TIME, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        JsonNode conditions = filter.get("conditions");
+        JsonNode value = conditions.get(0).get("value");
+        assertEquals(2, value.size());
+        assertEquals("ExactDate", value.get(0).asText());
+        assertEquals("1735689600000", value.get(1).asText());
+    }
+
+    @Test
+    public void testToFilterJson_withDateTimeBetween_usesStrictOperators() throws Exception {
+        // WHERE field_date_time BETWEEN t1 AND t2 has both bounds Marker.Bound.EXACTLY (normally inclusive,
+        // which addRangeBoundConditions maps to isGreaterEqual/isLessEqual). Confirmed directly against
+        // Lark's Search Records API: a DATE_TIME-family field rejects those outright ("fieldType '5' not
+        // support isGreaterEqual"). It must fall back to the strict isGreater/isLess instead - the exact
+        // boundary instant won't match, an accepted platform limitation.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Timestamp(org.apache.arrow.vector.types.TimeUnit.MILLISECOND, "UTC"));
+
+        Ranges ranges = mock(Ranges.class);
+        Range between = mock(Range.class);
+        Marker low = mock(Marker.class);
+        Marker high = mock(Marker.class);
+        when(low.isLowerUnbounded()).thenReturn(false);
+        when(low.getBound()).thenReturn(Marker.Bound.EXACTLY);
+        when(low.getValue()).thenReturn(java.time.LocalDateTime.of(1990, 1, 1, 0, 0, 0));
+        when(high.isUpperUnbounded()).thenReturn(false);
+        when(high.getBound()).thenReturn(Marker.Bound.EXACTLY);
+        when(high.getValue()).thenReturn(java.time.LocalDateTime.of(2000, 1, 1, 0, 0, 0));
+        when(between.getLow()).thenReturn(low);
+        when(between.getHigh()).thenReturn(high);
+
+        when(ranges.getOrderedRanges()).thenReturn(Collections.singletonList(between));
+        when(valueSet.getRanges()).thenReturn(ranges);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_date_time", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_date_time", "Date Time Field",
+                new NestedUIType(UITypeEnum.DATE_TIME, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(2, conditions.size());
+        assertEquals("isGreater", conditions.get(0).get("operator").asText());
+        assertEquals("isLess", conditions.get(1).get("operator").asText());
+    }
+
+    @Test
+    public void testToFilterJson_withSortedRangeSet_range_nonOrderableType_skipsPushdown() throws Exception {
+        // Per Lark's record-filter-guide, TEXT/BARCODE/PHONE/EMAIL/SINGLE_SELECT have NO ordering operators
+        // at all (only is/isNot/contains/doesNotContain/isEmpty/isNotEmpty) - confirmed live:
+        // `field_text > 'M'` and `field_single_select > 'Option A'` both returned zero rows instead of the
+        // real match counts. A genuine range constraint on one of these types must be skipped entirely
+        // (falling back to client-side filtering), not pushed down as an unsupported isGreater/isLess.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Utf8());
+
+        Ranges ranges = mock(Ranges.class);
+        Range greaterThanM = mock(Range.class);
+        Marker low = mock(Marker.class);
+        Marker high = mock(Marker.class);
+        when(low.isLowerUnbounded()).thenReturn(false);
+        when(low.getBound()).thenReturn(Marker.Bound.ABOVE);
+        when(low.getValue()).thenReturn("M");
+        when(high.isUpperUnbounded()).thenReturn(true);
+        when(greaterThanM.getLow()).thenReturn(low);
+        when(greaterThanM.getHigh()).thenReturn(high);
+
+        when(ranges.getOrderedRanges()).thenReturn(Collections.singletonList(greaterThanM));
+        when(valueSet.getRanges()).thenReturn(ranges);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_text", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_text", "Text Field",
+                new NestedUIType(UITypeEnum.TEXT, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        // No condition pushed for this field at all - not isGreater, not anything.
+        assertEquals("", filterJson);
+    }
+
+    @Test
+    public void testToFilterJson_withEquatableValueSet_checkbox_blacklist_negatesToIs() throws Exception {
+        // Per Lark's record-filter-guide, CHECKBOX supports only "is" - no "isNot" at all (confirmed live:
+        // `field_checkbox != true` returned zero rows instead of the real 280 false rows). A boolean
+        // blacklist must negate the excluded value and push "is" with the opposite instead.
+        EquatableValueSet valueSet = mock(EquatableValueSet.class);
+        when(valueSet.isWhiteList()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Bool());
+
+        Block block = mock(Block.class);
+        when(block.getRowCount()).thenReturn(1);
+        when(valueSet.getValueBlock()).thenReturn(block);
+        when(valueSet.getValue(0)).thenReturn(true);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_checkbox", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_checkbox", "Checkbox Field",
+                new NestedUIType(UITypeEnum.CHECKBOX, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(1, conditions.size());
+        assertEquals("is", conditions.get(0).get("operator").asText());
+        assertEquals("false", conditions.get(0).get("value").get(0).asText());
+    }
+
+    @Test
+    public void testToFilterJson_withSortedRangeSet_checkbox_notEqualPattern_negatesToIs() throws Exception {
+        // Boolean has an ordering (false < true) in Presto/Trino, so "field_checkbox != true" reaches
+        // toFilterJson's SortedRangeSet "!=" detection too, not just the EquatableValueSet blacklist path
+        // covered by testToFilterJson_withEquatableValueSet_checkbox_blacklist_negatesToIs. Confirmed live:
+        // without this, it pushed the unsupported "isNot" and returned zero rows instead of the real 280.
+        SortedRangeSet valueSet = mock(SortedRangeSet.class);
+        when(valueSet.isSingleValue()).thenReturn(false);
+        when(valueSet.isNullAllowed()).thenReturn(false);
+        when(valueSet.getType()).thenReturn(new ArrowType.Bool());
+
+        Ranges ranges = mock(Ranges.class);
+
+        Range belowTrue = mock(Range.class);
+        Marker belowLow = mock(Marker.class);
+        Marker belowHigh = mock(Marker.class);
+        when(belowLow.isLowerUnbounded()).thenReturn(true);
+        when(belowHigh.isUpperUnbounded()).thenReturn(false);
+        when(belowHigh.getBound()).thenReturn(Marker.Bound.BELOW);
+        when(belowHigh.getValue()).thenReturn(true);
+        when(belowTrue.getLow()).thenReturn(belowLow);
+        when(belowTrue.getHigh()).thenReturn(belowHigh);
+
+        Range aboveTrue = mock(Range.class);
+        Marker aboveLow = mock(Marker.class);
+        Marker aboveHigh = mock(Marker.class);
+        when(aboveLow.isLowerUnbounded()).thenReturn(false);
+        when(aboveLow.getBound()).thenReturn(Marker.Bound.ABOVE);
+        when(aboveLow.getValue()).thenReturn(true);
+        when(aboveHigh.isUpperUnbounded()).thenReturn(true);
+        when(aboveTrue.getLow()).thenReturn(aboveLow);
+        when(aboveTrue.getHigh()).thenReturn(aboveHigh);
+
+        when(ranges.getOrderedRanges()).thenReturn(Arrays.asList(belowTrue, aboveTrue));
+        when(valueSet.getRanges()).thenReturn(ranges);
+
+        Map<String, ValueSet> constraints = new HashMap<>();
+        constraints.put("field_checkbox", valueSet);
+
+        List<AthenaFieldLarkBaseMapping> mappings = Collections.singletonList(
+            new AthenaFieldLarkBaseMapping("field_checkbox", "Checkbox Field",
+                new NestedUIType(UITypeEnum.CHECKBOX, null)));
+
+        String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
+
+        assertNotNull(filterJson);
+        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
+        assertNull(filter.get("children"));
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(1, conditions.size());
+        assertEquals("is", conditions.get(0).get("operator").asText());
+        assertEquals("false", conditions.get(0).get("value").get(0).asText());
     }
 }

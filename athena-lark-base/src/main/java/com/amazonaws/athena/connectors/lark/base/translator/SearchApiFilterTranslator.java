@@ -32,11 +32,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RESERVED_SPLIT_KEY;
 
@@ -114,6 +118,53 @@ public final class SearchApiFilterTranslator
             else if (valueSet instanceof SortedRangeSet rangeSet && !isSingleValueSafe(rangeSet)
                     && getOrderedRangesSafe(rangeSet, fieldName).size() > 1) {
                 List<Range> ranges = getOrderedRangesSafe(rangeSet, fieldName);
+
+                // A column with a natural ordering (e.g. VARCHAR) represents "col != X" / "col NOT IN
+                // (x1, x2, ...)" as N+1 disjoint ranges excluding N points: (-inf, x1) union (x1, x2) union
+                // ... union (xN, +inf). Routing that through the generic range-union path below would emit
+                // isLess/isGreater (which Lark doesn't support for a categorical type like SINGLE_SELECT -
+                // silently zero rows) and would fail buildRangeUnionOrGroup's single-bound check entirely
+                // for N>1 (every interior range needs both bounds), skipping pushdown altogether. Recognize
+                // this shape and emit one "isNot" per excluded point ANDed together instead, which needs no
+                // ordering support and works for every equality-capable type.
+                List<Object> excludedValues = tryGetExcludedValues(ranges);
+                if (excludedValues != null) {
+                    // CHECKBOX (Boolean has an ordering - false < true - so "!=" reaches this SortedRangeSet
+                    // path too, not just EquatableValueSet) supports only "is", not "isNot" at all (confirmed
+                    // live: `field_checkbox != true` returned zero rows instead of the real 280 false rows -
+                    // see translateEquatableValueSet's blacklist case for the same fix on that code path).
+                    // Negate the excluded boolean and push "is" with the opposite instead.
+                    if (fieldUiType == UITypeEnum.CHECKBOX) {
+                        for (Object excludedValue : excludedValues) {
+                            if (excludedValue instanceof Boolean booleanValue) {
+                                allConditions.add(createCondition(fieldName, "is", !booleanValue));
+                            }
+                        }
+                        continue;
+                    }
+
+                    for (Object excludedValue : excludedValues) {
+                        Object convertedValue = convertValueForSearchApi(excludedValue, fieldUiType);
+                        allConditions.add(createCondition(fieldName, "isNot", convertedValue));
+                    }
+                    // Same 3-valued-logic gap as the NOT IN blacklist case (see translateEquatableValueSet):
+                    // "col != X" never matches NULL in SQL, but Lark's "isNot" treats an empty field as
+                    // trivially not-equal-to-X, so it leaks in unless explicitly excluded.
+                    if (!rangeSet.isNullAllowed()) {
+                        allConditions.add(createCondition(fieldName, "isNotEmpty", null));
+                    }
+                    continue;
+                }
+
+                // A genuine range union (e.g. "x < 5 OR x > 100", not a "!=" exclusion) needs isGreater/isLess,
+                // which - same as the single-range case in translateRangeSet - only NUMBER/CURRENCY/PROGRESS/
+                // RATING/DATE_TIME-family fields support in Lark's Search API.
+                if (!isOrderableUiType(fieldUiType)) {
+                    logger.info("Skipping pushdown for column '{}': UI type {} has no ordering operators in "
+                            + "Lark's Search API. Falling back to client-side filtering.", fieldName, fieldUiType);
+                    continue;
+                }
+
                 List<Map<String, Object>> orConditions = buildRangeUnionOrGroup(fieldName, ranges, fieldUiType);
                 if (orConditions != null) {
                     Map<String, Object> orGroup = new HashMap<>();
@@ -253,13 +304,22 @@ public final class SearchApiFilterTranslator
     {
         List<Map<String, Object>> conditions = new ArrayList<>();
 
-        // Handle single value (equality)
+        // Handle single value (equality). A SortedRangeSet with zero ranges and nullAllowed=true is a pure
+        // "IS NULL" constraint - the domain's only satisfying value is null, so isSingleValue() is true with
+        // getSingleValue() == null. Checkbox has no separate empty state so NULL maps to "is false"; every
+        // other type must use "isEmpty" - falling through to convertValueForSearchApi/"is" would otherwise
+        // turn null into the literal empty string "" (convertValueForSearchApi's null branch), which Lark's
+        // Search API treats as "equals empty string" and matches zero rows instead of the actual NULL rows.
         if (rangeSet.isSingleValue()) {
             Object value = rangeSet.getSingleValue();
 
-            // Special handling for checkbox NULL -> false
-            if (value == null && fieldUiType == UITypeEnum.CHECKBOX) {
-                conditions.add(createCondition(fieldName, "is", false));
+            if (value == null) {
+                if (fieldUiType == UITypeEnum.CHECKBOX) {
+                    conditions.add(createCondition(fieldName, "is", false));
+                }
+                else {
+                    conditions.add(createCondition(fieldName, "isEmpty", null));
+                }
                 return conditions;
             }
 
@@ -285,6 +345,19 @@ public final class SearchApiFilterTranslator
         // Handle a single range (>, <, >=, <=, or BETWEEN via both bounds set). Callers (toFilterJson) route
         // SortedRangeSets with more than one Range to buildRangeUnionOrGroup instead, since multiple ranges
         // are a union (OR) that a flat AND list here would translate incorrectly - see toFilterJson.
+        //
+        // Per Lark's record-filter-guide, isGreater/isGreaterEqual/isLess/isLessEqual are only supported for
+        // NUMBER/CURRENCY/PROGRESS/RATING and the DATE_TIME family - TEXT/BARCODE/PHONE/EMAIL/SINGLE_SELECT
+        // have no ordering operators at all (confirmed live: `field_text > 'M'` and
+        // `field_single_select > 'Option A'` both returned zero rows instead of the real match count).
+        // A genuine range constraint on one of those types can't be pushed down at all; skip it and let
+        // Athena's engine filter client-side instead of sending an operator Lark rejects.
+        if (!isOrderableUiType(fieldUiType)) {
+            logger.info("Skipping pushdown for column '{}': UI type {} has no ordering operators in Lark's "
+                    + "Search API. Falling back to client-side filtering.", fieldName, fieldUiType);
+            return conditions;
+        }
+
         try {
             List<Range> ranges = rangeSet.getRanges().getOrderedRanges();
             if (ranges != null && ranges.size() == 1) {
@@ -299,6 +372,18 @@ public final class SearchApiFilterTranslator
     }
 
     /**
+     * Per Lark's record-filter-guide, only these UI types support isGreater/isGreaterEqual/isLess/isLessEqual
+     * (the DATE_TIME family further restricts this to isGreater/isLess only - see addRangeBoundConditions).
+     * Every other pushdown-eligible type (TEXT, BARCODE, PHONE, EMAIL, SINGLE_SELECT) supports only equality,
+     * "contains", and empty-checks - no ordering at all.
+     */
+    private static boolean isOrderableUiType(UITypeEnum uiType)
+    {
+        return uiType == UITypeEnum.NUMBER || uiType == UITypeEnum.CURRENCY || uiType == UITypeEnum.PROGRESS
+                || uiType == UITypeEnum.RATING || isDateTimeUiType(uiType);
+    }
+
+    /**
      * Appends the low/high bound conditions for a single Range (e.g. {@code isGreater}/{@code isLessEqual}) to
      * the given conditions list. A range with both bounds set (e.g. BETWEEN) appends both conditions, which the
      * caller must AND together for correctness.
@@ -307,18 +392,55 @@ public final class SearchApiFilterTranslator
     {
         Marker low = range.getLow();
         Marker high = range.getHigh();
+        // Confirmed against Lark's Search Records API directly: a DATE_TIME-family field rejects
+        // isGreaterEqual/isLessEqual outright ("fieldType '5' not support isGreaterEqual"), so a BETWEEN's
+        // normally-inclusive bounds must fall back to the strict isGreater/isLess instead - the boundary
+        // instant itself won't match, which is an accepted platform limitation (Lark's own filter guide
+        // notes date comparisons are truncated to day granularity anyway).
+        boolean isDateTime = isDateTimeUiType(fieldUiType);
 
         if (!low.isLowerUnbounded()) {
-            String operator = (low.getBound() == Marker.Bound.EXACTLY) ? "isGreaterEqual" : "isGreater";
+            String operator = (!isDateTime && low.getBound() == Marker.Bound.EXACTLY) ? "isGreaterEqual" : "isGreater";
             Object value = convertValueForSearchApi(low.getValue(), fieldUiType);
             conditions.add(createCondition(fieldName, operator, value));
         }
 
         if (!high.isUpperUnbounded()) {
-            String operator = (high.getBound() == Marker.Bound.EXACTLY) ? "isLessEqual" : "isLess";
+            String operator = (!isDateTime && high.getBound() == Marker.Bound.EXACTLY) ? "isLessEqual" : "isLess";
             Object value = convertValueForSearchApi(high.getValue(), fieldUiType);
             conditions.add(createCondition(fieldName, operator, value));
         }
+    }
+
+    /**
+     * Detects the N+1-range shape a column with a natural ordering uses to represent {@code col != X} /
+     * {@code col NOT IN (x1, ..., xN)}: {@code (-inf, x1) union (x1, x2) union ... union (xN, +inf)} - every
+     * range single-bounded except the interior ones, which share their excluded value with both neighbors.
+     *
+     * @return The excluded values in order, or {@code null} if {@code ranges} isn't this shape.
+     */
+    private static List<Object> tryGetExcludedValues(List<Range> ranges)
+    {
+        if (!ranges.get(0).getLow().isLowerUnbounded()
+                || !ranges.get(ranges.size() - 1).getHigh().isUpperUnbounded()) {
+            return null;
+        }
+
+        List<Object> excludedValues = new ArrayList<>();
+        for (int i = 0; i < ranges.size() - 1; i++) {
+            Marker high = ranges.get(i).getHigh();
+            Marker low = ranges.get(i + 1).getLow();
+
+            boolean adjoins = !high.isUpperUnbounded() && high.getBound() == Marker.Bound.BELOW
+                    && !low.isLowerUnbounded() && low.getBound() == Marker.Bound.ABOVE
+                    && Objects.equals(high.getValue(), low.getValue());
+            if (!adjoins) {
+                return null;
+            }
+            excludedValues.add(high.getValue());
+        }
+
+        return excludedValues;
     }
 
     /**
@@ -358,6 +480,23 @@ public final class SearchApiFilterTranslator
     {
         List<Map<String, Object>> conditions = new ArrayList<>();
         boolean isWhiteList = valueSet.isWhiteList();
+
+        // Per Lark's record-filter-guide, CHECKBOX supports only the "is" operator - no "isNot" at all
+        // (confirmed live: `field_checkbox != true` returned zero rows instead of the real 280 false rows).
+        // A boolean blacklist excludes exactly one of its two possible values, so negate it and push "is"
+        // with the opposite value instead of the unsupported "isNot".
+        if (fieldUiType == UITypeEnum.CHECKBOX) {
+            int valueCount = valueSet.getValueBlock().getRowCount();
+            for (int i = 0; i < valueCount; i++) {
+                Object value = valueSet.getValue(i);
+                if (value instanceof Boolean booleanValue) {
+                    boolean targetValue = isWhiteList == booleanValue;
+                    conditions.add(createCondition(fieldName, "is", targetValue));
+                }
+            }
+            return conditions;
+        }
+
         String operator = isWhiteList ? "is" : "isNot";
 
         int valueCount = valueSet.getValueBlock().getRowCount();
@@ -365,6 +504,16 @@ public final class SearchApiFilterTranslator
             Object value = valueSet.getValue(i);
             Object convertedValue = convertValueForSearchApi(value, fieldUiType);
             conditions.add(createCondition(fieldName, operator, convertedValue));
+        }
+
+        // A blacklist (NOT IN) that doesn't allow null is "col NOT IN (...)" with no "OR col IS NULL" - per
+        // SQL's three-valued logic, a NULL column never satisfies "!=" (the comparison is UNKNOWN, not TRUE),
+        // so NULL rows must NOT be in the result. But Lark's "isNot" operator treats an empty/unset field as
+        // satisfying "isNot X" (it's trivially not equal to X), so without this, empty-field rows leak into
+        // every NOT IN result. CHECKBOX has no "isNotEmpty" operator (see translateRangeSet's IS NOT NULL
+        // handling) and Lark always returns a concrete true/false for it, so it's excluded here too.
+        if (!isWhiteList && !valueSet.isNullAllowed() && fieldUiType != UITypeEnum.CHECKBOX) {
+            conditions.add(createCondition(fieldName, "isNotEmpty", null));
         }
 
         return conditions;
@@ -382,6 +531,14 @@ public final class SearchApiFilterTranslator
                 // These operators don't need values
                 condition.put("value", Collections.emptyList());
             }
+            else if (value instanceof ExactDateValue exactDateValue) {
+                // Confirmed against Lark's Search Records API directly: every comparison operator on a
+                // DATE_TIME-family field (is/isNot/isGreater/isGreaterEqual/isLess/isLessEqual) requires a
+                // TWO-element value array {"ExactDate", "<epoch millis>"} - a bare epoch-millis value is
+                // rejected outright with "InvalidFilter ... not support this keyword". See
+                // https://open.larksuite.com/document/.../record-filter-guide.
+                condition.put("value", List.of("ExactDate", String.valueOf(exactDateValue.epochMillis())));
+            }
             else {
                 List<Object> valueArray = new ArrayList<>();
                 valueArray.add(convertToString(value));
@@ -395,6 +552,14 @@ public final class SearchApiFilterTranslator
         return condition;
     }
 
+    /**
+     * Marker wrapping a DATE_TIME-family value's epoch milliseconds so {@link #createCondition} can build
+     * Lark's required {@code ["ExactDate", "<epoch millis>"]} two-element value array for it.
+     */
+    private record ExactDateValue(long epochMillis)
+    {
+    }
+
     private static Object convertValueForSearchApi(Object value, UITypeEnum fieldUiType)
     {
         if (value == null) {
@@ -406,7 +571,21 @@ public final class SearchApiFilterTranslator
             return value;
         }
 
+        // DATE_TIME/CREATED_TIME/MODIFIED_TIME markers arrive as a java.time.LocalDateTime (the column's
+        // Arrow type is Timestamp(MILLISECOND, "UTC")). Wrap the epoch millis in ExactDateValue so
+        // createCondition can build Lark's required {"ExactDate", "<epoch millis>"} value array - a bare
+        // value (whether LocalDateTime's ISO-8601 toString() or a plain millis number) is rejected outright,
+        // so every date range/equality filter on these fields silently matched zero rows without this.
+        if (isDateTimeUiType(fieldUiType) && value instanceof LocalDateTime localDateTime) {
+            return new ExactDateValue(localDateTime.toInstant(ZoneOffset.UTC).toEpochMilli());
+        }
+
         return value;
+    }
+
+    private static boolean isDateTimeUiType(UITypeEnum uiType)
+    {
+        return uiType == UITypeEnum.DATE_TIME || uiType == UITypeEnum.CREATED_TIME || uiType == UITypeEnum.MODIFIED_TIME;
     }
 
     private static String convertToString(Object value)
@@ -416,6 +595,13 @@ public final class SearchApiFilterTranslator
         }
         if (value instanceof Boolean) {
             return value.toString();
+        }
+        // BigDecimal.toString() switches to scientific notation for values with a small adjusted exponent
+        // (e.g. a Decimal(38,18) zero prints as "0E-18"), which Lark's Search API cannot parse as a number,
+        // silently dropping matching rows for equality/range filters on NUMBER/CURRENCY/PROGRESS/RATING
+        // fields whose value is zero or otherwise near-zero. toPlainString() never uses scientific notation.
+        if (value instanceof BigDecimal) {
+            return ((BigDecimal) value).toPlainString();
         }
         if (value instanceof Number) {
             return value.toString();
