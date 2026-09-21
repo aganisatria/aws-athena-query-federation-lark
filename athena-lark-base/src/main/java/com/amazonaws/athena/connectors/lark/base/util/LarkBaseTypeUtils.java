@@ -77,15 +77,32 @@ public final class LarkBaseTypeUtils
             case URL, LOCATION, SINGLE_LINK, DUPLEX_LINK -> Types.MinorType.STRUCT;
 
             // Glue: depends on formulaType -> Arrow: depends on resolved type
-            case FORMULA -> {
-                NestedUIType newNestedUIType = new NestedUIType(larkField.nestedUIType().childType(), UITypeEnum.UNKNOWN);
-                AthenaFieldLarkBaseMapping newLarkBaseMapping = new AthenaFieldLarkBaseMapping(larkField.athenaName(), larkField.larkBaseFieldName(), newNestedUIType);
-
-                yield larkFieldToArrowMinorType(newLarkBaseMapping);
-            }
+            case FORMULA -> larkFieldToArrowMinorType(unwrapFormulaTarget(larkField));
 
             default -> Types.MinorType.VARCHAR;
         };
+    }
+
+    /**
+     * Unwraps a FORMULA field to the Lark field mapping for its resolved target type, so callers can
+     * switch on the target's UITypeEnum directly instead of always seeing FORMULA. Mirrors the crawler's
+     * equivalent unwrapping (a FORMULA's Glue type is built by calling the target UI type's own
+     * getGlueCatalogType) - without this, a formula resolving to a LIST/STRUCT-shaped target (e.g.
+     * Formula&lt;User&gt;, Formula&lt;Attachment&gt;) would get the correct Arrow MinorType (LIST/STRUCT,
+     * via this method feeding larkFieldToArrowMinorType) but the wrong child structure, since
+     * getLarkListChildField/getLarkStructChildFields would still see uiType=FORMULA - which neither
+     * switches on - and fall through to their generic default instead of the target type's real shape.
+     * Only unwraps one level, matching NestedUIType's own single-level (uiType, childType) shape and the
+     * pre-existing behavior this mirrors; a formula resolving to a LOOKUP's own target is a deeper case
+     * this shared model doesn't represent, unrelated to this fix.
+     */
+    private static AthenaFieldLarkBaseMapping unwrapFormulaTarget(AthenaFieldLarkBaseMapping larkField)
+    {
+        if (larkField.nestedUIType().uiType() != UITypeEnum.FORMULA) {
+            return larkField;
+        }
+        NestedUIType targetNestedUIType = new NestedUIType(larkField.nestedUIType().childType(), UITypeEnum.UNKNOWN);
+        return new AthenaFieldLarkBaseMapping(larkField.athenaName(), larkField.larkBaseFieldName(), targetNestedUIType);
     }
 
     /**
@@ -97,6 +114,7 @@ public final class LarkBaseTypeUtils
      */
     public static Field getLarkListChildField(AthenaFieldLarkBaseMapping larkField)
     {
+        larkField = unwrapFormulaTarget(larkField);
         UITypeEnum uiType = larkField.nestedUIType().uiType();
 
         return switch (uiType) {
@@ -194,6 +212,7 @@ public final class LarkBaseTypeUtils
      */
     public static List<Field> getLarkStructChildFields(AthenaFieldLarkBaseMapping larkField)
     {
+        larkField = unwrapFormulaTarget(larkField);
         UITypeEnum uiType = larkField.nestedUIType().uiType();
 
         return switch (uiType) {

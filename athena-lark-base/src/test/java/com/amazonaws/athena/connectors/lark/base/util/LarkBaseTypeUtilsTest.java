@@ -439,6 +439,50 @@ class LarkBaseTypeUtilsTest {
         assertThat(result.getType()).isEqualTo(ArrowType.Utf8.INSTANCE);
     }
 
+    // getLarkListChildField/getLarkStructChildFields must unwrap FORMULA the same way
+    // larkFieldToArrowMinorType already does - matches the crawler path, which builds a FORMULA's Glue
+    // type by calling the *target* UI type's own getGlueCatalogType (e.g. Formula<User> gets the same
+    // "array<struct<...>>" Glue type a plain USER field would). Without unwrapping here, the MinorType
+    // would correctly come out as LIST/STRUCT (via larkFieldToArrowMinorType's own unwrapping) but the
+    // child structure would still be built from uiType=FORMULA, which neither method switches on, so it
+    // silently fell back to a generic string child instead of the target type's real shape.
+    @Test
+    void testGetLarkListChildField_FormulaWithUserTarget_resolvesUserStructChildren() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "calc_owner", "Calculated Owner", new NestedUIType(UITypeEnum.FORMULA, UITypeEnum.USER));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getType()).isEqualTo(ArrowType.Struct.INSTANCE);
+        assertThat(result.getChildren()).extracting(Field::getName)
+                .containsExactly("avatar_url", "email", "en_name", "id", "name");
+    }
+
+    @Test
+    void testGetLarkStructChildFields_FormulaWithUrlTarget_resolvesUrlStructChildren() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "calc_link", "Calculated Link", new NestedUIType(UITypeEnum.FORMULA, UITypeEnum.URL));
+
+        List<Field> result = LarkBaseTypeUtils.getLarkStructChildFields(field);
+
+        assertThat(result).extracting(Field::getName).containsExactly("link", "text", "type");
+    }
+
+    @Test
+    void testLarkFieldToArrowField_FormulaWithUserTarget_producesListOfUserStruct() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "calc_owner", "Calculated Owner", new NestedUIType(UITypeEnum.FORMULA, UITypeEnum.USER));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field);
+
+        assertThat(result.getType()).isEqualTo(ArrowType.List.INSTANCE);
+        assertThat(result.getChildren()).hasSize(1);
+        Field listChild = result.getChildren().get(0);
+        assertThat(listChild.getType()).isEqualTo(ArrowType.Struct.INSTANCE);
+        assertThat(listChild.getChildren()).extracting(Field::getName)
+                .containsExactly("avatar_url", "email", "en_name", "id", "name");
+    }
+
     // End-to-end: larkFieldToArrowField for a LOOKUP field must produce a LIST Field whose single child carries
     // the resolved target type - this is the full schema shape Athena actually sees for a LOOKUP column.
     @Test
