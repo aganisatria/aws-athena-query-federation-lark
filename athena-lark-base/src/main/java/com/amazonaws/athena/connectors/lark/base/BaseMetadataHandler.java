@@ -100,6 +100,7 @@ import static com.amazonaws.athena.connectors.lark.base.BaseConstants.IS_PARALLE
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_BASE_FLAG;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_NAME_MAPPING_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_TYPE_MAPPING_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.NULLS_FIRST_FIELD_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RESERVED_SPLIT_KEY;
@@ -679,6 +680,48 @@ public class BaseMetadataHandler
         }
     }
 
+    /**
+     * Returns the original Lark field name of the primary (first) ORDER BY column when its direction
+     * explicitly requests NULLS FIRST, or {@code null} otherwise. Lark's Search API sort parameter has no
+     * null-positioning control and always places nulls last regardless of the "desc" flag (confirmed live:
+     * {@code ORDER BY x ASC NULLS FIRST} still returned non-null rows first), so a plain sort pushdown
+     * silently produces the wrong result for this direction. Only the primary sort column is checked -
+     * it's the one column whose null placement actually determines row order against Lark's fixed
+     * behavior; a secondary NULLS FIRST column on an already-tied primary key is a narrower case not
+     * handled here. The record handler uses this to run a two-phase fetch instead (see
+     * {@code BaseRecordHandler#getIterator}: nulls-only page(s) first via an added "isEmpty" filter
+     * condition, then the normally-sorted non-null rows via "isNotEmpty").
+     */
+    @VisibleForTesting
+    protected String findNullsFirstOriginalFieldName(List<OrderByField> orderByClause, String larkFieldNameMappingJson)
+    {
+        if (orderByClause == null || orderByClause.isEmpty()
+                || larkFieldNameMappingJson == null || larkFieldNameMappingJson.isEmpty()) {
+            return null;
+        }
+
+        OrderByField primarySort = orderByClause.get(0);
+        if (!primarySort.getDirection().isNullsFirst()) {
+            return null;
+        }
+
+        try {
+            Map<String, String> larkFieldNameToAthenaName = new ObjectMapper().readValue(
+                    larkFieldNameMappingJson, new TypeReference<Map<String, String>>() { });
+
+            for (Map.Entry<String, String> entry : larkFieldNameToAthenaName.entrySet()) {
+                if (entry.getValue().equalsIgnoreCase(primarySort.getColumnName())) {
+                    return entry.getKey();
+                }
+            }
+        }
+        catch (Exception e) {
+            logger.warn("doGetSplits: Failed to resolve NULLS FIRST field name for column {}: {}. "
+                    + "Proceeding without nulls-first handling.", primarySort.getColumnName(), e.getMessage(), e);
+        }
+        return null;
+    }
+
     private long calculateEffectiveRowCount(long totalRowCount, long queryLimit, boolean hasOrderBy)
     {
         if (hasOrderBy) {
@@ -966,6 +1009,7 @@ public class BaseMetadataHandler
             String larkFieldTypeMappingJson = FieldReaderUtil.readText(larkFieldTypeMappingReader, 0);
             String larkFieldNameMappingJson = FieldReaderUtil.readText(larkFieldNameMappingReader, 0);
             String sortExpression = buildSortExpressionForSplits(orderByClause, larkFieldNameMappingJson, tableName);
+            String nullsFirstFieldName = findNullsFirstOriginalFieldName(orderByClause, larkFieldNameMappingJson);
 
             long limit = request.getConstraints().hasLimit() ? request.getConstraints().getLimit() : -1;
             int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression);
@@ -985,6 +1029,11 @@ public class BaseMetadataHandler
                     .add(LARK_FIELD_NAME_MAPPING_PROPERTY, larkFieldNameMappingJson);
             if (!sortExpression.isEmpty()) {
                 splitBuilder.add(SORT_EXPRESSION_PROPERTY, sortExpression);
+            }
+            if (nullsFirstFieldName != null && !nullsFirstFieldName.isEmpty()) {
+                splitBuilder.add(NULLS_FIRST_FIELD_PROPERTY, nullsFirstFieldName);
+                logger.info("doGetSplits: ORDER BY requests NULLS FIRST on '{}', which Lark's Search API can't "
+                        + "natively produce. Record handler will run a two-phase fetch.", nullsFirstFieldName);
             }
 
             logger.info("doGetSplits: ORDER BY detected - collapsing {} planned partition row(s) into a single "

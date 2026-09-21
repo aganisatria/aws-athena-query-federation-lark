@@ -159,6 +159,15 @@ public final class BaseConstants
     public static final String SORT_EXPRESSION_PROPERTY = "sort_expression";
 
     /**
+     * Carries the original Lark field name of the primary ORDER BY column when its direction explicitly
+     * requests NULLS FIRST (e.g. {@code ORDER BY x ASC NULLS FIRST}). Lark's Search API sort parameter has
+     * no null-positioning control and always places nulls last regardless of the "desc" flag, so this
+     * property tells the record handler to run a two-phase fetch (nulls, then the Lark-sorted non-null
+     * rows) instead of trusting a single sorted request. Empty/absent when no such conflict exists.
+     */
+    public static final String NULLS_FIRST_FIELD_PROPERTY = "nulls_first_field";
+
+    /**
      * The property that helps metadata handler and record handler communicate the Lark field type mapping.
      * Stores a JSON string representing a Map<String, String> (AthenaFieldName -> LarkUiType).
      */

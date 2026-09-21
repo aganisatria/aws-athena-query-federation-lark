@@ -356,4 +356,84 @@ public class BaseMetadataHandlerTest {
 
         assertEquals("", sortExpression);
     }
+
+    @Test
+    public void testFindNullsFirstOriginalFieldName_ascNullsFirst_returnsLarkFieldName() {
+        // ORDER BY x ASC NULLS FIRST conflicts with Lark's fixed "nulls last" sort behavior (confirmed
+        // live: the connector still returned non-null rows first), so this must be detected and resolved
+        // back to the original Lark field name for the record handler's two-phase fetch.
+        String larkFieldNameMappingJson = "{\"Currency Field\":\"field_currency\"}";
+        List<com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField> orderByClause =
+            Collections.singletonList(new com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField(
+                "field_currency", com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField.Direction.ASC_NULLS_FIRST));
+
+        String result = handler.findNullsFirstOriginalFieldName(orderByClause, larkFieldNameMappingJson);
+
+        assertEquals("Currency Field", result);
+    }
+
+    @Test
+    public void testFindNullsFirstOriginalFieldName_descNullsFirst_returnsLarkFieldName() {
+        String larkFieldNameMappingJson = "{\"Currency Field\":\"field_currency\"}";
+        List<com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField> orderByClause =
+            Collections.singletonList(new com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField(
+                "field_currency", com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField.Direction.DESC_NULLS_FIRST));
+
+        String result = handler.findNullsFirstOriginalFieldName(orderByClause, larkFieldNameMappingJson);
+
+        assertEquals("Currency Field", result);
+    }
+
+    @Test
+    public void testFindNullsFirstOriginalFieldName_nullsLast_returnsNull() {
+        // NULLS_LAST already matches Lark's fixed behavior (confirmed live via CloudWatch logs: an
+        // implicit `ORDER BY x DESC` resolves to DESC_NULLS_LAST, not DESC_NULLS_FIRST as SQL's
+        // PostgreSQL-style convention would suggest), so no two-phase fetch is needed.
+        String larkFieldNameMappingJson = "{\"Currency Field\":\"field_currency\"}";
+        List<com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField> orderByClause =
+            Collections.singletonList(new com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField(
+                "field_currency", com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField.Direction.DESC_NULLS_LAST));
+
+        assertNull(handler.findNullsFirstOriginalFieldName(orderByClause, larkFieldNameMappingJson));
+    }
+
+    @Test
+    public void testFindNullsFirstOriginalFieldName_onlyChecksPrimarySortColumn() {
+        // Lark's Search API sorts on a flat priority list; a NULLS FIRST conflict on a secondary sort
+        // column (already tied on the primary key) is a narrower case this connector doesn't attempt to
+        // correct for, so only orderByClause.get(0) is ever checked.
+        String larkFieldNameMappingJson = "{\"Currency Field\":\"field_currency\",\"Rating Field\":\"field_rating\"}";
+        List<com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField> orderByClause = List.of(
+            new com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField(
+                "field_currency", com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField.Direction.ASC_NULLS_LAST),
+            new com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField(
+                "field_rating", com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField.Direction.ASC_NULLS_FIRST));
+
+        assertNull(handler.findNullsFirstOriginalFieldName(orderByClause, larkFieldNameMappingJson));
+    }
+
+    @Test
+    public void testFindNullsFirstOriginalFieldName_columnNotInMapping_returnsNull() {
+        String larkFieldNameMappingJson = "{\"Currency Field\":\"field_currency\"}";
+        List<com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField> orderByClause =
+            Collections.singletonList(new com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField(
+                "field_unmapped", com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField.Direction.ASC_NULLS_FIRST));
+
+        assertNull(handler.findNullsFirstOriginalFieldName(orderByClause, larkFieldNameMappingJson));
+    }
+
+    @Test
+    public void testFindNullsFirstOriginalFieldName_emptyOrderByClause_returnsNull() {
+        assertNull(handler.findNullsFirstOriginalFieldName(Collections.emptyList(), "{\"Currency Field\":\"field_currency\"}"));
+    }
+
+    @Test
+    public void testFindNullsFirstOriginalFieldName_emptyMappingJson_returnsNull() {
+        List<com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField> orderByClause =
+            Collections.singletonList(new com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField(
+                "field_currency", com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField.Direction.ASC_NULLS_FIRST));
+
+        assertNull(handler.findNullsFirstOriginalFieldName(orderByClause, ""));
+        assertNull(handler.findNullsFirstOriginalFieldName(orderByClause, null));
+    }
 }
