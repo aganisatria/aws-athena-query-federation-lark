@@ -42,7 +42,6 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import org.apache.arrow.util.VisibleForTesting;
-import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.commons.lang3.StringUtils;
@@ -56,7 +55,6 @@ import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 
 import javax.annotation.Nonnull;
 
-import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -317,8 +315,6 @@ public class BaseRecordHandler extends RecordHandler
         long successCount = 0;
         long errorCount = 0;
 
-        final Constraints constraints = recordsRequest.getConstraints();
-        final Map<String, ValueSet> constraintSummary = (constraints != null) ? constraints.getSummary() : Collections.emptyMap();
         final org.apache.arrow.vector.types.pojo.Schema schema = recordsRequest.getSchema();
 
         while (itemIterator.hasNext() && queryStatusChecker.isQueryRunning()) {
@@ -330,40 +326,25 @@ public class BaseRecordHandler extends RecordHandler
                     logger.info("Attempting to write row #{}. Flattened data: {}", currentRowNum, item);
                 }
 
-                // Make sure all schema fields are present, provide defaults based on schema AND constraints
+                // A key missing from `item` means the field was null in Lark's response - RecordItem's
+                // constructor strips null-valued entries entirely (see SearchRecordsResponse.RecordItem), so
+                // "absent" and "was null" are the same thing here. Every schema field is nullable (see
+                // LarkBaseTypeUtils), so always put null and let each extractor's already-correct null
+                // handling (isSet=0) take it from there. A previous version of this loop inserted a fake
+                // non-null default (e.g. "" for VARCHAR, BigDecimal.ZERO for DECIMAL) whenever the active
+                // constraint had nullAllowed=false, on the theory that the SDK's row-level ConstraintProjector
+                // needed a concrete value to check - but the SDK correctly evaluates ConstraintProjector.apply
+                // (null) too (confirmed against the SDK's VarCharFieldWriter bytecode), and the fake default
+                // could itself spuriously satisfy the constraint (confirmed live: an empty-string default
+                // sorts below every real value, so `field_single_select NOT BETWEEN 'Option A' AND 'Option B'`
+                // included all 10 genuinely-null rows as if they were "less than 'Option A'", returning 190
+                // instead of 180). This only surfaces for columns where pushdown to Lark was skipped (so the
+                // null rows are actually fetched instead of filtered server-side) combined with a
+                // nullAllowed=false constraint - e.g. any inequality/range query on a non-orderable type.
                 for (Field field : schema.getFields()) {
                     String fieldName = field.getName();
                     if (!item.containsKey(fieldName)) {
-                        boolean constraintAllowsNull = true;
-                        ValueSet valueSet = constraintSummary.get(fieldName);
-                        if (valueSet != null) {
-                            constraintAllowsNull = valueSet.isNullAllowed();
-                            if (envVarService.isEnableDebugLogging()) {
-                                logger.info("Row #{}: Constraint found for field '{}'. nullAllowed={}", currentRowNum, fieldName, constraintAllowsNull);
-                            }
-                        }
-
-                        // Input null if schema allows null and constraint allows null.
-                        // Otherwise, insert default non-null value.
-                        if (field.isNullable() && constraintAllowsNull) {
-                            if (field.getType() instanceof ArrowType.Bool) {
-                                item.put(fieldName, false);
-                                if (envVarService.isEnableDebugLogging()) {
-                                    logger.info("Row #{}: Missing boolean field '{}'. Defaulting to false.", currentRowNum, fieldName);
-                                }
-                            }
-                            else {
-                                item.put(fieldName, null);
-                                if (envVarService.isEnableDebugLogging()) {
-                                    logger.info("Row #{}: Field '{}' is nullable and constraint allows null (or no constraint), putting null.", currentRowNum, fieldName);
-                                }
-                            }
-                        }
-                        else {
-                            ArrowType fieldType = field.getType();
-                            Object defaultValue = getDefaultValueForType(fieldType);
-                            item.put(fieldName, defaultValue);
-                        }
+                        item.put(fieldName, null);
                     }
                 }
 
@@ -409,63 +390,6 @@ public class BaseRecordHandler extends RecordHandler
             logger.info("Completed processing records: {} total rows processed, {} success, {} filtered/error",
                     rowCount, successCount, errorCount);
         }
-    }
-
-    /**
-     * Determines a default value for a given ArrowType, intended for non-nullable fields
-     * that are missing from the source data. Uses Types.MinorType for switching.
-     * Usually happens when the field is being filtered from the query.
-     * For example: SELECT * FROM table WHERE field <> 'foo'
-     *
-     * @param type The ArrowType of the field.
-     * @return A default value (e.g., 0, "", false) or null if no suitable default is known.
-     */
-    private Object getDefaultValueForType(ArrowType type)
-    {
-        Types.MinorType minorType = Types.getMinorTypeForArrowType(type);
-        if (envVarService.isEnableDebugLogging()) {
-            logger.info("getDefaultValueForType: type={}, minorType={}", type, minorType);
-        }
-
-        return switch (minorType) {
-            case VARCHAR, LARGEVARCHAR, VIEWVARCHAR -> "";
-
-            case BIT -> false;
-
-            case TINYINT, SMALLINT, INT, UINT1, UINT2, UINT4, DATEDAY -> 0;
-            case BIGINT, UINT8, DATEMILLI, TIMESEC, TIMEMILLI, TIMEMICRO, TIMENANO, TIMESTAMPSEC, TIMESTAMPMILLI,
-                 TIMESTAMPMICRO, TIMESTAMPNANO, TIMESTAMPSECTZ, TIMESTAMPMILLITZ, TIMESTAMPMICROTZ, TIMESTAMPNANOTZ,
-                 DURATION -> 0L;
-
-            case FLOAT4, FLOAT2 -> 0.0f;
-            case FLOAT8 -> 0.0d;
-            case DECIMAL, DECIMAL256 -> BigDecimal.ZERO;
-
-            case VARBINARY, LARGEVARBINARY, FIXEDSIZEBINARY, VIEWVARBINARY -> new byte[0];
-
-            case INTERVALDAY, INTERVALYEAR, INTERVALMONTHDAYNANO -> {
-                logger.warn("Cannot determine a safe default value for non-nullable Interval type {}. Returning null.", minorType);
-                yield null;
-            }
-
-            case LIST, LARGELIST, LISTVIEW, LARGELISTVIEW, FIXED_SIZE_LIST -> {
-                if (envVarService.isEnableDebugLogging()) {
-                    logger.info("Returning empty List as default for non-nullable MinorType {}", minorType);
-                }
-                yield Collections.emptyList();
-            }
-            case STRUCT, MAP -> {
-                if (envVarService.isEnableDebugLogging()) {
-                    logger.info("Returning empty Map as default for non-nullable MinorType {}", minorType);
-                }
-                yield Collections.emptyMap();
-            }
-
-            case UNION, DENSEUNION, RUNENDENCODED, EXTENSIONTYPE, NULL -> {
-                logger.warn("Cannot determine a safe default value for non-nullable MinorType {}. Returning null.", minorType);
-                yield null;
-            }
-        };
     }
 
     /**
