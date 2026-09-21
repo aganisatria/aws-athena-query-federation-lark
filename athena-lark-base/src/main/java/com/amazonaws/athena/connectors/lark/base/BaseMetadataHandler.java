@@ -98,8 +98,10 @@ import static com.amazonaws.athena.connectors.lark.base.BaseConstants.EXPECTED_R
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.FILTER_EXPRESSION_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.IS_PARALLEL_SPLIT_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_BASE_FLAG;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_BASE_ID_PARAMETER;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_NAME_MAPPING_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_TYPE_MAPPING_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_TABLE_ID_PARAMETER;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.NULLS_FIRST_FIELD_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE_PROPERTY;
@@ -504,6 +506,23 @@ public class BaseMetadataHandler
      */
     private Optional<PartitionInfoResult> resolvePartitionInfo(TableName tableName, GetTableLayoutRequest request)
     {
+        // For a table the crawler already populated, Athena hands back on every request the exact
+        // Schema doGetTable returned - which already carries the Glue table's larkBaseId/larkTableId
+        // parameters as custom metadata (copied in by the SDK's own GlueMetadataHandler machinery).
+        // The Lark Base source and experimental providers below are for a *different* deployment mode
+        // (tables resolved fresh from Lark itself, not pre-crawled into Glue) and are guaranteed to
+        // fail for a crawled table: the source provider matches by Lark's own naming, which a crawled
+        // table's human-chosen Athena name generally won't equal, and the experimental provider's
+        // heuristic (matching a token in the raw query text against the schema/table name) always
+        // "succeeds" trivially for perfectly ordinary SQL, then wastes a real Lark API round-trip
+        // (~1s, confirmed live via CloudWatch) discovering that the schema/table name isn't a real
+        // Lark ID. Skip straight to the already-known-good answer when it's sitting right there.
+        Optional<PartitionInfoResult> crawledSchemaPartitionInfo = tryResolveFromCrawledSchemaMetadata(tableName, request);
+        if (crawledSchemaPartitionInfo.isPresent()) {
+            logger.info("getPartitions: Found partition info from the crawled table's own schema metadata.");
+            return crawledSchemaPartitionInfo;
+        }
+
         if (envVarService.isActivateLarkBaseSource() || envVarService.isActivateLarkDriveSource()) {
             logger.info("getPartitions: Attempting to get partition info from Lark Base source.");
             Optional<PartitionInfoResult> larkSourcePartitionInfo = larkSourceMetadataProvider.getPartitionInfo(tableName);
@@ -538,6 +557,39 @@ public class BaseMetadataHandler
         }
 
         return Optional.empty();
+    }
+
+    /**
+     * Reads larkBaseId/larkTableId directly off the request's already-resolved Schema (see the call
+     * site's comment in resolvePartitionInfo) instead of re-fetching them from Glue. Field name
+     * mappings still need their own Glue lookup (the column-comment-encoded type info isn't carried
+     * on the top-level Schema metadata), so this only saves the redundant ID lookup and, more
+     * importantly, the two doomed provider attempts ahead of it.
+     */
+    @VisibleForTesting
+    protected Optional<PartitionInfoResult> tryResolveFromCrawledSchemaMetadata(TableName tableName, GetTableLayoutRequest request)
+    {
+        Schema schema = request.getSchema();
+        if (schema == null) {
+            return Optional.empty();
+        }
+
+        Map<String, String> schemaMetadata = schema.getCustomMetadata();
+        String baseId = schemaMetadata.get(LARK_BASE_ID_PARAMETER);
+        String tableId = schemaMetadata.get(LARK_TABLE_ID_PARAMETER);
+        if (baseId == null || baseId.isEmpty() || tableId == null || tableId.isEmpty()) {
+            return Optional.empty();
+        }
+
+        try {
+            List<AthenaFieldLarkBaseMapping> mappings = glueCatalogService.getFieldNameMappings(tableName.getSchemaName(), tableName.getTableName());
+            return Optional.of(new PartitionInfoResult(baseId, tableId, mappings));
+        }
+        catch (Exception e) {
+            logger.warn("getPartitions: Found larkBaseId/larkTableId on the schema for {} but failed to fetch field "
+                    + "mappings from Glue: {}. Falling back to the normal provider chain.", tableName, e.getMessage(), e);
+            return Optional.empty();
+        }
     }
 
     private long extractQueryLimit(GetTableLayoutRequest request)
