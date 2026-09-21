@@ -327,4 +327,33 @@ public class BaseMetadataHandlerTest {
         assertFalse(result);
         verify(mockInvoker, never()).invoke(any());
     }
+
+    @Test
+    public void testBuildSortExpressionForSplits_invertsLarkFieldNameMapping() throws Exception {
+        // The partition only carries larkFieldNameMappingJson as Map<larkFieldName, athenaColumnName> (see
+        // its use in BaseRecordHandler) - this must invert it before handing it to
+        // SearchApiFilterTranslator.toSortJson, which looks fields up by Athena column name.
+        com.amazonaws.athena.connector.lambda.domain.TableName tableName =
+            new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
+
+        String larkFieldNameMappingJson = "{\"Currency Field\":\"field_currency\"}";
+        List<com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField> orderByClause =
+            Collections.singletonList(new com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField(
+                "field_currency", com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField.Direction.ASC_NULLS_LAST));
+
+        String sortExpression = handler.buildSortExpressionForSplits(orderByClause, larkFieldNameMappingJson, tableName);
+
+        assertNotNull(sortExpression);
+        assertTrue(sortExpression.contains("\"field_name\":\"Currency Field\""));
+    }
+
+    @Test
+    public void testBuildSortExpressionForSplits_emptyMappingJson_returnsEmptyString() {
+        com.amazonaws.athena.connector.lambda.domain.TableName tableName =
+            new com.amazonaws.athena.connector.lambda.domain.TableName("test_schema", "test_table");
+
+        String sortExpression = handler.buildSortExpressionForSplits(Collections.emptyList(), "", tableName);
+
+        assertEquals("", sortExpression);
+    }
 }

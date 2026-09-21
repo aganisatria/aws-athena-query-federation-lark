@@ -28,6 +28,7 @@ import com.amazonaws.athena.connector.lambda.data.BlockWriter;
 import com.amazonaws.athena.connector.lambda.data.SchemaBuilder;
 import com.amazonaws.athena.connector.lambda.domain.Split;
 import com.amazonaws.athena.connector.lambda.domain.TableName;
+import com.amazonaws.athena.connector.lambda.domain.predicate.OrderByField;
 import com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException;
 import com.amazonaws.athena.connector.lambda.handlers.GlueMetadataHandler;
 import com.amazonaws.athena.connector.lambda.metadata.GetDataSourceCapabilitiesRequest;
@@ -64,6 +65,7 @@ import com.amazonaws.athena.connectors.lark.base.service.LarkDriveService;
 import com.amazonaws.athena.connectors.lark.base.translator.SearchApiFilterTranslator;
 import com.amazonaws.athena.connectors.lark.base.util.CommonUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.arrow.util.VisibleForTesting;
 import org.apache.arrow.vector.complex.reader.FieldReader;
@@ -645,6 +647,38 @@ public class BaseMetadataHandler
         }
     }
 
+    /**
+     * Builds a sort expression for {@link #doGetSplits}, where {@code orderByClause} is reliably populated
+     * (unlike at {@code getPartitions} time - see the ORDER BY handling at the top of doGetSplits). The
+     * partition only carries {@code larkFieldNameMappingJson}, a {@code Map<larkFieldName, athenaColumnName>}
+     * (see its use in {@code BaseRecordHandler}), so this inverts it into the
+     * {@code List<AthenaFieldLarkBaseMapping>} shape {@link SearchApiFilterTranslator#toSortJson} expects;
+     * the UI type isn't needed for sorting, so it's left null.
+     */
+    @VisibleForTesting
+    protected String buildSortExpressionForSplits(List<OrderByField> orderByClause, String larkFieldNameMappingJson, TableName tableName)
+    {
+        if (larkFieldNameMappingJson == null || larkFieldNameMappingJson.isEmpty()) {
+            return "";
+        }
+
+        try {
+            Map<String, String> larkFieldNameToAthenaName = new ObjectMapper().readValue(
+                    larkFieldNameMappingJson, new TypeReference<Map<String, String>>() { });
+
+            List<AthenaFieldLarkBaseMapping> fieldNameMappings = new ArrayList<>();
+            for (Map.Entry<String, String> entry : larkFieldNameToAthenaName.entrySet()) {
+                fieldNameMappings.add(new AthenaFieldLarkBaseMapping(entry.getValue(), entry.getKey(), null));
+            }
+
+            return SearchApiFilterTranslator.toSortJson(orderByClause, fieldNameMappings);
+        }
+        catch (Exception e) {
+            logger.warn("doGetSplits: Failed to translate sort expression for {}: {}. Proceeding without sort.", tableName, e.getMessage(), e);
+            return "";
+        }
+    }
+
     private long calculateEffectiveRowCount(long totalRowCount, long queryLimit, boolean hasOrderBy)
     {
         if (hasOrderBy) {
@@ -912,6 +946,52 @@ public class BaseMetadataHandler
         FieldReader endIndexReader = partitions.getFieldReader(SPLIT_END_INDEX_PROPERTY);
         FieldReader larkFieldTypeMappingReader = partitions.getFieldReader(LARK_FIELD_TYPE_MAPPING_PROPERTY);
         FieldReader larkFieldNameMappingReader = partitions.getFieldReader(LARK_FIELD_NAME_MAPPING_PROPERTY);
+
+        // getPartitions (GetTableLayoutRequest) never actually receives ORDER BY info from Athena's engine
+        // in practice - request.getConstraints().getOrderByClause() is empty there even for a query with
+        // an ORDER BY (confirmed live via CloudWatch logs: orderByClause=[] at that stage, but correctly
+        // populated by the time GetSplitsRequest arrives here). That means any parallel-split plan
+        // getPartitions already baked into the partition rows was decided blind to the ORDER BY - and
+        // per-split sorting couldn't fix that anyway, since each split only ever sees a positional subset
+        // of rows, so no per-split sort can produce a correct global order (confirmed live:
+        // `ORDER BY field_currency ASC LIMIT 3` returned the 4th-smallest value first and dropped the true
+        // minimum). When ORDER BY is present, ignore however many partition rows were planned and build
+        // exactly one split that fetches the whole (filtered) result set through a single correctly-sorted
+        // Lark request instead.
+        List<OrderByField> orderByClause = request.getConstraints() != null ? request.getConstraints().getOrderByClause() : null;
+        if (orderByClause != null && !orderByClause.isEmpty()) {
+            String baseId = FieldReaderUtil.readText(baseIdReader, 0);
+            String tableId = FieldReaderUtil.readText(tableIdReader, 0);
+            String filterExpression = FieldReaderUtil.readText(filterExprReader, 0);
+            String larkFieldTypeMappingJson = FieldReaderUtil.readText(larkFieldTypeMappingReader, 0);
+            String larkFieldNameMappingJson = FieldReaderUtil.readText(larkFieldNameMappingReader, 0);
+            String sortExpression = buildSortExpressionForSplits(orderByClause, larkFieldNameMappingJson, tableName);
+
+            long limit = request.getConstraints().hasLimit() ? request.getConstraints().getLimit() : -1;
+            int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression);
+            int pageSizeForSplit = (limit > 0 && limit < PAGE_SIZE) ? (int) limit : PAGE_SIZE;
+            int finalExpectedRowCount = (limit > 0 && limit < totalRowCount) ? (int) limit : totalRowCount;
+
+            Split.Builder splitBuilder = Split.newBuilder(makeSpillLocation(request), makeEncryptionKey())
+                    .add(BASE_ID_PROPERTY, baseId)
+                    .add(TABLE_ID_PROPERTY, tableId)
+                    .add(FILTER_EXPRESSION_PROPERTY, filterExpression)
+                    .add(PAGE_SIZE_PROPERTY, String.valueOf(pageSizeForSplit))
+                    .add(EXPECTED_ROW_COUNT_PROPERTY, String.valueOf(finalExpectedRowCount))
+                    .add(IS_PARALLEL_SPLIT_PROPERTY, String.valueOf(false))
+                    .add(SPLIT_START_INDEX_PROPERTY, String.valueOf(0L))
+                    .add(SPLIT_END_INDEX_PROPERTY, String.valueOf(0L))
+                    .add(LARK_FIELD_TYPE_MAPPING_PROPERTY, larkFieldTypeMappingJson)
+                    .add(LARK_FIELD_NAME_MAPPING_PROPERTY, larkFieldNameMappingJson);
+            if (!sortExpression.isEmpty()) {
+                splitBuilder.add(SORT_EXPRESSION_PROPERTY, sortExpression);
+            }
+
+            logger.info("doGetSplits: ORDER BY detected - collapsing {} planned partition row(s) into a single "
+                    + "sorted split for table {}. PageSize={}, ExpectedRows={}",
+                    partitionCount, tableName, pageSizeForSplit, finalExpectedRowCount);
+            return new GetSplitsResponse(request.getCatalogName(), splitBuilder.build());
+        }
 
         for (int rowNum = 0; rowNum < partitionCount; rowNum++) {
             logger.debug("doGetSplits: Processing partition row {}", rowNum);
