@@ -171,4 +171,12 @@ class UtilTest {
         assertEquals("special_chars_", Util.sanitizeGlueRelatedName("special@chars!"));
         assertEquals("mixed_case_name", Util.sanitizeGlueRelatedName("Mixed-Case-Name"));
     }
+
+    @Test
+    void sanitizeGlueRelatedName_null_shouldReturnNullNotThrow() {
+        // Regression test: a null name (e.g. a control-table record with a blank Name cell) used to
+        // crash here with a raw NullPointerException instead of letting callers like
+        // LarkBaseService.sanitizeRecords report it via their own clearer validation.
+        assertNull(Util.sanitizeGlueRelatedName(null));
+    }
 }

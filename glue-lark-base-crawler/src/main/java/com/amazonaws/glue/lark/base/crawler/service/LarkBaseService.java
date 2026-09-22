@@ -346,6 +346,10 @@ public class LarkBaseService extends CommonLarkService
      */
     public List<LarkDatabaseRecord> sanitizeRecords(List<LarkDatabaseRecord> records)
     {
+        // Util.sanitizeGlueRelatedName is null-safe (returns null for a null name), so a control-table
+        // record with a blank Name cell survives this mapping as a record with a null name, instead of
+        // crashing here with a raw NullPointerException - leaving the null-fields check below (which
+        // exists specifically to catch and report this case clearly) able to actually run.
         List<LarkDatabaseRecord> sanitizedRecords = records.stream()
                 .map(record -> {
                     String sanitizedId = record.id();
@@ -354,15 +358,10 @@ public class LarkBaseService extends CommonLarkService
                 })
                 .collect(Collectors.toList());
 
-        List<String> duplicateNames = sanitizedRecords.stream()
-                .map(LarkDatabaseRecord::name)
-                .filter(name -> Collections.frequency(sanitizedRecords.stream().map(LarkDatabaseRecord::name).collect(Collectors.toList()), name) > 1)
-                .toList();
-
-        if (!duplicateNames.isEmpty()) {
-            throw new RuntimeException("Duplicate record names found duplicates: " + duplicateNames);
-        }
-
+        // Checked before the duplicate-name check below so a blank Name cell is reported as "null
+        // fields", not misattributed as a "duplicate" (multiple null names are otherwise indistinguishable
+        // from each other under Collections.frequency, and would report every null-name row as a
+        // "duplicate" of every other one instead of the more specific, actionable null-field error).
         List<String> nullFields = sanitizedRecords.stream()
                 .filter(record -> record.id() == null || record.name() == null)
                 .map(record -> record.id() == null ? "id" : "name")
@@ -370,6 +369,15 @@ public class LarkBaseService extends CommonLarkService
 
         if (!nullFields.isEmpty()) {
             throw new RuntimeException("Null record fields found null fields: " + nullFields);
+        }
+
+        List<String> duplicateNames = sanitizedRecords.stream()
+                .map(LarkDatabaseRecord::name)
+                .filter(name -> Collections.frequency(sanitizedRecords.stream().map(LarkDatabaseRecord::name).collect(Collectors.toList()), name) > 1)
+                .toList();
+
+        if (!duplicateNames.isEmpty()) {
+            throw new RuntimeException("Duplicate record names found duplicates: " + duplicateNames);
         }
 
         return sanitizedRecords;

@@ -320,8 +320,24 @@ public final class Util
         return glueDatabaseNameSet.size() != glueDatabaseNames.size();
     }
 
+    /**
+     * Sanitizes a name for use as a Glue-related identifier (table/database/column name). Null-safe:
+     * returns null for a null input instead of throwing. This matters for callers like
+     * LarkBaseService.sanitizeRecords, which sanitizes a control-table record's name before running
+     * its own explicit "is this field null?" validation (to raise a clear, actionable error rather
+     * than a raw NullPointerException) - a blank Name cell in the control table is a realistic
+     * operator mistake, not a contrived edge case. Before this null-safety, that validation was
+     * unreachable: this method NPE'd first, on the same null value the validation was written to
+     * catch and report cleanly.
+     *
+     * @param tableName The name to sanitize, or null.
+     * @return The sanitized name, or null if tableName was null.
+     */
     public static String sanitizeGlueRelatedName(String tableName)
     {
+        if (tableName == null) {
+            return null;
+        }
         return tableName.toLowerCase().replaceAll("[^a-zA-Z0-9$]", "_");
     }
 
