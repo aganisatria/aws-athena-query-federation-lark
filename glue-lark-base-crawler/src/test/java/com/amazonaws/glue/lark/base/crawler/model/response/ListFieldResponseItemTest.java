@@ -96,6 +96,32 @@ public class ListFieldResponseItemTest {
     }
 
     @Test
+    public void getFormulaGlueCatalogType_formula_noUiTypeButWithDataType_shouldFallBackToDataTypeCode() {
+        // Regression test: a FORMULA field that is a bare reference to another field (e.g.
+        // "$field[fldXXX]") omits "ui_type" entirely and gives only the numeric "data_type" code.
+        // Before the fix, this always fell back to TEXT/"string", corrupting a Formula<User> into a
+        // plain string Glue type instead of the correct array<struct<...>>.
+        Map<String, Object> property = new HashMap<>();
+        property.put("type", Map.of("data_type", 11));
+        ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder()
+                .uiType("Formula")
+                .property(property)
+                .build();
+        assertEquals(UITypeEnum.USER.getGlueCatalogType(null), item.getFormulaGlueCatalogType());
+    }
+
+    @Test
+    public void getFormulaGlueCatalogType_formula_noUiTypeAndNonNumericDataType_shouldDefaultToTextGlueType() {
+        Map<String, Object> property = new HashMap<>();
+        property.put("type", Map.of("data_type", "not_a_number"));
+        ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder()
+                .uiType("Formula")
+                .property(property)
+                .build();
+        assertEquals(UITypeEnum.TEXT.getGlueCatalogType(null), item.getFormulaGlueCatalogType());
+    }
+
+    @Test
     public void getLookupSourceFieldAndTableId_notLookupType_shouldReturnNull() {
         ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder().uiType("Text").build();
         assertNull(item.getLookupSourceFieldAndTableId());
@@ -191,6 +217,23 @@ public class ListFieldResponseItemTest {
     }
 
     @Test
+    public void getFormulaGlueCatalogUITypeEnum_formula_noUiTypeButWithDataType_shouldFallBackToDataTypeCode() {
+        // Regression test for Bug #17: a FORMULA field whose Lark metadata omits "ui_type" and gives
+        // only the numeric "data_type" code (observed for a formula that's a bare reference to
+        // another field, e.g. "$field[fldXXX]") must resolve via the code, not silently become TEXT.
+        Map<String, Object> property = Map.of("type", Map.of("data_type", 11));
+        ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder().uiType("Formula").property(property).build();
+        assertEquals(UITypeEnum.USER, item.getFormulaGlueCatalogUITypeEnum());
+    }
+
+    @Test
+    public void getFormulaGlueCatalogUITypeEnum_formula_noUiTypeAndNonNumericDataType_shouldDefaultToTextEnum() {
+        Map<String, Object> property = Map.of("type", Map.of("data_type", "not_a_number"));
+        ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder().uiType("Formula").property(property).build();
+        assertEquals(UITypeEnum.TEXT, item.getFormulaGlueCatalogUITypeEnum());
+    }
+
+    @Test
     public void getFormulaType_formula_withValidPropertyType_shouldReturnCorrectUiTypeString() {
         Map<String, Object> correctProperty = Map.of("type", Map.of("ui_type", "Checkbox"));
         ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder().uiType("Formula").property(correctProperty).build();
@@ -200,6 +243,20 @@ public class ListFieldResponseItemTest {
     @Test
     public void getFormulaType_formula_noPropertyType_shouldDefaultToTextUiType() {
         ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder().uiType("Formula").property(Collections.emptyMap()).build();
+        assertEquals(UITypeEnum.TEXT.getUiType(), item.getFormulaType());
+    }
+
+    @Test
+    public void getFormulaType_formula_noUiTypeButWithDataType_shouldFallBackToDataTypeCode() {
+        Map<String, Object> property = Map.of("type", Map.of("data_type", 11));
+        ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder().uiType("Formula").property(property).build();
+        assertEquals(UITypeEnum.USER.getUiType(), item.getFormulaType());
+    }
+
+    @Test
+    public void getFormulaType_formula_noUiTypeAndNonNumericDataType_shouldDefaultToTextUiType() {
+        Map<String, Object> property = Map.of("type", Map.of("data_type", "not_a_number"));
+        ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder().uiType("Formula").property(property).build();
         assertEquals(UITypeEnum.TEXT.getUiType(), item.getFormulaType());
     }
 

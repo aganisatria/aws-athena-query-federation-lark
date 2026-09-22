@@ -150,4 +150,47 @@ class UITypeEnumTest {
         assertThat(UITypeEnum.BUTTON.getUiType()).isEqualTo("Button");
         assertThat(UITypeEnum.STAGE.getUiType()).isEqualTo("Stage");
     }
+
+    @Test
+    void testFromDataTypeCodeUnambiguousCodes() {
+        // These codes have exactly one corresponding UITypeEnum, unlike 1 (Text/Barcode/Email) and
+        // 2 (Number/Currency/Progress/Rating), which Lark only disambiguates via "ui_type".
+        assertThat(UITypeEnum.fromDataTypeCode(3)).isEqualTo(UITypeEnum.SINGLE_SELECT);
+        assertThat(UITypeEnum.fromDataTypeCode(4)).isEqualTo(UITypeEnum.MULTI_SELECT);
+        assertThat(UITypeEnum.fromDataTypeCode(5)).isEqualTo(UITypeEnum.DATE_TIME);
+        assertThat(UITypeEnum.fromDataTypeCode(7)).isEqualTo(UITypeEnum.CHECKBOX);
+        assertThat(UITypeEnum.fromDataTypeCode(11)).isEqualTo(UITypeEnum.USER);
+        assertThat(UITypeEnum.fromDataTypeCode(13)).isEqualTo(UITypeEnum.PHONE);
+        assertThat(UITypeEnum.fromDataTypeCode(15)).isEqualTo(UITypeEnum.URL);
+        assertThat(UITypeEnum.fromDataTypeCode(17)).isEqualTo(UITypeEnum.ATTACHMENT);
+        assertThat(UITypeEnum.fromDataTypeCode(18)).isEqualTo(UITypeEnum.SINGLE_LINK);
+        assertThat(UITypeEnum.fromDataTypeCode(19)).isEqualTo(UITypeEnum.LOOKUP);
+        assertThat(UITypeEnum.fromDataTypeCode(20)).isEqualTo(UITypeEnum.FORMULA);
+        assertThat(UITypeEnum.fromDataTypeCode(21)).isEqualTo(UITypeEnum.DUPLEX_LINK);
+        assertThat(UITypeEnum.fromDataTypeCode(22)).isEqualTo(UITypeEnum.LOCATION);
+        assertThat(UITypeEnum.fromDataTypeCode(23)).isEqualTo(UITypeEnum.GROUP_CHAT);
+        assertThat(UITypeEnum.fromDataTypeCode(24)).isEqualTo(UITypeEnum.STAGE);
+        assertThat(UITypeEnum.fromDataTypeCode(1001)).isEqualTo(UITypeEnum.CREATED_TIME);
+        assertThat(UITypeEnum.fromDataTypeCode(1002)).isEqualTo(UITypeEnum.MODIFIED_TIME);
+        assertThat(UITypeEnum.fromDataTypeCode(1003)).isEqualTo(UITypeEnum.CREATED_USER);
+        assertThat(UITypeEnum.fromDataTypeCode(1004)).isEqualTo(UITypeEnum.MODIFIED_USER);
+        assertThat(UITypeEnum.fromDataTypeCode(1005)).isEqualTo(UITypeEnum.AUTO_NUMBER);
+        assertThat(UITypeEnum.fromDataTypeCode(3001)).isEqualTo(UITypeEnum.BUTTON);
+    }
+
+    @Test
+    void testFromDataTypeCodeAmbiguousCodes() {
+        // Codes 1 and 2 are shared by multiple ui_types on Lark's side; without a "ui_type" string
+        // to disambiguate, we resolve to the plain/generic member.
+        assertThat(UITypeEnum.fromDataTypeCode(1)).isEqualTo(UITypeEnum.TEXT);
+        assertThat(UITypeEnum.fromDataTypeCode(2)).isEqualTo(UITypeEnum.NUMBER);
+    }
+
+    @Test
+    void testFromDataTypeCodeUnrecognizedOrNull() {
+        assertThat(UITypeEnum.fromDataTypeCode(null)).isEqualTo(UITypeEnum.UNKNOWN);
+        assertThat(UITypeEnum.fromDataTypeCode(9999)).isEqualTo(UITypeEnum.UNKNOWN);
+        assertThat(UITypeEnum.fromDataTypeCode(-1)).isEqualTo(UITypeEnum.UNKNOWN);
+        assertThat(UITypeEnum.fromDataTypeCode(0)).isEqualTo(UITypeEnum.UNKNOWN);
+    }
 }
