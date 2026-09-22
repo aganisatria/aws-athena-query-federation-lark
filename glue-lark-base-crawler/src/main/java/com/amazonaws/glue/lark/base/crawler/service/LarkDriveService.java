@@ -60,48 +60,25 @@ public class LarkDriveService extends CommonLarkService
 
         do {
             try {
-                URIBuilder uriBuilder = new URIBuilder(LARK_DRIVE_URL + "/" + "files")
-                        .addParameter("folder_token", folderToken)
-                        .addParameter("page_size", String.valueOf(pageSize));
+                final String currentPageToken = pageToken;
+                ListAllFolderResponse tableResponse = retry.invoke(() -> fetchFolderPage(folderToken, currentPageToken));
 
-                if (!pageToken.isEmpty()) {
-                    uriBuilder.addParameter("page_token", pageToken);
-                }
+                if (tableResponse.getFiles() != null) {
+                    List<ListAllFolderResponse.DriveFile> filteredFiles = tableResponse.getFiles().stream()
+                            .filter(file -> file.getType().equalsIgnoreCase("bitable")).toList();
 
-                URI uri = uriBuilder.build();
-
-                HttpGet request = new HttpGet(uri);
-                request.setHeader("Authorization", "Bearer " + tenantAccessToken);
-                request.setHeader("Content-Type", "application/json");
-
-                HttpResponse response = httpClient.execute(request);
-                String responseBody = EntityUtils.toString(response.getEntity());
-
-                ListAllFolderResponse tableResponse = objectMapper.readValue(responseBody, ListAllFolderResponse.class);
-
-                // 1254002: No more data
-                if (tableResponse.getCode() == 0 || tableResponse.getCode() == 1254002) {
-                    if (tableResponse.getFiles() != null) {
-                        List<ListAllFolderResponse.DriveFile> filteredFiles = tableResponse.getFiles().stream()
-                                .filter(file -> file.getType().equalsIgnoreCase("bitable")).toList();
-
-                        for (ListAllFolderResponse.DriveFile file : filteredFiles) {
-                            allTables.add(
-                                    new LarkDatabaseRecord(
-                                            file.getToken(),
-                                            Util.sanitizeGlueRelatedName(file.getName())
-                                    )
-                            );
-                        }
+                    for (ListAllFolderResponse.DriveFile file : filteredFiles) {
+                        allTables.add(
+                                new LarkDatabaseRecord(
+                                        file.getToken(),
+                                        Util.sanitizeGlueRelatedName(file.getName())
+                                )
+                        );
                     }
+                }
 
-                    pageToken = tableResponse.getNextPageToken();
-                    hasMore = tableResponse.hasMore();
-                }
-                else {
-                    logger.error("Failed to list tables for folder {}: {}", folderToken, responseBody);
-                    throw new IOException("Failed to retrieve tables for folder: " + folderToken + ", Error: " + tableResponse.getMsg());
-                }
+                pageToken = tableResponse.getNextPageToken();
+                hasMore = tableResponse.hasMore();
             }
             catch (Exception e) {
                 logger.error("Failed to get records for folder {}: {}", folderToken, e.getMessage());
@@ -112,5 +89,41 @@ public class LarkDriveService extends CommonLarkService
 
         logger.info("Retrieved a total of {} tables from folder {}", allTables.size(), folderToken);
         return allTables;
+    }
+
+    /**
+     * Fetches a single page of {@link #getLarkBases}'s result. Split out so it can be retried in
+     * isolation via {@link com.amazonaws.glue.lark.base.crawler.util.ThrottlingRetry} - a rate-limited
+     * page fetch backs off and retries just this one page, not the whole paginated call.
+     */
+    private ListAllFolderResponse fetchFolderPage(String folderToken, String pageToken)
+            throws IOException, java.net.URISyntaxException
+    {
+        URIBuilder uriBuilder = new URIBuilder(LARK_DRIVE_URL + "/" + "files")
+                .addParameter("folder_token", folderToken)
+                .addParameter("page_size", String.valueOf(pageSize));
+
+        if (!pageToken.isEmpty()) {
+            uriBuilder.addParameter("page_token", pageToken);
+        }
+
+        URI uri = uriBuilder.build();
+
+        HttpGet request = new HttpGet(uri);
+        request.setHeader("Authorization", "Bearer " + tenantAccessToken);
+        request.setHeader("Content-Type", "application/json");
+
+        HttpResponse response = httpClient.execute(request);
+        String responseBody = EntityUtils.toString(response.getEntity());
+
+        ListAllFolderResponse tableResponse = objectMapper.readValue(responseBody, ListAllFolderResponse.class);
+
+        // 1254002: No more data
+        if (tableResponse.getCode() == 0 || tableResponse.getCode() == 1254002) {
+            return tableResponse;
+        }
+
+        logger.error("Failed to list tables for folder {}: {}", folderToken, responseBody);
+        throw new IOException("Failed to retrieve tables for folder: " + folderToken + ", Code: " + tableResponse.getCode() + ", Error: " + tableResponse.getMsg());
     }
 }

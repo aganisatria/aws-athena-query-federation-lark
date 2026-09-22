@@ -144,6 +144,54 @@ public class LarkBaseServiceTest {
         assertTrue(capturedRequests.get(1).getURI().toString().contains("page_token=page_token_2"));
     }
 
+    @Test
+    public void listTables_rateLimited_thenSucceeds_retriesTransparently() throws Exception {
+        // Regression test for the crawler having zero rate-limit retry/backoff: before ThrottlingRetry
+        // existed, a single throttled page fetch failed the whole listTables call (and, via the
+        // per-table isolation in BaseLarkBaseCrawlerHandler, silently dropped that table/database from
+        // the crawl) instead of ever being retried.
+        String baseId = "baseRateLimited";
+        String rateLimitedJson = "{\"code\":1254290, \"msg\":\"TooManyRequest\"}";
+        String successJson = "{\"code\":0, \"msg\":\"success\", \"data\":{\"items\":[{\"table_id\":\"tbl1\",\"name\":\"table_1\"}],\"has_more\":false}}";
+
+        // Zero delays so the test runs fast while still exercising the real retry loop.
+        larkBaseService.retry = new com.amazonaws.glue.lark.base.crawler.util.ThrottlingRetry(0, 0, 0.5, 0, 60_000);
+
+        when(mockHttpClient.execute(any(HttpGet.class))).thenReturn(mockHttpResponse);
+        when(mockHttpResponse.getEntity()).thenReturn(mockHttpEntity);
+        when(mockHttpEntity.getContent())
+                .thenReturn(new ByteArrayInputStream(rateLimitedJson.getBytes()))
+                .thenReturn(new ByteArrayInputStream(successJson.getBytes()));
+
+        List<ListAllTableResponse.BaseItem> result = larkBaseService.listTables(baseId);
+
+        assertEquals(1, result.size());
+        assertEquals("tbl1", result.get(0).getTableId());
+        verify(mockHttpClient, times(2)).execute(any(HttpGet.class));
+    }
+
+    @Test
+    public void listTables_nonThrottlingApiError_doesNotRetry() throws Exception {
+        // A genuine (non-throttling) API error must fail immediately, not be retried - confirms
+        // ThrottlingRetry's filter is selective, not a blanket retry-everything wrapper.
+        String baseId = "baseApiError";
+        String errorJson = "{\"code\":10001, \"msg\":\"API Error\"}";
+
+        larkBaseService.retry = new com.amazonaws.glue.lark.base.crawler.util.ThrottlingRetry(0, 0, 0.5, 0, 60_000);
+
+        when(mockHttpClient.execute(any(HttpGet.class))).thenReturn(mockHttpResponse);
+        when(mockHttpResponse.getEntity()).thenReturn(mockHttpEntity);
+        when(mockHttpEntity.getContent()).thenReturn(new ByteArrayInputStream(errorJson.getBytes()));
+
+        try {
+            larkBaseService.listTables(baseId);
+            fail("Expected a RuntimeException for a non-throttling API error");
+        }
+        catch (RuntimeException e) {
+            verify(mockHttpClient, times(1)).execute(any(HttpGet.class));
+        }
+    }
+
     @Test(expected = RuntimeException.class)
     public void listTables_refreshAccessTokenFails_shouldThrowRuntimeException() throws IOException {
         doThrow(new IOException("Token refresh failed")).when(larkBaseService).refreshTenantAccessToken();

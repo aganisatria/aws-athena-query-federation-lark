@@ -80,45 +80,23 @@ public class LarkBaseService extends CommonLarkService
 
         do {
             try {
-                URIBuilder uriBuilder = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables")
-                        .addParameter("page_size", String.valueOf(pageSize));
-
-                if (!pageToken.isEmpty()) {
-                    uriBuilder.addParameter("page_token", pageToken);
-                }
-
-                URI uri = uriBuilder.build();
-
-                HttpGet request = new HttpGet(uri);
-                request.setHeader("Authorization", "Bearer " + tenantAccessToken);
-                request.setHeader("Content-Type", "application/json");
-
-                HttpResponse response = httpClient.execute(request);
-                String responseBody = EntityUtils.toString(response.getEntity());
-
-                ListAllTableResponse tableResponse = objectMapper.readValue(responseBody, ListAllTableResponse.class);
+                final String currentPageToken = pageToken;
+                ListAllTableResponse tableResponse = retry.invoke(() -> fetchTablesPage(baseId, currentPageToken));
 
                 System.out.println("Table response: " + tableResponse.getItems());
                 System.out.println("Count: " + count);
                 count++;
 
-                // 1254002: No more data
-                if (tableResponse.getCode() == 0 || tableResponse.getCode() == 1254002) {
-                    if (tableResponse.getItems() != null) {
-                        allTables.addAll(tableResponse.getItems());
-                    }
-
-                    pageToken = tableResponse.getPageToken();
-                    hasMore = tableResponse.hasMore();
-
-                    logger.info("Retrieved {} tables from base {}, has_more={}",
-                            tableResponse.getItems() != null ? tableResponse.getItems().size() : 0,
-                            baseId, hasMore);
+                if (tableResponse.getItems() != null) {
+                    allTables.addAll(tableResponse.getItems());
                 }
-                else {
-                    logger.error("Failed to list tables for base {}: {}", baseId, responseBody);
-                    throw new IOException("Failed to retrieve tables for base: " + baseId + ", Error: " + tableResponse.getMsg());
-                }
+
+                pageToken = tableResponse.getPageToken();
+                hasMore = tableResponse.hasMore();
+
+                logger.info("Retrieved {} tables from base {}, has_more={}",
+                        tableResponse.getItems() != null ? tableResponse.getItems().size() : 0,
+                        baseId, hasMore);
             }
             catch (Exception e) {
                 logger.error("Failed to get records for base {}: {}", baseId, e.getMessage());
@@ -129,6 +107,41 @@ public class LarkBaseService extends CommonLarkService
 
         logger.info("Retrieved a total of {} tables from base {}", allTables.size(), baseId);
         return allTables;
+    }
+
+    /**
+     * Fetches a single page of {@link #listTables}'s result. Split out so it can be retried in
+     * isolation via {@link ThrottlingRetry} - a rate-limited page fetch backs off and retries just this
+     * one page, not the whole paginated call.
+     */
+    private ListAllTableResponse fetchTablesPage(String baseId, String pageToken)
+            throws IOException, java.net.URISyntaxException
+    {
+        URIBuilder uriBuilder = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables")
+                .addParameter("page_size", String.valueOf(pageSize));
+
+        if (!pageToken.isEmpty()) {
+            uriBuilder.addParameter("page_token", pageToken);
+        }
+
+        URI uri = uriBuilder.build();
+
+        HttpGet request = new HttpGet(uri);
+        request.setHeader("Authorization", "Bearer " + tenantAccessToken);
+        request.setHeader("Content-Type", "application/json");
+
+        HttpResponse response = httpClient.execute(request);
+        String responseBody = EntityUtils.toString(response.getEntity());
+
+        ListAllTableResponse tableResponse = objectMapper.readValue(responseBody, ListAllTableResponse.class);
+
+        // 1254002: No more data
+        if (tableResponse.getCode() == 0 || tableResponse.getCode() == 1254002) {
+            return tableResponse;
+        }
+
+        logger.error("Failed to list tables for base {}: {}", baseId, responseBody);
+        throw new IOException("Failed to retrieve tables for base: " + baseId + ", Code: " + tableResponse.getCode() + ", Error: " + tableResponse.getMsg());
     }
 
     /**
@@ -155,44 +168,21 @@ public class LarkBaseService extends CommonLarkService
 
         do {
             try {
-                URIBuilder uriBuilder = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables/" + tableId + "/fields")
-                        .addParameter("page_size", String.valueOf(pageSize));
+                final String currentPageToken = pageToken;
+                ListFieldResponse fieldResponse = retry.invoke(() -> fetchFieldsPage(baseId, tableId, currentPageToken));
 
-                if (!pageToken.isEmpty()) {
-                    uriBuilder.addParameter("page_token", pageToken);
+                logger.info("Field response for page {}: {}", currentPageToken.isEmpty() ? "initial" : currentPageToken, fieldResponse);
+
+                List<ListFieldResponse.FieldItem> fields = fieldResponse.getItems();
+                if (fields != null) {
+                    allFields.addAll(fields);
                 }
 
-                URI uri = uriBuilder.build();
+                pageToken = fieldResponse.getPageToken();
+                hasMore = fieldResponse.hasMore();
 
-                HttpGet request = new HttpGet(uri);
-                request.setHeader("Authorization", "Bearer " + tenantAccessToken);
-                request.setHeader("Content-Type", "application/json");
-
-                logger.info("Requesting fields for table {}: {}", tableId, uri);
-
-                HttpResponse response = httpClient.execute(request);
-                String responseBody = EntityUtils.toString(response.getEntity());
-
-                ListFieldResponse fieldResponse =
-                        objectMapper.readValue(responseBody, ListFieldResponse.class);
-
-                logger.info("Field response for page {}: {}", pageToken.isEmpty() ? "initial" : pageToken, fieldResponse);
-
-                if (fieldResponse.getCode() == 0) {
-                    List<ListFieldResponse.FieldItem> fields = fieldResponse.getItems();
-                    if (fields != null) {
-                        allFields.addAll(fields);
-                    }
-
-                    pageToken = fieldResponse.getPageToken();
-                    hasMore = fieldResponse.hasMore();
-
-                    logger.info("Retrieved {} fields from table {}, has_more={}",
-                            fields != null ? fields.size() : 0, tableId, hasMore);
-                }
-                else {
-                    throw new IOException("Failed to retrieve fields for table: " + tableId + ", Error: " + fieldResponse.getMsg());
-                }
+                logger.info("Retrieved {} fields from table {}, has_more={}",
+                        fields != null ? fields.size() : 0, tableId, hasMore);
             }
             catch (Exception e) {
                 logger.error("Failed to get fields for table {}: {}", tableId, e.getMessage());
@@ -203,6 +193,41 @@ public class LarkBaseService extends CommonLarkService
 
         logger.info("Retrieved a total of {} fields from table {}", allFields.size(), tableId);
         return allFields;
+    }
+
+    /**
+     * Fetches a single page of {@link #getTableFields}'s result. Split out so it can be retried in
+     * isolation via {@link ThrottlingRetry} - a rate-limited page fetch backs off and retries just this
+     * one page, not the whole paginated call.
+     */
+    private ListFieldResponse fetchFieldsPage(String baseId, String tableId, String pageToken)
+            throws IOException, java.net.URISyntaxException
+    {
+        URIBuilder uriBuilder = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables/" + tableId + "/fields")
+                .addParameter("page_size", String.valueOf(pageSize));
+
+        if (!pageToken.isEmpty()) {
+            uriBuilder.addParameter("page_token", pageToken);
+        }
+
+        URI uri = uriBuilder.build();
+
+        HttpGet request = new HttpGet(uri);
+        request.setHeader("Authorization", "Bearer " + tenantAccessToken);
+        request.setHeader("Content-Type", "application/json");
+
+        logger.info("Requesting fields for table {}: {}", tableId, uri);
+
+        HttpResponse response = httpClient.execute(request);
+        String responseBody = EntityUtils.toString(response.getEntity());
+
+        ListFieldResponse fieldResponse = objectMapper.readValue(responseBody, ListFieldResponse.class);
+
+        if (fieldResponse.getCode() == 0) {
+            return fieldResponse;
+        }
+
+        throw new IOException("Failed to retrieve fields for table: " + tableId + ", Code: " + fieldResponse.getCode() + ", Error: " + fieldResponse.getMsg());
     }
 
     /**
@@ -229,81 +254,45 @@ public class LarkBaseService extends CommonLarkService
 
         do {
             try {
-                // page_size/page_token MUST be query parameters, not body fields: sending page_token in
-                // the JSON body causes the Lark API to never advance past the first page - has_more
-                // stays true and the same page_token/records get returned forever, no matter how many
-                // times "the next page" is requested. Confirmed by direct comparison against the same
-                // endpoint: identical request otherwise, only the query-param form actually reaches
-                // has_more=false. See the same fix in athena-lark-base's LarkBaseService.
-                URIBuilder uriBuilder = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables/" + tableId + "/records/search")
-                        .addParameter("page_size", String.valueOf(pageSize));
+                final String currentPageToken = pageToken;
+                SearchRecordsResponse recordsResponse = retry.invoke(() -> fetchRecordsPage(baseId, tableId, currentPageToken));
 
-                if (!pageToken.isEmpty()) {
-                    uriBuilder.addParameter("page_token", pageToken);
-                }
+                if (recordsResponse.getItems() != null) {
+                    for (SearchRecordsResponse.RecordItem record : recordsResponse.getItems()) {
+                        Map<String, Object> originalFields = record.getFields();
 
-                URI uri = uriBuilder.build();
+                        // Normalize Search API response to List API format
+                        Map<String, Object> fields = SearchApiResponseNormalizer.normalizeRecordFields(originalFields);
 
-                com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.Builder requestBuilder =
-                        com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.builder();
+                        String id = null;
+                        String name = null;
+                        Set<String> whitelistTableIds = Collections.emptySet();
+                        Set<String> blacklistTableIds = Collections.emptySet();
 
-                String requestBody = objectMapper.writeValueAsString(requestBuilder.build());
-
-                logger.info("Search API request for table {}: {}", tableId, requestBody);
-
-                HttpPost request = new HttpPost(uri);
-                request.setHeader("Authorization", "Bearer " + tenantAccessToken);
-                request.setHeader("Content-Type", "application/json");
-                request.setEntity(new org.apache.http.entity.StringEntity(requestBody, java.nio.charset.StandardCharsets.UTF_8));
-
-                HttpResponse response = httpClient.execute(request);
-                String responseBody = EntityUtils.toString(response.getEntity());
-
-                SearchRecordsResponse recordsResponse =
-                        objectMapper.readValue(responseBody, SearchRecordsResponse.class);
-
-                if (recordsResponse.getCode() == 0) {
-                    if (recordsResponse.getItems() != null) {
-                        for (SearchRecordsResponse.RecordItem record : recordsResponse.getItems()) {
-                            Map<String, Object> originalFields = record.getFields();
-
-                            // Normalize Search API response to List API format
-                            Map<String, Object> fields = SearchApiResponseNormalizer.normalizeRecordFields(originalFields);
-
-                            String id = null;
-                            String name = null;
-                            Set<String> whitelistTableIds = Collections.emptySet();
-                            Set<String> blacklistTableIds = Collections.emptySet();
-
-                            if (fields != null) {
-                                if (fields.containsKey("id")) {
-                                    Object idObj = fields.get("id");
-                                    id = idObj != null ? idObj.toString() : null;
-                                }
-
-                                if (fields.containsKey("name")) {
-                                    Object nameObj = fields.get("name");
-                                    name = nameObj != null ? nameObj.toString() : null;
-                                }
-
-                                // Optional columns on the control table: comma-separated Lark table IDs that
-                                // restrict which tables get crawled for this database. Absent/blank means no
-                                // restriction from that list.
-                                whitelistTableIds = parseTableIdList(fields.get("whitelist_tables"));
-                                blacklistTableIds = parseTableIdList(fields.get("blacklist_tables"));
+                        if (fields != null) {
+                            if (fields.containsKey("id")) {
+                                Object idObj = fields.get("id");
+                                id = idObj != null ? idObj.toString() : null;
                             }
 
-                            parsedRecords.add(new LarkDatabaseRecord(id, name, whitelistTableIds, blacklistTableIds));
-                        }
-                    }
+                            if (fields.containsKey("name")) {
+                                Object nameObj = fields.get("name");
+                                name = nameObj != null ? nameObj.toString() : null;
+                            }
 
-                    pageToken = recordsResponse.getPageToken();
-                    hasMore = recordsResponse.hasMore();
+                            // Optional columns on the control table: comma-separated Lark table IDs that
+                            // restrict which tables get crawled for this database. Absent/blank means no
+                            // restriction from that list.
+                            whitelistTableIds = parseTableIdList(fields.get("whitelist_tables"));
+                            blacklistTableIds = parseTableIdList(fields.get("blacklist_tables"));
+                        }
+
+                        parsedRecords.add(new LarkDatabaseRecord(id, name, whitelistTableIds, blacklistTableIds));
+                    }
                 }
-                else {
-                    throw new IOException("Failed to retrieve records for table: " + tableId +
-                            ", Error: " + recordsResponse.getMsg());
-                }
+
+                pageToken = recordsResponse.getPageToken();
+                hasMore = recordsResponse.hasMore();
             }
             catch (Exception e) {
                 throw new RuntimeException("Failed to get records for table: " + tableId, e);
@@ -312,6 +301,54 @@ public class LarkBaseService extends CommonLarkService
         while (hasMore && pageToken != null && !pageToken.isEmpty());
 
         return sanitizeRecords(parsedRecords);
+    }
+
+    /**
+     * Fetches a single page of {@link #getTableRecords}'s result. Split out so it can be retried in
+     * isolation via {@link ThrottlingRetry} - a rate-limited page fetch backs off and retries just this
+     * one page, not the whole paginated call.
+     */
+    private SearchRecordsResponse fetchRecordsPage(String baseId, String tableId, String pageToken)
+            throws IOException, java.net.URISyntaxException
+    {
+        // page_size/page_token MUST be query parameters, not body fields: sending page_token in
+        // the JSON body causes the Lark API to never advance past the first page - has_more
+        // stays true and the same page_token/records get returned forever, no matter how many
+        // times "the next page" is requested. Confirmed by direct comparison against the same
+        // endpoint: identical request otherwise, only the query-param form actually reaches
+        // has_more=false. See the same fix in athena-lark-base's LarkBaseService.
+        URIBuilder uriBuilder = new URIBuilder(LARK_BASE_URL + "/" + baseId + "/tables/" + tableId + "/records/search")
+                .addParameter("page_size", String.valueOf(pageSize));
+
+        if (!pageToken.isEmpty()) {
+            uriBuilder.addParameter("page_token", pageToken);
+        }
+
+        URI uri = uriBuilder.build();
+
+        com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.Builder requestBuilder =
+                com.amazonaws.glue.lark.base.crawler.model.request.SearchRecordsRequest.builder();
+
+        String requestBody = objectMapper.writeValueAsString(requestBuilder.build());
+
+        logger.info("Search API request for table {}: {}", tableId, requestBody);
+
+        HttpPost request = new HttpPost(uri);
+        request.setHeader("Authorization", "Bearer " + tenantAccessToken);
+        request.setHeader("Content-Type", "application/json");
+        request.setEntity(new org.apache.http.entity.StringEntity(requestBody, java.nio.charset.StandardCharsets.UTF_8));
+
+        HttpResponse response = httpClient.execute(request);
+        String responseBody = EntityUtils.toString(response.getEntity());
+
+        SearchRecordsResponse recordsResponse = objectMapper.readValue(responseBody, SearchRecordsResponse.class);
+
+        if (recordsResponse.getCode() == 0) {
+            return recordsResponse;
+        }
+
+        throw new IOException("Failed to retrieve records for table: " + tableId +
+                ", Code: " + recordsResponse.getCode() + ", Error: " + recordsResponse.getMsg());
     }
 
     /**
