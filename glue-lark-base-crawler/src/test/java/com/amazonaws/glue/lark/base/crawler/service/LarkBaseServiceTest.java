@@ -288,12 +288,48 @@ public class LarkBaseServiceTest {
         larkBaseService.sanitizeRecords(records);
     }
 
-    @Test(expected = RuntimeException.class)
+    @Test
     public void sanitizeRecords_nullName_shouldThrowException() {
+        // Regression test: this used to be `@Test(expected = RuntimeException.class)`, which also
+        // passes for a raw NullPointerException - masking a real bug where a null record name crashed
+        // inside Util.sanitizeGlueRelatedName (called unconditionally before this method's own
+        // null-field validation ever ran) instead of surfacing the intended, actionable
+        // "Null record fields found null fields: [name]" message. Asserting the message, not just the
+        // exception type, is what would have caught it.
         List<LarkDatabaseRecord> records = Collections.singletonList(
                 new LarkDatabaseRecord("id1", null)
         );
-        larkBaseService.sanitizeRecords(records);
+        try {
+            larkBaseService.sanitizeRecords(records);
+            fail("Expected a RuntimeException for a null record name");
+        }
+        catch (NullPointerException e) {
+            fail("sanitizeRecords should report a null name via its own validation message, " +
+                    "not crash with a raw NullPointerException: " + e);
+        }
+        catch (RuntimeException e) {
+            assertTrue("Unexpected exception message: " + e.getMessage(),
+                    e.getMessage() != null && e.getMessage().contains("Null record fields"));
+        }
+    }
+
+    @Test
+    public void sanitizeRecords_multipleNullNames_reportsAsNullFieldsNotDuplicates() {
+        // Two blank-name rows sanitize to the same (null) name, which - if the duplicate-name check
+        // ran before the null-fields check - would be misreported as a "duplicate name" instead of the
+        // more specific and actionable "null fields" error. The null-fields check must run first.
+        List<LarkDatabaseRecord> records = Arrays.asList(
+                new LarkDatabaseRecord("id1", null),
+                new LarkDatabaseRecord("id2", null)
+        );
+        try {
+            larkBaseService.sanitizeRecords(records);
+            fail("Expected a RuntimeException for null record names");
+        }
+        catch (RuntimeException e) {
+            assertTrue("Expected a null-fields error, got: " + e.getMessage(),
+                    e.getMessage() != null && e.getMessage().contains("Null record fields"));
+        }
     }
 
     @Test
