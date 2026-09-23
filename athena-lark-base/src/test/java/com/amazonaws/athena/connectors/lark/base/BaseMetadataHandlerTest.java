@@ -47,6 +47,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
@@ -399,6 +400,42 @@ public class BaseMetadataHandlerTest {
 
         assertFalse(result);
         verify(mockInvoker, never()).invoke(any());
+    }
+
+    @Test
+    public void testCalculateOrderBySplitSizing_limitZero_requestsOneRowNotWholeTable() {
+        // Regression test: a bare `limit > 0` check used to treat LIMIT 0 (SELECT ... ORDER BY x LIMIT 0
+        // - a valid, if unusual, query) the same as "no LIMIT at all", fetching and sorting the entire
+        // table via Lark's Search API for zero requested rows. Requesting 1 row (not 0 - BaseRecordHandler's
+        // own row-count cap checks treat 0 as "unbounded" too) caps the real fetch to a single small page.
+        software.amazon.awssdk.utils.Pair<Integer, Integer> sizing = handler.calculateOrderBySplitSizing(0, 550);
+
+        assertEquals(1, sizing.left().intValue());
+        assertEquals(1, sizing.right().intValue());
+    }
+
+    @Test
+    public void testCalculateOrderBySplitSizing_noLimit_usesPageSizeAndTotalRowCount() {
+        software.amazon.awssdk.utils.Pair<Integer, Integer> sizing = handler.calculateOrderBySplitSizing(-1, 550);
+
+        assertEquals(PAGE_SIZE, sizing.left().intValue());
+        assertEquals(550, sizing.right().intValue());
+    }
+
+    @Test
+    public void testCalculateOrderBySplitSizing_limitSmallerThanTotal_usesLimit() {
+        software.amazon.awssdk.utils.Pair<Integer, Integer> sizing = handler.calculateOrderBySplitSizing(10, 550);
+
+        assertEquals(10, sizing.left().intValue());
+        assertEquals(10, sizing.right().intValue());
+    }
+
+    @Test
+    public void testCalculateOrderBySplitSizing_limitLargerThanTotal_usesTotalRowCount() {
+        software.amazon.awssdk.utils.Pair<Integer, Integer> sizing = handler.calculateOrderBySplitSizing(1000, 550);
+
+        assertEquals(PAGE_SIZE, sizing.left().intValue());
+        assertEquals(550, sizing.right().intValue());
     }
 
     @Test

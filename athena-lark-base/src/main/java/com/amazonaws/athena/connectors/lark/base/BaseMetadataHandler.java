@@ -727,6 +727,35 @@ public class BaseMetadataHandler
     }
 
     /**
+     * Computes the page size and expected row count to request for the single collapsed split
+     * {@link #doGetSplits} builds when the query has an ORDER BY clause.
+     * <p>
+     * A bare {@code limit > 0} check treats LIMIT 0 (a valid, if unusual, query - e.g. a BI tool probing
+     * column types without wanting data) the same as "no LIMIT at all", which would fetch and sort the
+     * ENTIRE table via Lark's Search API for zero requested rows. {@link BaseRecordHandler}'s own
+     * row-count cap checks (e.g. {@code expectedRowCountForSplit > 0 && ...}) use the same "0 means
+     * unbounded" convention throughout, so requesting a literal 0 here wouldn't stop the fetch loop
+     * either - it would keep paging until Lark's own {@code hasMorePages} goes false. Requesting exactly
+     * 1 row instead (rather than 0) sidesteps that shared convention safely: it caps the real fetch to a
+     * single small page instead of the whole table, and Athena's own engine-level LIMIT 0 enforcement
+     * discards that one row and returns the correct empty result to the user regardless.
+     *
+     * @param limit The query's LIMIT value, or a negative number if absent.
+     * @param totalRowCount The table's total row count (after any WHERE filter).
+     * @return A pair of (page size, expected row count) to use for the split.
+     */
+    @VisibleForTesting
+    protected Pair<Integer, Integer> calculateOrderBySplitSizing(long limit, int totalRowCount)
+    {
+        if (limit == 0) {
+            return Pair.of(1, 1);
+        }
+        int pageSizeForSplit = (limit > 0 && limit < PAGE_SIZE) ? (int) limit : PAGE_SIZE;
+        int finalExpectedRowCount = (limit > 0 && limit < totalRowCount) ? (int) limit : totalRowCount;
+        return Pair.of(pageSizeForSplit, finalExpectedRowCount);
+    }
+
+    /**
      * Builds a sort expression for {@link #doGetSplits}, where {@code orderByClause} is reliably populated
      * (unlike at {@code getPartitions} time - see the ORDER BY handling at the top of doGetSplits). The
      * partition only carries {@code larkFieldNameMappingJson}, a {@code Map<larkFieldName, athenaColumnName>}
@@ -1091,8 +1120,9 @@ public class BaseMetadataHandler
 
             long limit = request.getConstraints().hasLimit() ? request.getConstraints().getLimit() : -1;
             int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression);
-            int pageSizeForSplit = (limit > 0 && limit < PAGE_SIZE) ? (int) limit : PAGE_SIZE;
-            int finalExpectedRowCount = (limit > 0 && limit < totalRowCount) ? (int) limit : totalRowCount;
+            Pair<Integer, Integer> splitSizing = calculateOrderBySplitSizing(limit, totalRowCount);
+            int pageSizeForSplit = splitSizing.left();
+            int finalExpectedRowCount = splitSizing.right();
 
             Split.Builder splitBuilder = Split.newBuilder(makeSpillLocation(request), makeEncryptionKey())
                     .add(BASE_ID_PROPERTY, baseId)
