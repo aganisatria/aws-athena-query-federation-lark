@@ -267,6 +267,24 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     protected Optional<ListFieldResponse.FieldItem> getLookupType(ListFieldResponse.FieldItem item, String baseId)
     {
+        return getLookupType(item, baseId, new HashSet<>());
+    }
+
+    /**
+     * Resolves the field a LOOKUP field's target points to.
+     *
+     * @param visited table/field pairs already visited in this resolution chain. A misconfigured Lark Base can
+     *                have LOOKUP fields that reference each other in a cycle (e.g. table A's field looks up to
+     *                table B's field, which looks up back to table A's field); without cycle detection, the
+     *                recursive callers below ({@link #getLarkBaseOriginalColumnType} and
+     *                {@link #getFormulaOrLookupFieldType}) would recurse indefinitely and crash the whole crawl
+     *                Lambda invocation with a StackOverflowError - an Error, not an Exception, so none of this
+     *                class's per-table/per-database try/catch isolation catches it. Mirrors the cycle
+     *                detection + depth cap athena-lark-base's LarkBaseService.getLookupType already has for the
+     *                identical hazard (see {@link LarkBaseCrawlerConstants#LOOKUP_MAX_DEPTH}).
+     */
+    private Optional<ListFieldResponse.FieldItem> getLookupType(ListFieldResponse.FieldItem item, String baseId, Set<String> visited)
+    {
         Pair<String, String> metadata = item.getLookupSourceFieldAndTableId();
         if (metadata == null) {
             return Optional.empty();
@@ -274,6 +292,19 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
         String fieldId = metadata.left();
         String tableId = metadata.right();
+
+        if (visited.size() >= LarkBaseCrawlerConstants.LOOKUP_MAX_DEPTH) {
+            logger.warn("LOOKUP resolution for fieldId '{}' in tableId '{}' (base '{}') exceeded the max depth ({}). "
+                    + "Returning empty.", fieldId, tableId, baseId, LarkBaseCrawlerConstants.LOOKUP_MAX_DEPTH);
+            return Optional.empty();
+        }
+
+        String visitKey = tableId + "|" + fieldId;
+        if (!visited.add(visitKey)) {
+            logger.warn("Detected circular LOOKUP reference while resolving fieldId '{}' in tableId '{}' (base '{}'). "
+                    + "Breaking the cycle and returning empty.", fieldId, tableId, baseId);
+            return Optional.empty();
+        }
 
         try {
             return larkBaseService.getTableFields(baseId, tableId)
@@ -289,11 +320,16 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     private String getLarkBaseOriginalColumnType(ListFieldResponse.FieldItem item, String baseId)
     {
+        return getLarkBaseOriginalColumnType(item, baseId, new HashSet<>());
+    }
+
+    private String getLarkBaseOriginalColumnType(ListFieldResponse.FieldItem item, String baseId, Set<String> visited)
+    {
         if (item.getUIType().equals(UITypeEnum.FORMULA)) {
             return item.getUIType().getUiType() + "<" + item.getFormulaType() + ">";
         }
         else if (item.getUIType().equals(UITypeEnum.LOOKUP)) {
-            Optional<ListFieldResponse.FieldItem> fieldOptional = getLookupType(item, baseId);
+            Optional<ListFieldResponse.FieldItem> fieldOptional = getLookupType(item, baseId, visited);
             if (fieldOptional.isPresent()) {
                 ListFieldResponse.FieldItem field = fieldOptional.get();
                 if (field.getUIType() != null) {
@@ -301,7 +337,7 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
                         UITypeEnum newUIType = field.getUIType();
 
                         if (newUIType == UITypeEnum.LOOKUP) {
-                            return item.getUIType().getUiType() + "<" + getLarkBaseOriginalColumnType(field, baseId) + ">";
+                            return item.getUIType().getUiType() + "<" + getLarkBaseOriginalColumnType(field, baseId, visited) + ">";
                         }
                         else {
                             return item.getUIType().getUiType() + "<" + newUIType.getUiType() + ">";
@@ -324,11 +360,16 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
 
     private String getFormulaOrLookupFieldType(ListFieldResponse.FieldItem item, String baseId)
     {
+        return getFormulaOrLookupFieldType(item, baseId, new HashSet<>());
+    }
+
+    private String getFormulaOrLookupFieldType(ListFieldResponse.FieldItem item, String baseId, Set<String> visited)
+    {
         switch (item.getUIType()) {
             case FORMULA:
                 return item.getFormulaGlueCatalogType();
             case LOOKUP:
-                Optional<ListFieldResponse.FieldItem> fieldOptional = getLookupType(item, baseId);
+                Optional<ListFieldResponse.FieldItem> fieldOptional = getLookupType(item, baseId, visited);
                 if (fieldOptional.isPresent()) {
                     ListFieldResponse.FieldItem field = fieldOptional.get();
                     if (field.getUIType() != null) {
@@ -336,7 +377,7 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
                             UITypeEnum newUIType = field.getUIType();
 
                             if (newUIType == UITypeEnum.LOOKUP) {
-                                return getFormulaOrLookupFieldType(field, baseId);
+                                return getFormulaOrLookupFieldType(field, baseId, visited);
                             }
                             else {
                                 return newUIType.getGlueCatalogType(null);

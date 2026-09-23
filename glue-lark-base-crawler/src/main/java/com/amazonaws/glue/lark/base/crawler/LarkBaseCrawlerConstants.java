@@ -40,6 +40,14 @@ public final class LarkBaseCrawlerConstants
     public static final String CRAWLING_METHOD = "CrawlingMethod";
 
     /**
+     * Safety valve on top of cycle detection for chained LOOKUP resolution
+     * (see {@link com.amazonaws.glue.lark.base.crawler.BaseLarkBaseCrawlerHandler#getLookupType}) - caps how many
+     * hops are followed even for a legitimate, non-circular chain. Matches
+     * athena-lark-base's BaseConstants.DEFAULT_LARK_LOOKUP_MAX_DEPTH.
+     */
+    public static final int LOOKUP_MAX_DEPTH = 20;
+
+    /**
      * Private constructor to prevent instantiation.
      */
     private LarkBaseCrawlerConstants()

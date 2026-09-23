@@ -445,4 +445,34 @@ public class LarkBaseCrawlerHandlerTest {
 
         assertEquals("string", result);
     }
+
+    @Test
+    public void testGetFormulaOrLookupFieldType_circularLookup_terminatesInsteadOfStackOverflow() throws Exception {
+        // Regression test: a misconfigured Lark Base can have LOOKUP fields that reference each other in
+        // a cycle (a normal user data-entry mistake, not something the crawler can prevent upstream).
+        // Before cycle detection was added, this recursed indefinitely - each level also making a real,
+        // uncached Lark API call - until a StackOverflowError, which (being an Error, not an Exception)
+        // is not caught by any of this class's per-table/per-database try/catch isolation and crashes
+        // the entire crawl Lambda invocation, not just the one table with the bad LOOKUP chain.
+        java.lang.reflect.Method method = BaseLarkBaseCrawlerHandler.class.getDeclaredMethod("getFormulaOrLookupFieldType", ListFieldResponse.FieldItem.class, String.class);
+        method.setAccessible(true);
+
+        // fieldA (table A) looks up fieldB (table B), which looks up back to fieldA (table A).
+        ListFieldResponse.FieldItem fieldA = ListFieldResponse.FieldItem.builder()
+                .uiType("Lookup").fieldId("fieldA")
+                .property(Map.of("target_field", "fieldB", "filter_info", Map.of("target_table", "tableB")))
+                .build();
+        ListFieldResponse.FieldItem fieldB = ListFieldResponse.FieldItem.builder()
+                .uiType("Lookup").fieldId("fieldB")
+                .property(Map.of("target_field", "fieldA", "filter_info", Map.of("target_table", "tableA")))
+                .build();
+
+        when(mockLarkBaseService.getTableFields("baseId", "tableB")).thenReturn(Collections.singletonList(fieldB));
+        when(mockLarkBaseService.getTableFields("baseId", "tableA")).thenReturn(Collections.singletonList(fieldA));
+
+        // Must return (not throw/hang/StackOverflow) once the cycle is detected.
+        String result = (String) method.invoke(handler, fieldA, "baseId");
+
+        assertNull(result);
+    }
 }
