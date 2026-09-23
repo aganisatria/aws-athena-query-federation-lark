@@ -377,11 +377,17 @@ public final class SearchApiFilterTranslator
             boolean isNotNull = isEffectivelyNotNull(rangeSet);
             if (isNotNull) {
                 if (fieldUiType == UITypeEnum.CHECKBOX) {
-                    conditions.add(createCondition(fieldName, "is", true));
+                    // CHECKBOX has no separate empty state in Lark - every row is genuinely true or
+                    // false - so "IS NOT NULL" is not "equals true", it's a tautology that matches every
+                    // row. Pushing "is true" here (as this used to) silently excluded every `false` row
+                    // from the result: a plain `WHERE checkbox_col IS NOT NULL` would return only the
+                    // `true` rows instead of all of them, with no error. Push no condition at all and let
+                    // Athena's own engine apply the (always-true) check against the real materialized
+                    // value - which RegistererExtractor's BitExtractor does correctly leave as SQL NULL
+                    // only when the field is genuinely absent, never for an explicit `false`.
+                    return conditions;
                 }
-                else {
-                    conditions.add(createCondition(fieldName, "isNotEmpty", null));
-                }
+                conditions.add(createCondition(fieldName, "isNotEmpty", null));
                 return conditions;
             }
         }
