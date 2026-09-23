@@ -719,11 +719,21 @@ public final class SearchApiFilterTranslator
 
     /**
      * Combines an existing filter with a split range filter for parallel processing.
-     * Creates conditions for: splitKey >= startIndex AND splitKey <= endIndex
+     * Creates conditions for: splitKey >= startIndex AND (endIndex == {@link Long#MAX_VALUE} ? true : splitKey <= endIndex)
+     * <p>
+     * {@code endIndex == Long.MAX_VALUE} means "no upper bound" - used for a split that must cover every
+     * remaining row above {@code startIndex}, since {@code $reserved_split_key} is a user-populated
+     * auto-number field whose value domain can have gaps or extend past the table's current row count
+     * (e.g. after any row has ever been deleted - auto-number fields don't renumber or reclaim values).
+     * {@code writeParallelPartitions} sizes splits off the row COUNT, which is only an accurate upper bound
+     * on the key's value range for a table that has never had a row deleted; the last split is deliberately
+     * left open-ended so rows with a higher key value than that estimate are never silently excluded from
+     * every split's range.
      */
     public static String toSplitFilterJson(String existingFilterJson, long startIndex, long endIndex)
     {
-        if (startIndex <= 0 || endIndex <= 0) {
+        boolean isOpenEnded = endIndex == Long.MAX_VALUE;
+        if (startIndex <= 0 || (endIndex <= 0 && !isOpenEnded)) {
             return existingFilterJson;
         }
 
@@ -748,14 +758,15 @@ public final class SearchApiFilterTranslator
             startCondition.put("field_name", RESERVED_SPLIT_KEY);
             startCondition.put("operator", "isGreaterEqual");
             startCondition.put("value", List.of(String.valueOf(startIndex)));
-
-            Map<String, Object> endCondition = new HashMap<>();
-            endCondition.put("field_name", RESERVED_SPLIT_KEY);
-            endCondition.put("operator", "isLessEqual");
-            endCondition.put("value", List.of(String.valueOf(endIndex)));
-
             allConditions.add(startCondition);
-            allConditions.add(endCondition);
+
+            if (!isOpenEnded) {
+                Map<String, Object> endCondition = new HashMap<>();
+                endCondition.put("field_name", RESERVED_SPLIT_KEY);
+                endCondition.put("operator", "isLessEqual");
+                endCondition.put("value", List.of(String.valueOf(endIndex)));
+                allConditions.add(endCondition);
+            }
 
             // Build combined filter
             Map<String, Object> filter = new HashMap<>();

@@ -454,6 +454,43 @@ public class BaseMetadataHandlerTest {
     }
 
     @Test
+    public void testComputeParallelSplitEndIndex_lastSplit_isOpenEnded() {
+        // $reserved_split_key is a user-populated auto-number field whose values can have gaps or exceed
+        // the row-count estimate once any row has ever been deleted. The last split must stay open-ended
+        // (Long.MAX_VALUE) so it still covers every row above its start index regardless of gaps, rather
+        // than silently excluding rows with a higher key value than the stale row-count-based estimate.
+        long endIndex = handler.computeParallelSplitEndIndex(4, 5, 2500);
+
+        assertEquals(Long.MAX_VALUE, endIndex);
+    }
+
+    @Test
+    public void testComputeParallelSplitEndIndex_lastSplit_singleSplitTotal_isOpenEnded() {
+        // A single-split "parallel" plan (numSplits == 1) is still the last split - it must cover the
+        // whole table's key range, not just [1, PAGE_SIZE].
+        long endIndex = handler.computeParallelSplitEndIndex(0, 1, 50);
+
+        assertEquals(Long.MAX_VALUE, endIndex);
+    }
+
+    @Test
+    public void testComputeParallelSplitEndIndex_nonLastSplit_boundedByPageSize() {
+        // Every split except the last is still sized normally off PAGE_SIZE, preserving parallelism.
+        long endIndex = handler.computeParallelSplitEndIndex(0, 5, 2500);
+
+        assertEquals(PAGE_SIZE, endIndex);
+    }
+
+    @Test
+    public void testComputeParallelSplitEndIndex_nonLastSplit_boundedByEffectiveRowCount() {
+        // A non-last split's bound is still clamped to effectiveRowCount when that's smaller than a full
+        // page (e.g. a LIMIT reduced the effective row count below what raw split-index math would give).
+        long endIndex = handler.computeParallelSplitEndIndex(0, 2, 300);
+
+        assertEquals(300, endIndex);
+    }
+
+    @Test
     public void testCalculateOrderBySplitSizing_limitZero_requestsOneRowNotWholeTable() {
         // Regression test: a bare `limit > 0` check used to treat LIMIT 0 (SELECT ... ORDER BY x LIMIT 0
         // - a valid, if unusual, query) the same as "no LIMIT at all", fetching and sorting the entire

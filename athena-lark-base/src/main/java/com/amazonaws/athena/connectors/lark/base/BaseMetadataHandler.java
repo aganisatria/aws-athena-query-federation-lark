@@ -874,8 +874,12 @@ public class BaseMetadataHandler
 
         for (int i = 0; i < numSplits; i++) {
             final long startIndex = (long) i * PAGE_SIZE + 1;
-            final long endIndex = Math.min((long) (i + 1) * PAGE_SIZE, effectiveRowCount);
-            final long currentSplitRowCount = endIndex - startIndex + 1;
+            final long endIndex = computeParallelSplitEndIndex(i, numSplits, effectiveRowCount);
+            // Matches the "0 means unbounded" convention BaseRecordHandler.getIterator already relies on
+            // elsewhere (expectedRowCountForSplit > 0 gates the cap) - an exact row count can't be known
+            // up front for an open-ended split (endIndex == Long.MAX_VALUE), so its fetch loop must rely
+            // solely on Lark's own hasMorePages signal.
+            final int currentSplitRowCount = endIndex == Long.MAX_VALUE ? 0 : (int) (endIndex - startIndex + 1);
 
             blockWriter.writeRows((block, rowNum) -> {
                 BlockUtils.setValue(block.getFieldVector(BASE_ID_PROPERTY), rowNum, baseId);
@@ -883,7 +887,7 @@ public class BaseMetadataHandler
                 BlockUtils.setValue(block.getFieldVector(FILTER_EXPRESSION_PROPERTY), rowNum, filterExpression);
                 BlockUtils.setValue(block.getFieldVector(SORT_EXPRESSION_PROPERTY), rowNum, "");
                 BlockUtils.setValue(block.getFieldVector(PAGE_SIZE_PROPERTY), rowNum, PAGE_SIZE);
-                BlockUtils.setValue(block.getFieldVector(EXPECTED_ROW_COUNT_PROPERTY), rowNum, (int) currentSplitRowCount);
+                BlockUtils.setValue(block.getFieldVector(EXPECTED_ROW_COUNT_PROPERTY), rowNum, currentSplitRowCount);
                 BlockUtils.setValue(block.getFieldVector(IS_PARALLEL_SPLIT_PROPERTY), rowNum, true);
                 BlockUtils.setValue(block.getFieldVector(SPLIT_START_INDEX_PROPERTY), rowNum, startIndex);
                 BlockUtils.setValue(block.getFieldVector(SPLIT_END_INDEX_PROPERTY), rowNum, endIndex);
@@ -893,6 +897,35 @@ public class BaseMetadataHandler
             });
         }
         logger.info("getPartitions: Successfully wrote {} parallel partition rows.", numSplits);
+    }
+
+    /**
+     * Computes the (inclusive) upper bound of the {@code $reserved_split_key} range for parallel split
+     * number {@code splitIndex} (0-based) out of {@code numSplits} total.
+     * <p>
+     * {@code $reserved_split_key} is a user-populated auto-number field: once any row has ever been
+     * deleted, its values develop gaps and its true maximum can exceed {@code effectiveRowCount} (a row
+     * COUNT, not the key's max value - auto-number fields don't renumber or reclaim values on delete).
+     * Capping every split's range at {@code effectiveRowCount} would then silently exclude every row whose
+     * key landed above that stale estimate from every split's range - a permanent, silent row-loss bug.
+     * The last split's upper bound is therefore left open ({@link Long#MAX_VALUE}, meaning "no upper
+     * bound" - see {@link SearchApiFilterTranslator#toSplitFilterJson}), guaranteeing full coverage
+     * regardless of gaps, at the cost of that one split doing more sequential Lark pages if the domain is
+     * sparse.
+     *
+     * @param splitIndex 0-based index of the split being sized
+     * @param numSplits total number of parallel splits being planned
+     * @param effectiveRowCount the table's estimated row count (post-LIMIT), used to size every split
+     * except the last
+     * @return the split's inclusive upper bound, or {@code Long.MAX_VALUE} for the last split
+     */
+    @VisibleForTesting
+    protected long computeParallelSplitEndIndex(int splitIndex, int numSplits, long effectiveRowCount)
+    {
+        if (splitIndex == numSplits - 1) {
+            return Long.MAX_VALUE;
+        }
+        return Math.min((long) (splitIndex + 1) * PAGE_SIZE, effectiveRowCount);
     }
 
     /**
