@@ -22,6 +22,7 @@ package com.amazonaws.athena.connectors.lark.base;
 import com.amazonaws.athena.connector.lambda.ThrottlingInvoker;
 import com.amazonaws.athena.connector.lambda.data.BlockAllocator;
 import com.amazonaws.athena.connector.lambda.data.BlockAllocatorImpl;
+import com.amazonaws.athena.connector.lambda.data.BlockWriter;
 import com.amazonaws.athena.connector.lambda.metadata.*;
 import com.amazonaws.athena.connector.lambda.security.EncryptionKeyFactory;
 import com.amazonaws.athena.connector.lambda.security.LocalKeyFactory;
@@ -400,6 +401,50 @@ public class BaseMetadataHandlerTest {
 
         assertFalse(result);
         verify(mockInvoker, never()).invoke(any());
+    }
+
+    @Test
+    public void testWriteSinglePartition_hasOrderBy_skipsRedundantRowCountLookup() throws Exception {
+        // doGetSplits's ORDER BY branch always collapses into one sorted split and recomputes its own
+        // sizing from scratch via a fresh getTotalRowCount call - the EXPECTED_ROW_COUNT_PROPERTY written
+        // here is provably never read for that case. Calling getTotalRowCount (which invokes Lark) here
+        // too would be a second, wasted round-trip with identical parameters on every ORDER BY query.
+        java.lang.reflect.Method method = BaseMetadataHandler.class.getDeclaredMethod("writeSinglePartition",
+                BlockWriter.class, String.class, String.class, String.class, String.class, String.class,
+                String.class, long.class, boolean.class);
+        method.setAccessible(true);
+
+        BlockWriter mockBlockWriter = mock(BlockWriter.class);
+        method.invoke(handler, mockBlockWriter, "base1", "tbl1", "", "", "{}", "{}", -1L, true);
+
+        verify(mockInvoker, never()).invoke(any());
+        verify(mockBlockWriter, times(1)).writeRows(any());
+    }
+
+    @Test
+    public void testWriteSinglePartition_noOrderBy_stillLooksUpRowCount() throws Exception {
+        // Regression guard: the skip must be scoped to ORDER BY only - a plain (non-ORDER-BY)
+        // single-partition query still needs a real row count to size EXPECTED_ROW_COUNT_PROPERTY
+        // correctly for BaseRecordHandler's fetch-loop cap.
+        java.lang.reflect.Method method = BaseMetadataHandler.class.getDeclaredMethod("writeSinglePartition",
+                BlockWriter.class, String.class, String.class, String.class, String.class, String.class,
+                String.class, long.class, boolean.class);
+        method.setAccessible(true);
+
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
+                        .items(Collections.emptyList())
+                        .hasMore(false)
+                        .total(10)
+                        .build())
+                .build();
+        when(mockInvoker.invoke(any())).thenReturn(response);
+
+        BlockWriter mockBlockWriter = mock(BlockWriter.class);
+        method.invoke(handler, mockBlockWriter, "base1", "tbl1", "", "", "{}", "{}", -1L, false);
+
+        verify(mockInvoker, times(1)).invoke(any());
+        verify(mockBlockWriter, times(1)).writeRows(any());
     }
 
     @Test

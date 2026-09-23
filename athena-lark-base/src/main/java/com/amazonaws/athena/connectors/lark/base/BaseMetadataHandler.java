@@ -950,16 +950,31 @@ public class BaseMetadataHandler
                                       String filterExpression, String sortExpression, String fieldTypeMappingJson,
                                       String fieldNameMappingJson, long queryLimit, boolean hasOrderBy)
     {
-        int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression);
-        long effectiveRowCount = calculateEffectiveRowCount(totalRowCount, queryLimit, hasOrderBy);
+        final int finalExpectedRowCount;
+        if (hasOrderBy) {
+            // doGetSplits's ORDER BY branch always collapses whatever partition(s) were planned into a
+            // single sorted split and recomputes its own sizing from scratch via a fresh getTotalRowCount
+            // + calculateOrderBySplitSizing call (it never reads EXPECTED_ROW_COUNT_PROPERTY from the
+            // partition row - that FieldReader is only consumed by the non-ORDER-BY per-row loop, which
+            // is unreachable once execution takes the ORDER BY branch). Computing an accurate value here
+            // would just be a second, wasted Lark API round-trip - identical baseId/tableId/filterExpression
+            // - on every single ORDER BY query. calculateEffectiveRowCount also always returns
+            // totalRowCount unchanged when hasOrderBy is true, so the "0 rows due to LIMIT" early-return
+            // below is provably unreachable for this case too; skip straight to writing the one partition.
+            finalExpectedRowCount = 0;
+        }
+        else {
+            int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression);
+            long effectiveRowCount = calculateEffectiveRowCount(totalRowCount, queryLimit, hasOrderBy);
 
-        if (effectiveRowCount == 0 && totalRowCount > 0) {
-            logger.info("getPartitions: Effective row count is 0 due to LIMIT, writing no partitions.");
-            return;
+            if (effectiveRowCount == 0 && totalRowCount > 0) {
+                logger.info("getPartitions: Effective row count is 0 due to LIMIT, writing no partitions.");
+                return;
+            }
+            finalExpectedRowCount = (int) effectiveRowCount;
         }
 
         logger.info("getPartitions: Writing 1 single partition row.");
-        final int finalExpectedRowCount = (int) effectiveRowCount;
 
         blockWriter.writeRows((block, rowNum) -> {
             BlockUtils.setValue(block.getFieldVector(BASE_ID_PROPERTY), rowNum, baseId);
