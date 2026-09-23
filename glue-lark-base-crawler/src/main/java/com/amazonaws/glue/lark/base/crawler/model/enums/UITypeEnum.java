@@ -143,4 +143,56 @@ public enum UITypeEnum
         }
         return UNKNOWN;
     }
+
+    /**
+     * Maps Lark's numeric field-type code (the "data_type" seen in a FORMULA field's
+     * property.type, e.g. {"data_type": 11} for a formula resolving to a User field) to a
+     * UITypeEnum. Used as a fallback when Lark's API omits the "ui_type" string that
+     * fromString normally keys off - observed in practice for a FORMULA whose expression is a
+     * bare reference to another field (e.g. "$field[fldXXX]") with no wrapping function; Lark's
+     * "list fields" response then gives only {"data_type": N} for property.type, with no
+     * "ui_type" key at all. Without this fallback, such a formula silently resolved to TEXT
+     * regardless of its real target type, corrupting structural targets (User, Attachment,
+     * GroupChat, ...) into a flattened string instead of the correct array/struct shape.
+     * Codes 1 (Text/Barcode/Email) and 2 (Number/Currency/Progress/Rating) are inherently
+     * ambiguous at the numeric level - Lark only disambiguates them via "ui_type" - so they map
+     * to their plain/generic member (TEXT, NUMBER) here, matching the pre-existing fallback
+     * behavior for those specific codes exactly; every other code below is unambiguous.
+     *
+     * @param dataTypeCode Lark's numeric field-type code, or null if absent.
+     * @return The corresponding UITypeEnum, or UNKNOWN if the code is null or unrecognized.
+     */
+    public static UITypeEnum fromDataTypeCode(Integer dataTypeCode)
+    {
+        if (dataTypeCode == null) {
+            return UNKNOWN;
+        }
+
+        return switch (dataTypeCode) {
+            case 1 -> TEXT;
+            case 2 -> NUMBER;
+            case 3 -> SINGLE_SELECT;
+            case 4 -> MULTI_SELECT;
+            case 5 -> DATE_TIME;
+            case 7 -> CHECKBOX;
+            case 11 -> USER;
+            case 13 -> PHONE;
+            case 15 -> URL;
+            case 17 -> ATTACHMENT;
+            case 18 -> SINGLE_LINK;
+            case 19 -> LOOKUP;
+            case 20 -> FORMULA;
+            case 21 -> DUPLEX_LINK;
+            case 22 -> LOCATION;
+            case 23 -> GROUP_CHAT;
+            case 24 -> STAGE;
+            case 1001 -> CREATED_TIME;
+            case 1002 -> MODIFIED_TIME;
+            case 1003 -> CREATED_USER;
+            case 1004 -> MODIFIED_USER;
+            case 1005 -> AUTO_NUMBER;
+            case 3001 -> BUTTON;
+            default -> UNKNOWN;
+        };
+    }
 }

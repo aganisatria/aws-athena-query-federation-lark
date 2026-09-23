@@ -174,4 +174,45 @@ public class UITypeEnumTest {
     public void getGlueCatalogType_unknown_shouldReturnString() {
         assertEquals("string", UITypeEnum.UNKNOWN.getGlueCatalogType(null));
     }
+
+    @Test
+    public void fromDataTypeCode_unambiguousCodes_shouldReturnCorrectEnum() {
+        // These codes have exactly one corresponding UITypeEnum, unlike 1 (Text/Barcode/Email) and
+        // 2 (Number/Currency/Progress/Rating), which Lark only disambiguates via "ui_type".
+        assertEquals(UITypeEnum.SINGLE_SELECT, UITypeEnum.fromDataTypeCode(3));
+        assertEquals(UITypeEnum.MULTI_SELECT, UITypeEnum.fromDataTypeCode(4));
+        assertEquals(UITypeEnum.DATE_TIME, UITypeEnum.fromDataTypeCode(5));
+        assertEquals(UITypeEnum.CHECKBOX, UITypeEnum.fromDataTypeCode(7));
+        assertEquals(UITypeEnum.USER, UITypeEnum.fromDataTypeCode(11));
+        assertEquals(UITypeEnum.PHONE, UITypeEnum.fromDataTypeCode(13));
+        assertEquals(UITypeEnum.URL, UITypeEnum.fromDataTypeCode(15));
+        assertEquals(UITypeEnum.ATTACHMENT, UITypeEnum.fromDataTypeCode(17));
+        assertEquals(UITypeEnum.SINGLE_LINK, UITypeEnum.fromDataTypeCode(18));
+        assertEquals(UITypeEnum.LOOKUP, UITypeEnum.fromDataTypeCode(19));
+        assertEquals(UITypeEnum.FORMULA, UITypeEnum.fromDataTypeCode(20));
+        assertEquals(UITypeEnum.DUPLEX_LINK, UITypeEnum.fromDataTypeCode(21));
+        assertEquals(UITypeEnum.LOCATION, UITypeEnum.fromDataTypeCode(22));
+        assertEquals(UITypeEnum.GROUP_CHAT, UITypeEnum.fromDataTypeCode(23));
+        assertEquals(UITypeEnum.STAGE, UITypeEnum.fromDataTypeCode(24));
+        assertEquals(UITypeEnum.CREATED_TIME, UITypeEnum.fromDataTypeCode(1001));
+        assertEquals(UITypeEnum.MODIFIED_TIME, UITypeEnum.fromDataTypeCode(1002));
+        assertEquals(UITypeEnum.CREATED_USER, UITypeEnum.fromDataTypeCode(1003));
+        assertEquals(UITypeEnum.MODIFIED_USER, UITypeEnum.fromDataTypeCode(1004));
+        assertEquals(UITypeEnum.AUTO_NUMBER, UITypeEnum.fromDataTypeCode(1005));
+        assertEquals(UITypeEnum.BUTTON, UITypeEnum.fromDataTypeCode(3001));
+    }
+
+    @Test
+    public void fromDataTypeCode_ambiguousCodes_shouldReturnGenericMember() {
+        assertEquals(UITypeEnum.TEXT, UITypeEnum.fromDataTypeCode(1));
+        assertEquals(UITypeEnum.NUMBER, UITypeEnum.fromDataTypeCode(2));
+    }
+
+    @Test
+    public void fromDataTypeCode_unrecognizedOrNull_shouldReturnUnknown() {
+        assertEquals(UITypeEnum.UNKNOWN, UITypeEnum.fromDataTypeCode(null));
+        assertEquals(UITypeEnum.UNKNOWN, UITypeEnum.fromDataTypeCode(9999));
+        assertEquals(UITypeEnum.UNKNOWN, UITypeEnum.fromDataTypeCode(-1));
+        assertEquals(UITypeEnum.UNKNOWN, UITypeEnum.fromDataTypeCode(0));
+    }
 }
