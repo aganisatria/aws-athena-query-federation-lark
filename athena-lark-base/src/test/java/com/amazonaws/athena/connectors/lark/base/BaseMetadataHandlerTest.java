@@ -245,7 +245,13 @@ public class BaseMetadataHandlerTest {
         GetTableRequest request = new GetTableRequest(identity, "queryId", "catalog",
                 new com.amazonaws.athena.connector.lambda.domain.TableName("schemaa", "table1"), Collections.emptyMap());
 
-        assertThrows(RuntimeException.class, () -> handler.doGetTable(allocator, request));
+        com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException thrown =
+                assertThrows(com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException.class,
+                        () -> handler.doGetTable(allocator, request));
+        // Same classification as the whitelist/blacklist "table not found" case - a raw, unclassified
+        // RuntimeException here would propagate without Athena's ENTITY_NOT_FOUND_EXCEPTION handling.
+        assertEquals(software.amazon.awssdk.services.glue.model.FederationSourceErrorCode.ENTITY_NOT_FOUND_EXCEPTION.toString(),
+                thrown.getErrorDetails().errorCode());
 
         verify(mockLarkSourceMetadataProvider).getTableSchema(any(GetTableRequest.class));
     }

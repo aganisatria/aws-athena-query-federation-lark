@@ -490,7 +490,11 @@ public class BaseMetadataHandler
         }
 
         logger.error("doGetTable: No schema found for {}. Returning empty schema.", request.getTableName());
-        throw new RuntimeException("Unable to retrieve table schema from Glue or Lark Base source.");
+        // Same classification as the whitelist/blacklist "not found" case above (line ~421) - both mean
+        // Athena asked for a table this connector can't actually serve. A raw RuntimeException here would
+        // propagate without Athena's ENTITY_NOT_FOUND_EXCEPTION handling, inconsistent with that sibling case.
+        throw new AthenaConnectorException("Unable to retrieve table schema from Glue or Lark Base source for " + request.getTableName(),
+                ErrorDetails.builder().errorCode(FederationSourceErrorCode.ENTITY_NOT_FOUND_EXCEPTION.toString()).build());
     }
 
     /**
