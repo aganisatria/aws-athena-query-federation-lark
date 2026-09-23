@@ -102,6 +102,7 @@ import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_BASE_
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_NAME_MAPPING_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_TYPE_MAPPING_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_TABLE_ID_PARAMETER;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.MAX_PARALLEL_SPLIT_MAPPING_BYTES;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.NULLS_FIRST_FIELD_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE_PROPERTY;
@@ -858,6 +859,17 @@ public class BaseMetadataHandler
         }
 
         int numSplits = (int) Math.ceil((double) effectiveRowCount / PAGE_SIZE);
+
+        if (exceedsParallelSplitMappingBudget(numSplits, fieldTypeMappingJson, fieldNameMappingJson)) {
+            logger.warn("getPartitions: {} parallel partition rows would duplicate the field mapping metadata "
+                    + "past the {}-byte safety budget (each row/split carries its own full copy, and neither "
+                    + "GetTableLayoutResponse nor GetSplitsResponse/Split supports spilling). Falling back to a "
+                    + "single sequentially-paginated partition instead.", numSplits, MAX_PARALLEL_SPLIT_MAPPING_BYTES);
+            writeSinglePartition(blockWriter, baseId, tableId, filterExpression, "", fieldTypeMappingJson,
+                    fieldNameMappingJson, queryLimit, hasOrderBy);
+            return;
+        }
+
         logger.info("getPartitions: Writing {} parallel partition rows for {} effective rows.", numSplits, effectiveRowCount);
 
         for (int i = 0; i < numSplits; i++) {
@@ -881,6 +893,24 @@ public class BaseMetadataHandler
             });
         }
         logger.info("getPartitions: Successfully wrote {} parallel partition rows.", numSplits);
+    }
+
+    /**
+     * Whether writing {@code numSplits} parallel partition rows would duplicate the field-mapping JSON
+     * (once per row, and again once per Split built from each row) past {@link BaseConstants#MAX_PARALLEL_SPLIT_MAPPING_BYTES}.
+     *
+     * @param numSplits the number of parallel partition rows/splits {@code writeParallelPartitions} would create
+     * @param fieldTypeMappingJson the field type mapping JSON that would be duplicated into every row/split
+     * @param fieldNameMappingJson the field name mapping JSON that would be duplicated into every row/split
+     * @return true if the projected duplicated bytes exceed the safety budget
+     */
+    @VisibleForTesting
+    protected boolean exceedsParallelSplitMappingBudget(int numSplits, String fieldTypeMappingJson, String fieldNameMappingJson)
+    {
+        long bytesPerSplit = (long) (fieldTypeMappingJson == null ? 0 : fieldTypeMappingJson.length())
+                + (fieldNameMappingJson == null ? 0 : fieldNameMappingJson.length());
+        long projectedBytes = bytesPerSplit * (long) numSplits;
+        return projectedBytes > MAX_PARALLEL_SPLIT_MAPPING_BYTES;
     }
 
     private void writeSinglePartition(BlockWriter blockWriter, String baseId, String tableId,

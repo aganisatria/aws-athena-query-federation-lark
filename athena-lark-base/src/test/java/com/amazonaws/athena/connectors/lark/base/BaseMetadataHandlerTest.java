@@ -403,6 +403,57 @@ public class BaseMetadataHandlerTest {
     }
 
     @Test
+    public void testExceedsParallelSplitMappingBudget_smallMappingManySplits_staysUnderBudget() {
+        // A realistic mapping JSON for a modest table is a few dozen bytes, so even thousands of splits
+        // must not trip the safety budget.
+        boolean result = handler.exceedsParallelSplitMappingBudget(10_000, "{\"col1\":\"TEXT\"}", "{\"Col 1\":\"col1\"}");
+
+        assertFalse(result);
+    }
+
+    @Test
+    public void testExceedsParallelSplitMappingBudget_largeMappingManySplits_exceedsBudget() {
+        // A wide table (many columns, e.g. long Chinese field names) producing a several-KB mapping JSON,
+        // duplicated across a few thousand splits, must trip the budget rather than risk Lambda's ~6MB
+        // synchronous response payload limit.
+        String largeTypeMapping = "a".repeat(3000);
+        String largeNameMapping = "b".repeat(3000);
+
+        boolean result = handler.exceedsParallelSplitMappingBudget(1000, largeTypeMapping, largeNameMapping);
+
+        assertTrue(result);
+    }
+
+    @Test
+    public void testExceedsParallelSplitMappingBudget_exactlyAtBudget_doesNotExceed() {
+        String typeMapping = "a".repeat(2000);
+        String nameMapping = "b".repeat(2000);
+
+        // bytesPerSplit (4000) * numSplits (1000) == MAX_PARALLEL_SPLIT_MAPPING_BYTES (4_000_000) exactly.
+        boolean result = handler.exceedsParallelSplitMappingBudget(1000, typeMapping, nameMapping);
+
+        assertFalse(result);
+    }
+
+    @Test
+    public void testExceedsParallelSplitMappingBudget_oneSplitOverBudget_exceeds() {
+        String typeMapping = "a".repeat(2000);
+        String nameMapping = "b".repeat(2000);
+
+        // One split beyond the exact-budget case pushes the projected total just past the limit.
+        boolean result = handler.exceedsParallelSplitMappingBudget(1001, typeMapping, nameMapping);
+
+        assertTrue(result);
+    }
+
+    @Test
+    public void testExceedsParallelSplitMappingBudget_nullMappingJson_treatedAsZeroBytesNotNpe() {
+        boolean result = handler.exceedsParallelSplitMappingBudget(Integer.MAX_VALUE, null, null);
+
+        assertFalse(result);
+    }
+
+    @Test
     public void testCalculateOrderBySplitSizing_limitZero_requestsOneRowNotWholeTable() {
         // Regression test: a bare `limit > 0` check used to treat LIMIT 0 (SELECT ... ORDER BY x LIMIT 0
         // - a valid, if unusual, query) the same as "no LIMIT at all", fetching and sorting the entire

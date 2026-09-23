@@ -218,4 +218,16 @@ public final class BaseConstants
      * This is constant for the default page size.
      */
     public static final int PAGE_SIZE = 500;
+
+    /**
+     * Safety budget (in bytes) for how much duplicated field-mapping metadata parallel splitting is allowed
+     * to add across all of a query's partition rows/splits. Every parallel partition row (and, from it, every
+     * Split) carries its own full copy of the table's field type/name mapping JSON, and neither
+     * GetTableLayoutResponse nor GetSplitsResponse/Split supports spilling (only ReadRecordsResponse does), so
+     * this duplication counts fully against AWS Lambda's ~6MB synchronous response payload limit. 4MB leaves
+     * headroom under that limit for the rest of each response (other split properties, JSON/Arrow envelope
+     * overhead). When the projected total would exceed this budget, parallel splitting is skipped in favor of
+     * the single, sequentially-paginated partition, which already fetches the full result set correctly.
+     */
+    public static final long MAX_PARALLEL_SPLIT_MAPPING_BYTES = 4_000_000L;
 }
