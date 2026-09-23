@@ -44,6 +44,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
@@ -196,6 +198,45 @@ public class LarkBaseTableResolverTest {
         // table1, and the LOOKUP resolution), not called directly and unwrapped.
         verify(mockLarkBaseService).getLookupType("db1", "relatedTableId", "relatedFieldId");
         verify(mockInvoker, times(4)).invoke(any(Callable.class));
+    }
+
+    @Test
+    public void testDiscoverTableFields_LookupResolutionFailure_skipsOnlyThatFieldNotWholeTable() throws Exception {
+        // Regression test: getTargetFieldAndTableForLookup() returns Pair.of(null, null) - not a thrown
+        // exception - for a LOOKUP field whose target is malformed or permission-restricted (a realistic
+        // case, not contrived). That null tableId/fieldId then makes the getLookupType(...) call below
+        // fail against Lark's API. Before this fix, that exception wasn't caught per-field - it escaped
+        // the whole for-loop into discoverTableFields's outer catch, which returns whatever fieldMappings
+        // had been collected BEFORE the failure, silently dropping every field that came after the broken
+        // one in Lark's response, not just that one column.
+        when(mockEnvVarService.isActivateLarkBaseSource()).thenReturn(true);
+        when(mockEnvVarService.getLarkBaseSources()).thenReturn("base1:table1");
+        when(mockLarkBaseService.getDatabaseRecords(anyString(), anyString())).thenReturn(Collections.singletonList(new LarkDatabaseRecord("db1", "base1")));
+        when(mockLarkBaseService.listTables(anyString())).thenReturn(Collections.singletonList(ListAllTableResponse.BaseItem.builder().name("table1").tableId("tableId1").build()));
+
+        ListFieldResponse.FieldItem brokenLookupField = ListFieldResponse.FieldItem.builder()
+                .fieldName("brokenLookup")
+                .fieldId("fieldId1")
+                .uiType("LOOKUP")
+                .property(Collections.emptyMap()) // no target_field/filter_info -> getTargetFieldAndTableForLookup() returns Pair.of(null, null)
+                .build();
+        ListFieldResponse.FieldItem laterTextField = ListFieldResponse.FieldItem.builder()
+                .fieldName("laterField")
+                .fieldId("fieldId2")
+                .uiType("Text")
+                .build();
+
+        when(mockLarkBaseService.getTableFields(anyString(), anyString()))
+                .thenReturn(java.util.Arrays.asList(brokenLookupField, laterTextField));
+        when(mockLarkBaseService.getLookupType(eq("db1"), isNull(), isNull()))
+                .thenThrow(new RuntimeException("Failed to retrieve fields for table: null, Error: NOTEXIST"));
+
+        List<TableDirectInitialized> tables = resolver.resolveTables();
+
+        assertEquals(1, tables.size());
+        // The field AFTER the broken LOOKUP in Lark's response must still make it into the schema.
+        assertEquals(1, tables.get(0).columns().size());
+        assertEquals("laterField", tables.get(0).columns().get(0).larkBaseFieldName());
     }
 
     @Test
