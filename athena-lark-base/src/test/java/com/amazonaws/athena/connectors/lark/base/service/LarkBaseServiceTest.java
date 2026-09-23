@@ -189,6 +189,30 @@ public class LarkBaseServiceTest {
     }
 
     @Test
+    public void getTableRecords_fractionalNumberField_preservesFullPrecisionAsBigDecimal() throws Exception {
+        // Without DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, Jackson would deserialize this
+        // fractional value as a Double, silently collapsing precision before RegistererExtractor's
+        // (correct) BigDecimal handling ever sees it - IEEE 754 double only carries ~15-17 significant
+        // decimal digits. This value's exact digits must survive deserialization unchanged.
+        String baseId = "baseR1";
+        String tableId = "tblR1";
+        String preciseValue = "123456789012345.6789";
+        String mockJsonResponse = "{\"code\":0,\"data\":{\"items\":[{\"record_id\":\"rec123\",\"fields\":{\"field_number\":"
+                + preciseValue + "}}],\"has_more\":false}}";
+
+        MockHttpClientWrapper mockHttpClient = new MockHttpClientWrapper();
+        mockHttpClient.addResponse(mockJsonResponse, 200, "OK");
+        LarkBaseService larkBaseService = new LarkBaseService(TEST_APP_ID, TEST_APP_SECRET, mockHttpClient);
+
+        TableRecordsRequest request = TableRecordsRequest.builder().baseId(baseId).tableId(tableId).build();
+        SearchRecordsResponse result = larkBaseService.getTableRecords(request);
+
+        Object fieldValue = result.getItems().get(0).getFields().get("field_number");
+        assertEquals(java.math.BigDecimal.class, fieldValue.getClass());
+        assertEquals(new java.math.BigDecimal(preciseValue), fieldValue);
+    }
+
+    @Test
     public void getTableRecords_success_multiplePages() throws Exception {
         String baseId = "baseR1";
         String tableId = "tblR1";

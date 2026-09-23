@@ -26,6 +26,7 @@ import com.amazonaws.athena.connectors.lark.base.model.response.ListFieldRespons
 import com.amazonaws.athena.connectors.lark.base.model.response.SearchRecordsResponse;
 import com.amazonaws.athena.connectors.lark.base.util.CommonUtil;
 import com.amazonaws.athena.connectors.lark.base.util.SearchApiResponseNormalizer;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -60,7 +61,15 @@ public class LarkBaseService extends CommonLarkService
 {
     private static final Logger logger = LoggerFactory.getLogger(LarkBaseService.class);
     private static final String LARK_BASE_URL = LARK_API_BASE_URL + "/bitable/v1/apps";
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    // Without this, Jackson deserializes a fractional NUMBER/CURRENCY value from Lark's JSON as a Double
+    // before RegistererExtractor.registerDecimalExtractor ever sees it - IEEE 754 double only carries
+    // ~15-17 significant decimal digits, so a value combining enough magnitude and decimal precision
+    // (e.g. a large currency total with cents) silently loses precision at parse time, before any of this
+    // codebase's own (correct) BigDecimal handling runs. Deserializing floats as BigDecimal instead
+    // preserves the original JSON digits exactly; integer-valued fields are unaffected (Jackson only
+    // applies this to JSON tokens containing a decimal point or exponent).
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper()
+            .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
 
     private static final int FIELD_CACHE_MAX_SIZE = 1000;
     private static final int FIELD_CACHE_TTL_MINUTES = 5;
