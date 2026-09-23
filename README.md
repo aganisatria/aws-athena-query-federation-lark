@@ -151,6 +151,7 @@ All Lark Base field types are supported:
 ### Known Limitations
 
 - **NUMBER field precision**: Lark Base stores `Number` field values as IEEE 754 double-precision floats, which only preserve about 15-17 significant digits. Values that exceed this (e.g. bank card numbers, long numeric IDs) are silently rounded by Lark Base itself - trailing digits are replaced with zeros - before the data ever reaches this connector. This is a Lark Base platform limitation, not a connector bug, and it cannot be corrected downstream by the connector. Per [Lark's own documentation](https://www.larksuite.com/hc/en-US/articles/890398616778-base-limits-faqs): *"To record information containing large numbers, such as bank card numbers, use the text field."* If you need exact large numbers or high-precision decimals, store them in a `Text` field in Lark Base instead of a `Number` field.
+- **`WHERE` constraints on List/Struct-typed columns crash the query**: any `WHERE` clause that references a column whose type is array/struct-shaped - `Multi Select`, `User`, `Attachment`, `Url`, `Location`, `Single Link`, `Duplex Link`, `Group Chat`, `Lookup`, `Created User`, `Modified User`, or a `Formula`/`Lookup` that resolves to one of these - fails the whole query with `GENERIC_INTERNAL_ERROR: java.lang.RuntimeException: java.lang.IllegalArgumentException: Lists have one child Field. Found: none`, even for the simplest case (`IS NOT NULL`). This reproduces regardless of the column's declared nullability and regardless of this connector's advertised filter-pushdown capabilities (both were tested and ruled out) - it happens inside Amazon Athena's own managed query engine, before this connector's Lambda ever receives a `GetSplitsRequest` or `ReadRecordsRequest`, so nothing in this connector's code can intercept or work around it. It is a platform-level limitation of Amazon Athena Federated Query's handling of complex (List/Struct) column types in predicates, not a bug in this connector. **Workaround**: don't filter on these columns directly - e.g. select the column without a `WHERE` clause on it, or filter on a related scalar column instead. Unconstrained `SELECT *` and constraints on scalar columns both work normally.
 
 ## Architecture
 
@@ -431,6 +432,12 @@ ORDER BY created_date DESC LIMIT 100;
 3. RegistererExtractor implementation for the field type
 
 **Reference**: [DIAGRAMS.md#Class-Hierarchy](./DIAGRAMS.md#class-hierarchy)
+
+### Issue: `GENERIC_INTERNAL_ERROR: ... IllegalArgumentException: Lists have one child Field. Found: none`
+
+This is not a connector bug - see [Known Limitations](#known-limitations) above. It happens whenever a `WHERE` clause references a List/Struct-typed column (Multi Select, User, Attachment, Url, Location, Single/Duplex Link, Group Chat, Lookup, Created/Modified User, or a Formula/Lookup resolving to one of these), inside Amazon Athena's own query engine before this connector's Lambda is ever invoked for splits or records.
+
+**Fix**: remove the `WHERE` condition on that column (filter on a scalar column instead, or drop the filter and post-filter client-side).
 
 ## Common Development Scenarios
 
