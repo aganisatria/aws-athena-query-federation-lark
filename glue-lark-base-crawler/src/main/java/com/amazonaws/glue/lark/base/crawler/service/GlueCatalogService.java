@@ -24,6 +24,7 @@ import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.glue.GlueClient;
 import software.amazon.awssdk.services.glue.model.AlreadyExistsException;
 import software.amazon.awssdk.services.glue.model.BatchDeleteTableRequest;
+import software.amazon.awssdk.services.glue.model.BatchDeleteTableResponse;
 import software.amazon.awssdk.services.glue.model.CreateDatabaseRequest;
 import software.amazon.awssdk.services.glue.model.CreateTableRequest;
 import software.amazon.awssdk.services.glue.model.DataLakePrincipal;
@@ -55,6 +56,9 @@ import static java.util.Objects.requireNonNull;
 public class GlueCatalogService
 {
     private static final Logger logger = LoggerFactory.getLogger(GlueCatalogService.class);
+
+    // AWS Glue's BatchDeleteTable enforces a max of 100 table names per call.
+    private static final int GLUE_BATCH_DELETE_TABLE_LIMIT = 100;
 
     private final GlueClient glueClient;
     private final String catalogId;
@@ -228,27 +232,46 @@ public class GlueCatalogService
     }
 
     /**
-     * Batch delete table.
-     * There is no batch delete table in Glue, so we need to delete one by one.
+     * Batch delete table. Unlike batchCreateTable/batchUpdateTable/the database equivalents (Glue has no
+     * real batch create/update API, so those are single-item loops), BatchDeleteTable is a genuine Glue
+     * batch API - and can report PER-TABLE failures inside an overall HTTP 200 response
+     * ({@link BatchDeleteTableResponse#hasErrors()}/{@link BatchDeleteTableResponse#errors()}), which this
+     * method used to silently discard entirely (the response wasn't even captured). A table that fails to
+     * delete for a persistent Glue-side reason would then linger in the catalog indefinitely with no
+     * operator-visible signal - every future crawl would recompute the same deletion candidate and hit the
+     * same silent failure again. Also chunks each database's table list to Glue's documented 100-item
+     * BatchDeleteTable limit, since a database needing more than 100 deletions in one crawl would
+     * otherwise fail the entire batch.
      *
      * @param databaseNameAndTables The map of database names and tables
      */
     public void batchDeleteTable(Map<String, List<Table>> databaseNameAndTables)
     {
         for (Map.Entry<String, List<Table>> dbEntry : databaseNameAndTables.entrySet()) {
-            // Isolate one database's delete-table batch failure instead of aborting the rest.
-            try {
-                glueClient.batchDeleteTable(
-                        BatchDeleteTableRequest.builder()
-                                .databaseName(dbEntry.getKey())
-                                .tablesToDelete(dbEntry.getValue().stream()
-                                        .map(Table::name)
-                                        .collect(Collectors.toList()))
-                                .catalogId(catalogId)
-                                .build());
-            }
-            catch (Exception e) {
-                logger.error("Failed to delete tables in database {}: {}", dbEntry.getKey(), e.getMessage(), e);
+            String databaseName = dbEntry.getKey();
+            List<String> tableNames = dbEntry.getValue().stream().map(Table::name).collect(Collectors.toList());
+
+            for (int i = 0; i < tableNames.size(); i += GLUE_BATCH_DELETE_TABLE_LIMIT) {
+                List<String> chunk = tableNames.subList(i, Math.min(i + GLUE_BATCH_DELETE_TABLE_LIMIT, tableNames.size()));
+                // Isolate one chunk's delete-table batch failure instead of aborting the rest.
+                try {
+                    BatchDeleteTableResponse response = glueClient.batchDeleteTable(
+                            BatchDeleteTableRequest.builder()
+                                    .databaseName(databaseName)
+                                    .tablesToDelete(chunk)
+                                    .catalogId(catalogId)
+                                    .build());
+
+                    if (response.hasErrors() && !response.errors().isEmpty()) {
+                        response.errors().forEach(tableError ->
+                                logger.error("Failed to delete table {}.{}: {} ({})",
+                                        databaseName, tableError.tableName(),
+                                        tableError.errorDetail().errorMessage(), tableError.errorDetail().errorCode()));
+                    }
+                }
+                catch (Exception e) {
+                    logger.error("Failed to delete tables in database {}: {}", databaseName, e.getMessage(), e);
+                }
             }
         }
     }

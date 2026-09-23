@@ -143,10 +143,60 @@ class GlueCatalogServiceTest {
         Map<String, List<Table>> databaseNameAndTables = Map.of(
                 "testDatabase", List.of(Table.builder().name("testTable").build())
         );
+        when(glueClient.batchDeleteTable(any(BatchDeleteTableRequest.class)))
+                .thenReturn(BatchDeleteTableResponse.builder().errors(Collections.emptyList()).build());
 
         glueCatalogService.batchDeleteTable(databaseNameAndTables);
 
         verify(glueClient, times(1)).batchDeleteTable(any(BatchDeleteTableRequest.class));
+    }
+
+    @Test
+    void testBatchDeleteTable_perTableErrorsInResponse_doesNotThrowAndStillProcessesOtherDatabases() {
+        // BatchDeleteTable can report per-table failures inside an overall HTTP 200 response
+        // (hasErrors()/errors()) - this must not be silently discarded, and must not prevent other
+        // databases in the same call from being processed.
+        Map<String, List<Table>> databaseNameAndTables = new java.util.LinkedHashMap<>();
+        databaseNameAndTables.put("dbWithError", List.of(Table.builder().name("stubbornTable").build()));
+        databaseNameAndTables.put("dbWithoutError", List.of(Table.builder().name("okTable").build()));
+
+        TableError tableError = TableError.builder()
+                .tableName("stubbornTable")
+                .errorDetail(ErrorDetail.builder().errorCode("InternalServiceException").errorMessage("boom").build())
+                .build();
+        when(glueClient.batchDeleteTable(argThat((BatchDeleteTableRequest req) -> req != null && "dbWithError".equals(req.databaseName()))))
+                .thenReturn(BatchDeleteTableResponse.builder().errors(List.of(tableError)).build());
+        when(glueClient.batchDeleteTable(argThat((BatchDeleteTableRequest req) -> req != null && "dbWithoutError".equals(req.databaseName()))))
+                .thenReturn(BatchDeleteTableResponse.builder().errors(Collections.emptyList()).build());
+
+        assertDoesNotThrow(() -> glueCatalogService.batchDeleteTable(databaseNameAndTables));
+
+        verify(glueClient, times(1)).batchDeleteTable(
+                argThat((BatchDeleteTableRequest req) -> req != null && "dbWithError".equals(req.databaseName())));
+        verify(glueClient, times(1)).batchDeleteTable(
+                argThat((BatchDeleteTableRequest req) -> req != null && "dbWithoutError".equals(req.databaseName())));
+    }
+
+    @Test
+    void testBatchDeleteTable_moreThan100Tables_chunksIntoMultipleRequests() {
+        List<Table> manyTables = new java.util.ArrayList<>();
+        for (int i = 0; i < 250; i++) {
+            manyTables.add(Table.builder().name("table" + i).build());
+        }
+        Map<String, List<Table>> databaseNameAndTables = Map.of("testDatabase", manyTables);
+        when(glueClient.batchDeleteTable(any(BatchDeleteTableRequest.class)))
+                .thenReturn(BatchDeleteTableResponse.builder().errors(Collections.emptyList()).build());
+
+        glueCatalogService.batchDeleteTable(databaseNameAndTables);
+
+        // 250 tables / 100-per-call Glue limit = 3 calls (100, 100, 50), never exceeding the limit in one call.
+        ArgumentCaptor<BatchDeleteTableRequest> requestCaptor = ArgumentCaptor.forClass(BatchDeleteTableRequest.class);
+        verify(glueClient, times(3)).batchDeleteTable(requestCaptor.capture());
+        for (BatchDeleteTableRequest req : requestCaptor.getAllValues()) {
+            assertTrue(req.tablesToDelete().size() <= 100);
+        }
+        int totalRequested = requestCaptor.getAllValues().stream().mapToInt(req -> req.tablesToDelete().size()).sum();
+        assertEquals(250, totalRequested);
     }
 
     @Test
