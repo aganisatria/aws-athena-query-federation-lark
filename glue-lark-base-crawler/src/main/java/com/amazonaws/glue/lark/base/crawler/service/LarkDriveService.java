@@ -22,7 +22,7 @@ package com.amazonaws.glue.lark.base.crawler.service;
 import com.amazonaws.glue.lark.base.crawler.model.LarkDatabaseRecord;
 import com.amazonaws.glue.lark.base.crawler.model.response.ListAllFolderResponse;
 import com.amazonaws.glue.lark.base.crawler.util.Util;
-import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.util.EntityUtils;
@@ -113,10 +113,12 @@ public class LarkDriveService extends CommonLarkService
         request.setHeader("Authorization", "Bearer " + tenantAccessToken);
         request.setHeader("Content-Type", "application/json");
 
-        HttpResponse response = httpClient.execute(request);
-        String responseBody = EntityUtils.toString(response.getEntity());
-
-        ListAllFolderResponse tableResponse = objectMapper.readValue(responseBody, ListAllFolderResponse.class);
+        ListAllFolderResponse tableResponse;
+        String responseBody;
+        try (CloseableHttpResponse response = httpClient.execute(request)) {
+            responseBody = EntityUtils.toString(response.getEntity());
+            tableResponse = objectMapper.readValue(responseBody, ListAllFolderResponse.class);
+        }
 
         // 1254002: No more data
         if (tableResponse.getCode() == 0 || tableResponse.getCode() == 1254002) {

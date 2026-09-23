@@ -25,7 +25,7 @@ import com.amazonaws.glue.lark.base.crawler.model.response.ListFieldResponse;
 import com.amazonaws.glue.lark.base.crawler.model.response.SearchRecordsResponse;
 import com.amazonaws.glue.lark.base.crawler.util.SearchApiResponseNormalizer;
 import com.amazonaws.glue.lark.base.crawler.util.Util;
-import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.utils.URIBuilder;
@@ -130,10 +130,12 @@ public class LarkBaseService extends CommonLarkService
         request.setHeader("Authorization", "Bearer " + tenantAccessToken);
         request.setHeader("Content-Type", "application/json");
 
-        HttpResponse response = httpClient.execute(request);
-        String responseBody = EntityUtils.toString(response.getEntity());
-
-        ListAllTableResponse tableResponse = objectMapper.readValue(responseBody, ListAllTableResponse.class);
+        ListAllTableResponse tableResponse;
+        String responseBody;
+        try (CloseableHttpResponse response = httpClient.execute(request)) {
+            responseBody = EntityUtils.toString(response.getEntity());
+            tableResponse = objectMapper.readValue(responseBody, ListAllTableResponse.class);
+        }
 
         // 1254002: No more data
         if (tableResponse.getCode() == 0 || tableResponse.getCode() == 1254002) {
@@ -218,10 +220,11 @@ public class LarkBaseService extends CommonLarkService
 
         logger.info("Requesting fields for table {}: {}", tableId, uri);
 
-        HttpResponse response = httpClient.execute(request);
-        String responseBody = EntityUtils.toString(response.getEntity());
-
-        ListFieldResponse fieldResponse = objectMapper.readValue(responseBody, ListFieldResponse.class);
+        ListFieldResponse fieldResponse;
+        try (CloseableHttpResponse response = httpClient.execute(request)) {
+            String responseBody = EntityUtils.toString(response.getEntity());
+            fieldResponse = objectMapper.readValue(responseBody, ListFieldResponse.class);
+        }
 
         if (fieldResponse.getCode() == 0) {
             return fieldResponse;
@@ -338,10 +341,11 @@ public class LarkBaseService extends CommonLarkService
         request.setHeader("Content-Type", "application/json");
         request.setEntity(new org.apache.http.entity.StringEntity(requestBody, java.nio.charset.StandardCharsets.UTF_8));
 
-        HttpResponse response = httpClient.execute(request);
-        String responseBody = EntityUtils.toString(response.getEntity());
-
-        SearchRecordsResponse recordsResponse = objectMapper.readValue(responseBody, SearchRecordsResponse.class);
+        SearchRecordsResponse recordsResponse;
+        try (CloseableHttpResponse response = httpClient.execute(request)) {
+            String responseBody = EntityUtils.toString(response.getEntity());
+            recordsResponse = objectMapper.readValue(responseBody, SearchRecordsResponse.class);
+        }
 
         if (recordsResponse.getCode() == 0) {
             return recordsResponse;

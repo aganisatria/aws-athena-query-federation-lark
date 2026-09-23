@@ -25,10 +25,10 @@ import com.amazonaws.glue.lark.base.crawler.model.response.ListFieldResponse;
 import com.amazonaws.glue.lark.base.crawler.model.response.SearchRecordsResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.HttpEntity;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -60,13 +60,13 @@ public class LarkBaseServiceTest {
     private LarkBaseService larkBaseService = new LarkBaseService(TEST_APP_ID, TEST_APP_SECRET);
 
     @Mock
-    private HttpClient mockHttpClient;
+    private CloseableHttpClient mockHttpClient;
 
     @Mock
     private ObjectMapper mockObjectMapper;
 
     @Mock
-    private HttpResponse mockHttpResponse;
+    private CloseableHttpResponse mockHttpResponse;
 
     @Mock
     private HttpEntity mockHttpEntity;

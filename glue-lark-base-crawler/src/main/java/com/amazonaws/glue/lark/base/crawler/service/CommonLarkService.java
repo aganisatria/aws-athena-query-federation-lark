@@ -23,10 +23,10 @@ import com.amazonaws.glue.lark.base.crawler.model.request.TenantAccessTokenReque
 import com.amazonaws.glue.lark.base.crawler.model.response.TenantAccessTokenResponse;
 import com.amazonaws.glue.lark.base.crawler.util.ThrottlingRetry;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.util.EntityUtils;
 
@@ -42,7 +42,7 @@ public class CommonLarkService
 
     private final String larkAppId;
     private final String larkAppSecret;
-    protected HttpClient httpClient;
+    protected CloseableHttpClient httpClient;
     protected ObjectMapper objectMapper = new ObjectMapper();
     // Package-visible/overridable (like httpClient and objectMapper above) so tests can inject a
     // no-retry instance (timeoutMs <= 0) instead of exercising real backoff delays.
@@ -89,11 +89,12 @@ public class CommonLarkService
         if (httpClient == null) {
             throw new IllegalStateException("HTTP client not yet initialized");
         }
-        HttpResponse response = httpClient.execute(request);
 
-        String responseBody = EntityUtils.toString(response.getEntity());
-
-        TenantAccessTokenResponse tokenResponse = objectMapper.readValue(responseBody, TenantAccessTokenResponse.class);
+        TenantAccessTokenResponse tokenResponse;
+        try (CloseableHttpResponse response = httpClient.execute(request)) {
+            String responseBody = EntityUtils.toString(response.getEntity());
+            tokenResponse = objectMapper.readValue(responseBody, TenantAccessTokenResponse.class);
+        }
 
         if (tokenResponse.code() == 0 && tokenResponse.tenantAccessToken() != null
                 && !tokenResponse.tenantAccessToken().isEmpty()) {
