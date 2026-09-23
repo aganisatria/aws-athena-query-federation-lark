@@ -404,28 +404,10 @@ public class BaseMetadataHandlerTest {
     }
 
     @Test
-    public void testWriteSinglePartition_hasOrderBy_skipsRedundantRowCountLookup() throws Exception {
-        // doGetSplits's ORDER BY branch always collapses into one sorted split and recomputes its own
-        // sizing from scratch via a fresh getTotalRowCount call - the EXPECTED_ROW_COUNT_PROPERTY written
-        // here is provably never read for that case. Calling getTotalRowCount (which invokes Lark) here
-        // too would be a second, wasted round-trip with identical parameters on every ORDER BY query.
-        java.lang.reflect.Method method = BaseMetadataHandler.class.getDeclaredMethod("writeSinglePartition",
-                BlockWriter.class, String.class, String.class, String.class, String.class, String.class,
-                String.class, long.class, boolean.class);
-        method.setAccessible(true);
-
-        BlockWriter mockBlockWriter = mock(BlockWriter.class);
-        method.invoke(handler, mockBlockWriter, "base1", "tbl1", "", "", "{}", "{}", -1L, true);
-
-        verify(mockInvoker, never()).invoke(any());
-        verify(mockBlockWriter, times(1)).writeRows(any());
-    }
-
-    @Test
-    public void testWriteSinglePartition_noOrderBy_stillLooksUpRowCount() throws Exception {
-        // Regression guard: the skip must be scoped to ORDER BY only - a plain (non-ORDER-BY)
-        // single-partition query still needs a real row count to size EXPECTED_ROW_COUNT_PROPERTY
-        // correctly for BaseRecordHandler's fetch-loop cap.
+    public void testWriteSinglePartition_alwaysLooksUpRowCount_regardlessOfHasOrderByFlag() throws Exception {
+        // Athena's engine doesn't populate GetTableLayoutRequest's ORDER BY constraint - hasOrderBy is
+        // unreliable here (always false in practice) - so writeSinglePartition can't skip this lookup
+        // based on it. Verifies both flag values still take the real, unconditional lookup path.
         java.lang.reflect.Method method = BaseMetadataHandler.class.getDeclaredMethod("writeSinglePartition",
                 BlockWriter.class, String.class, String.class, String.class, String.class, String.class,
                 String.class, long.class, boolean.class);
@@ -441,10 +423,70 @@ public class BaseMetadataHandlerTest {
         when(mockInvoker.invoke(any())).thenReturn(response);
 
         BlockWriter mockBlockWriter = mock(BlockWriter.class);
+        method.invoke(handler, mockBlockWriter, "base1", "tbl1", "", "", "{}", "{}", -1L, true);
         method.invoke(handler, mockBlockWriter, "base1", "tbl1", "", "", "{}", "{}", -1L, false);
 
+        verify(mockInvoker, times(2)).invoke(any());
+        verify(mockBlockWriter, times(2)).writeRows(any());
+    }
+
+    @Test
+    public void testResolveOrderBySplitTotalRowCount_singlePartitionWithRawCount_reusesStoredValue() throws Exception {
+        // getPartitions already fetched this exact (filtered) count once via writeSinglePartition - reuse
+        // it instead of a second, identical Lark API round-trip.
+        int result = handler.resolveOrderBySplitTotalRowCount(true, 550, "base1", "tbl1", "");
+
+        assertEquals(550, result);
+        verify(mockInvoker, never()).invoke(any());
+    }
+
+    @Test
+    public void testResolveOrderBySplitTotalRowCount_singlePartitionWithZeroRawCount_reusesGenuineZero() throws Exception {
+        // 0 is a legitimate fetched count (a filter matching no rows), not the "unavailable" sentinel -
+        // must still be reused, not treated as missing.
+        int result = handler.resolveOrderBySplitTotalRowCount(true, 0, "base1", "tbl1", "");
+
+        assertEquals(0, result);
+        verify(mockInvoker, never()).invoke(any());
+    }
+
+    @Test
+    public void testResolveOrderBySplitTotalRowCount_parallelPlanned_fallsBackToFreshFetch() throws Exception {
+        // writeParallelPartitions stores an UNFILTERED count under the same property (wrong semantics to
+        // reuse whenever a filter is present), so a parallel-planned row 0 must never be trusted here -
+        // regardless of what value it carries (-1 sentinel in production, but the flag alone must gate this).
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
+                        .items(Collections.emptyList())
+                        .hasMore(false)
+                        .total(999)
+                        .build())
+                .build();
+        when(mockInvoker.invoke(any())).thenReturn(response);
+
+        int result = handler.resolveOrderBySplitTotalRowCount(false, -1, "base1", "tbl1", "");
+
+        assertEquals(999, result);
         verify(mockInvoker, times(1)).invoke(any());
-        verify(mockBlockWriter, times(1)).writeRows(any());
+    }
+
+    @Test
+    public void testResolveOrderBySplitTotalRowCount_rawCountUnavailable_fallsBackToFreshFetch() throws Exception {
+        // null means the property wasn't present on the partition schema at all (e.g. a version-mismatch
+        // edge case) - must not be confused with a genuinely-fetched zero.
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
+                        .items(Collections.emptyList())
+                        .hasMore(false)
+                        .total(42)
+                        .build())
+                .build();
+        when(mockInvoker.invoke(any())).thenReturn(response);
+
+        int result = handler.resolveOrderBySplitTotalRowCount(true, null, "base1", "tbl1", "");
+
+        assertEquals(42, result);
+        verify(mockInvoker, times(1)).invoke(any());
     }
 
     @Test

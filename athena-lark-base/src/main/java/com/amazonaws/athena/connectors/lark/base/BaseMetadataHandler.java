@@ -106,6 +106,7 @@ import static com.amazonaws.athena.connectors.lark.base.BaseConstants.MAX_PARALL
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.NULLS_FIRST_FIELD_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RAW_TOTAL_ROW_COUNT_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RESERVED_SPLIT_KEY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.SORT_EXPRESSION_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.SOURCE_TYPE;
@@ -510,6 +511,7 @@ public class BaseMetadataHandler
                 .addStringField(FILTER_EXPRESSION_PROPERTY)
                 .addIntField(PAGE_SIZE_PROPERTY)
                 .addIntField(EXPECTED_ROW_COUNT_PROPERTY)
+                .addIntField(RAW_TOTAL_ROW_COUNT_PROPERTY)
                 .addStringField(SORT_EXPRESSION_PROPERTY)
 
                 // Split Property
@@ -757,6 +759,31 @@ public class BaseMetadataHandler
     }
 
     /**
+     * Decides whether {@link #doGetSplits}'s ORDER BY branch can reuse the row count {@code getPartitions}
+     * already fetched (via {@code writeSinglePartition}, stored in row 0's {@code RAW_TOTAL_ROW_COUNT_PROPERTY})
+     * instead of paying for a second, identical Lark API round-trip for the same baseId/tableId/filterExpression.
+     * <p>
+     * Only trusted when row 0 was planned as a single (non-parallel) partition: {@code writeParallelPartitions}
+     * stores an intentionally UNFILTERED count under the same property (see its own comment), which would be
+     * the wrong number to reuse whenever a filter is present. Falling back to a fresh fetch in that case only
+     * costs the extra round-trip for the rarer parallel-split-eligible-table case, never correctness.
+     *
+     * @param singlePartitionPlanned whether row 0's {@code IS_PARALLEL_SPLIT_PROPERTY} was false
+     * @param rawTotalRowCountFromPartition row 0's {@code RAW_TOTAL_ROW_COUNT_PROPERTY} value, or {@code null}
+     * if that property wasn't present on the partition schema at all (e.g. a version-mismatch edge case)
+     * @return the row count to use for {@link #calculateOrderBySplitSizing}
+     */
+    @VisibleForTesting
+    protected int resolveOrderBySplitTotalRowCount(boolean singlePartitionPlanned, Integer rawTotalRowCountFromPartition,
+                                                    String baseId, String tableId, String filterExpression)
+    {
+        if (singlePartitionPlanned && rawTotalRowCountFromPartition != null && rawTotalRowCountFromPartition >= 0) {
+            return rawTotalRowCountFromPartition;
+        }
+        return getTotalRowCount(baseId, tableId, filterExpression);
+    }
+
+    /**
      * Builds a sort expression for {@link #doGetSplits}, where {@code orderByClause} is reliably populated
      * (unlike at {@code getPartitions} time - see the ORDER BY handling at the top of doGetSplits). The
      * partition only carries {@code larkFieldNameMappingJson}, a {@code Map<larkFieldName, athenaColumnName>}
@@ -888,6 +915,14 @@ public class BaseMetadataHandler
                 BlockUtils.setValue(block.getFieldVector(SORT_EXPRESSION_PROPERTY), rowNum, "");
                 BlockUtils.setValue(block.getFieldVector(PAGE_SIZE_PROPERTY), rowNum, PAGE_SIZE);
                 BlockUtils.setValue(block.getFieldVector(EXPECTED_ROW_COUNT_PROPERTY), rowNum, currentSplitRowCount);
+                // -1 sentinel: this path's own totalRowCount (above) is deliberately UNFILTERED (positional
+                // range planning needs the whole table's key range, not the filtered match count - see this
+                // method's class-level comment), so it has the wrong semantics to reuse as
+                // RAW_TOTAL_ROW_COUNT_PROPERTY, which must be the FILTERED count. doGetSplits's ORDER BY
+                // branch checks IS_PARALLEL_SPLIT_PROPERTY before trusting this property and falls back to
+                // fetching a fresh (correctly filtered) count whenever it's true, so this sentinel is never
+                // actually read as a row count.
+                BlockUtils.setValue(block.getFieldVector(RAW_TOTAL_ROW_COUNT_PROPERTY), rowNum, -1);
                 BlockUtils.setValue(block.getFieldVector(IS_PARALLEL_SPLIT_PROPERTY), rowNum, true);
                 BlockUtils.setValue(block.getFieldVector(SPLIT_START_INDEX_PROPERTY), rowNum, startIndex);
                 BlockUtils.setValue(block.getFieldVector(SPLIT_END_INDEX_PROPERTY), rowNum, endIndex);
@@ -950,29 +985,17 @@ public class BaseMetadataHandler
                                       String filterExpression, String sortExpression, String fieldTypeMappingJson,
                                       String fieldNameMappingJson, long queryLimit, boolean hasOrderBy)
     {
-        final int finalExpectedRowCount;
-        if (hasOrderBy) {
-            // doGetSplits's ORDER BY branch always collapses whatever partition(s) were planned into a
-            // single sorted split and recomputes its own sizing from scratch via a fresh getTotalRowCount
-            // + calculateOrderBySplitSizing call (it never reads EXPECTED_ROW_COUNT_PROPERTY from the
-            // partition row - that FieldReader is only consumed by the non-ORDER-BY per-row loop, which
-            // is unreachable once execution takes the ORDER BY branch). Computing an accurate value here
-            // would just be a second, wasted Lark API round-trip - identical baseId/tableId/filterExpression
-            // - on every single ORDER BY query. calculateEffectiveRowCount also always returns
-            // totalRowCount unchanged when hasOrderBy is true, so the "0 rows due to LIMIT" early-return
-            // below is provably unreachable for this case too; skip straight to writing the one partition.
-            finalExpectedRowCount = 0;
-        }
-        else {
-            int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression);
-            long effectiveRowCount = calculateEffectiveRowCount(totalRowCount, queryLimit, hasOrderBy);
+        // Athena's engine doesn't populate GetTableLayoutRequest's ORDER BY constraint - it's only visible
+        // once GetSplitsRequest arrives (see doGetSplits) - so hasOrderBy is unreliable here and this call
+        // can't be skipped based on it; every query pays for this lookup at getPartitions time regardless.
+        int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression);
+        long effectiveRowCount = calculateEffectiveRowCount(totalRowCount, queryLimit, hasOrderBy);
 
-            if (effectiveRowCount == 0 && totalRowCount > 0) {
-                logger.info("getPartitions: Effective row count is 0 due to LIMIT, writing no partitions.");
-                return;
-            }
-            finalExpectedRowCount = (int) effectiveRowCount;
+        if (effectiveRowCount == 0 && totalRowCount > 0) {
+            logger.info("getPartitions: Effective row count is 0 due to LIMIT, writing no partitions.");
+            return;
         }
+        final int finalExpectedRowCount = (int) effectiveRowCount;
 
         logger.info("getPartitions: Writing 1 single partition row.");
 
@@ -983,6 +1006,11 @@ public class BaseMetadataHandler
             BlockUtils.setValue(block.getFieldVector(SORT_EXPRESSION_PROPERTY), rowNum, sortExpression);
             BlockUtils.setValue(block.getFieldVector(PAGE_SIZE_PROPERTY), rowNum, PAGE_SIZE);
             BlockUtils.setValue(block.getFieldVector(EXPECTED_ROW_COUNT_PROPERTY), rowNum, finalExpectedRowCount);
+            // The un-clamped total (as opposed to finalExpectedRowCount, which calculateEffectiveRowCount
+            // may cap at the query's LIMIT) - see RAW_TOTAL_ROW_COUNT_PROPERTY's javadoc. This path always
+            // has the correct (filtered) value on hand already, so doGetSplits's ORDER BY branch can reuse
+            // it directly instead of re-fetching the identical count from Lark a second time.
+            BlockUtils.setValue(block.getFieldVector(RAW_TOTAL_ROW_COUNT_PROPERTY), rowNum, totalRowCount);
             BlockUtils.setValue(block.getFieldVector(IS_PARALLEL_SPLIT_PROPERTY), rowNum, false);
             BlockUtils.setValue(block.getFieldVector(SPLIT_START_INDEX_PROPERTY), rowNum, 0L);
             BlockUtils.setValue(block.getFieldVector(SPLIT_END_INDEX_PROPERTY), rowNum, 0L);
@@ -1169,6 +1197,7 @@ public class BaseMetadataHandler
         FieldReader sortExprReader = partitions.getFieldReader(SORT_EXPRESSION_PROPERTY);
         FieldReader pageSizeReader = partitions.getFieldReader(PAGE_SIZE_PROPERTY);
         FieldReader expectedCountReader = partitions.getFieldReader(EXPECTED_ROW_COUNT_PROPERTY);
+        FieldReader rawTotalRowCountReader = partitions.getFieldReader(RAW_TOTAL_ROW_COUNT_PROPERTY);
         FieldReader isParallelReader = partitions.getFieldReader(IS_PARALLEL_SPLIT_PROPERTY);
         FieldReader startIndexReader = partitions.getFieldReader(SPLIT_START_INDEX_PROPERTY);
         FieldReader endIndexReader = partitions.getFieldReader(SPLIT_END_INDEX_PROPERTY);
@@ -1197,7 +1226,12 @@ public class BaseMetadataHandler
             String nullsFirstFieldName = findNullsFirstOriginalFieldName(orderByClause, larkFieldNameMappingJson);
 
             long limit = request.getConstraints().hasLimit() ? request.getConstraints().getLimit() : -1;
-            int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression);
+
+            boolean singlePartitionPlanned = !FieldReaderUtil.readBoolean(isParallelReader, 0);
+            Integer rawTotalRowCount = rawTotalRowCountReader != null
+                    ? FieldReaderUtil.readInt(rawTotalRowCountReader, 0) : null;
+            int totalRowCount = resolveOrderBySplitTotalRowCount(singlePartitionPlanned, rawTotalRowCount,
+                    baseId, tableId, filterExpression);
             Pair<Integer, Integer> splitSizing = calculateOrderBySplitSizing(limit, totalRowCount);
             int pageSizeForSplit = splitSizing.left();
             int finalExpectedRowCount = splitSizing.right();

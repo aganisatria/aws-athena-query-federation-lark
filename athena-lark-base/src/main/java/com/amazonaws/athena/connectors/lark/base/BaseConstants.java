@@ -133,6 +133,19 @@ public final class BaseConstants
     public static final String EXPECTED_ROW_COUNT_PROPERTY = "expected_row_count";
 
     /**
+     * Carries the raw, un-clamped {@code getTotalRowCount} result from {@code getPartitions} through to
+     * {@code doGetSplits}. Unlike {@link #EXPECTED_ROW_COUNT_PROPERTY} (which {@code writeSinglePartition}
+     * may cap at the query's LIMIT), this is always the true total matching row count. Athena's engine
+     * doesn't populate {@code GetTableLayoutRequest}'s ORDER BY constraint - it's only visible once
+     * {@code GetSplitsRequest} arrives - so {@code getPartitions} cannot know in advance whether a query
+     * is an ORDER BY one and skip its own row-count lookup accordingly; every query pays for one such
+     * lookup at that stage regardless. Reusing that already-fetched raw count here lets doGetSplits's
+     * ORDER BY branch size its single collapsed split correctly without a second, redundant Lark API call
+     * for the identical baseId/tableId/filterExpression.
+     */
+    public static final String RAW_TOTAL_ROW_COUNT_PROPERTY = "raw_total_row_count";
+
+    /**
      * The is parallel split property that helps metadata handler and record handler communicate the is parallel split.
      * this is used to identify the record id that is used to identify the record in the lark base.
      */
