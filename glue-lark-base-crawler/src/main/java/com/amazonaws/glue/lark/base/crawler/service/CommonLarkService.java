@@ -21,6 +21,7 @@ package com.amazonaws.glue.lark.base.crawler.service;
 
 import com.amazonaws.glue.lark.base.crawler.model.request.TenantAccessTokenRequest;
 import com.amazonaws.glue.lark.base.crawler.model.response.TenantAccessTokenResponse;
+import com.amazonaws.glue.lark.base.crawler.util.ThrottlingRetry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
@@ -43,6 +44,9 @@ public class CommonLarkService
     private final String larkAppSecret;
     protected HttpClient httpClient;
     protected ObjectMapper objectMapper = new ObjectMapper();
+    // Package-visible/overridable (like httpClient and objectMapper above) so tests can inject a
+    // no-retry instance (timeoutMs <= 0) instead of exercising real backoff delays.
+    protected ThrottlingRetry retry = new ThrottlingRetry();
 
     public CommonLarkService(String larkAppId, String larkAppSecret)
     {
