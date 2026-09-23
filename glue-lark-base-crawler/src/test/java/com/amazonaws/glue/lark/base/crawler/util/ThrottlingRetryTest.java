@@ -109,6 +109,31 @@ public class ThrottlingRetryTest {
     }
 
     @Test
+    public void reset_clearsAccumulatedBackoffDelay() throws Exception {
+        // Ramp up a real backoff delay via one throttling event then a success - handleSuccess only
+        // decays by increaseMs (10ms), leaving ~190ms still outstanding, mirroring the real state left
+        // behind after a throttling burst that this Lambda-reused instance would otherwise carry into
+        // the next, unrelated invocation (see ThrottlingRetry.reset()'s javadoc).
+        ThrottlingRetry retry = new ThrottlingRetry(200, 1000, 0.5, 10, 60_000);
+        AtomicInteger calls = new AtomicInteger(0);
+        retry.invoke(() -> {
+            if (calls.incrementAndGet() == 1) {
+                throw new IOException("Code: 1254290, Error: TooManyRequest");
+            }
+            return "ok";
+        });
+
+        retry.reset();
+
+        long start = System.currentTimeMillis();
+        retry.invoke(() -> "ok");
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertTrue("Expected near-zero delay after reset() (would be ~190ms otherwise), took " + elapsed + "ms",
+                elapsed < 100);
+    }
+
+    @Test
     public void invoke_persistentThrottling_eventuallyGivesUpAndRethrows() {
         AtomicInteger calls = new AtomicInteger(0);
         // A tiny positive timeout with zero delay still allows at least one retry loop iteration

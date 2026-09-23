@@ -139,6 +139,20 @@ public class LarkBaseCrawlerHandlerTest {
     }
 
     @Test
+    public void handleRequest_resetsThrottlingStateOnBothServices() {
+        // This handler is constructed once per Lambda cold start and reused across warm invocations, so
+        // a backoff delay ramped up by a prior invocation's throttling must not silently carry into an
+        // unrelated later one - see ThrottlingRetry.reset()/CommonLarkService.resetThrottlingState().
+        when(mockLarkBaseService.getTableRecords("baseDs123", "tableDs456")).thenReturn(Collections.emptyList());
+        when(mockGlueCatalogService.getDatabases()).thenReturn(Collections.emptyList());
+
+        handler.handleRequest(payload, mockContext);
+
+        verify(mockLarkBaseService, times(1)).resetThrottlingState();
+        verify(mockLarkDriveService, times(1)).resetThrottlingState();
+    }
+
+    @Test
     public void handleRequest_duplicateSanitizedTableNamesInSameBase_disambiguatedByTableId() {
         // Reproduces a real risk: two distinct Lark tables in the same base (e.g. "Report A" and
         // "report a") both sanitize to the same Glue table name. The create/update/delete diffing in

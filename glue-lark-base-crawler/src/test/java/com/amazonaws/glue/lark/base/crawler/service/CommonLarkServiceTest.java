@@ -21,6 +21,7 @@ package com.amazonaws.glue.lark.base.crawler.service;
 
 import com.amazonaws.glue.lark.base.crawler.model.request.TenantAccessTokenRequest;
 import com.amazonaws.glue.lark.base.crawler.model.response.TenantAccessTokenResponse;
+import com.amazonaws.glue.lark.base.crawler.util.ThrottlingRetry;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.HttpEntity;
@@ -242,6 +243,16 @@ public class CommonLarkServiceTest {
 
         verify(mockObjectMapper).writeValueAsString(any(TenantAccessTokenRequest.class));
         verify(mockHttpClient, never()).execute(any());
+    }
+
+    @Test
+    public void resetThrottlingState_delegatesToRetryReset() {
+        ThrottlingRetry mockRetry = mock(ThrottlingRetry.class);
+        commonLarkService.retry = mockRetry;
+
+        commonLarkService.resetThrottlingState();
+
+        verify(mockRetry, times(1)).reset();
     }
 
     @Test

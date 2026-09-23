@@ -858,6 +858,13 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
     @Override
     public String handleRequest(Object input, Context context)
     {
+        // This handler is constructed once per Lambda cold start and reused across warm invocations, so
+        // larkBaseService/larkDriveService's throttling backoff (ramped up by a prior invocation's
+        // rate-limiting) must not be allowed to silently slow down an unrelated later invocation - see
+        // ThrottlingRetry.reset().
+        larkBaseService.resetThrottlingState();
+        larkDriveService.resetThrottlingState();
+
         // Step 1: Get records from Lark
         logger.info("Step 1: Fetching records from Lark Base");
         List<LarkDatabaseRecord> listRecordsResponse = this.getLarkDatabases();

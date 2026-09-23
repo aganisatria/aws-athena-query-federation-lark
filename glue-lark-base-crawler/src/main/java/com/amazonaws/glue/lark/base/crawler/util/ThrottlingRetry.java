@@ -163,6 +163,19 @@ public final class ThrottlingRetry
         delay.set(newDelay);
     }
 
+    /**
+     * Clears any backed-off delay accumulated from throttling. This instance is held by a
+     * {@code CommonLarkService} field, which - like the whole handler - is constructed once per Lambda
+     * cold start and reused across every warm invocation, so without this a backoff ramped up by one
+     * invocation's throttling would otherwise persist into the next, unrelated invocation on the same
+     * warm container (decaying only {@link #DEFAULT_INCREASE_MS} per successful call). Callers should
+     * invoke this once at the start of each Lambda invocation so retry state doesn't leak across them.
+     */
+    public void reset()
+    {
+        delay.set(0);
+    }
+
     private void applySleep()
             throws InterruptedException
     {

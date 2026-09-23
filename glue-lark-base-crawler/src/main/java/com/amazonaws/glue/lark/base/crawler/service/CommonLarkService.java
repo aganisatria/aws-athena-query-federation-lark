@@ -56,6 +56,16 @@ public class CommonLarkService
     }
 
     /**
+     * Clears this service's accumulated throttling backoff. See {@link ThrottlingRetry#reset()} - this
+     * service instance is reused across warm Lambda invocations, so callers should invoke this once at
+     * the start of each invocation.
+     */
+    public void resetThrottlingState()
+    {
+        retry.reset();
+    }
+
+    /**
      * Refresh tenant access token. We use synchronized to ensure that only one thread can refresh the token at a time.
      *
      * @throws IOException If failed to refresh tenant access token
