@@ -420,6 +420,42 @@ public class BaseMetadataHandler
                     ErrorDetails.builder().errorCode(FederationSourceErrorCode.ENTITY_NOT_FOUND_EXCEPTION.toString()).build());
         }
 
+        // Try Glue first, mirroring the precedence resolvePartitionInfo/tryResolveFromCrawledSchemaMetadata
+        // already established for a crawler-populated table: a Glue lookup is a single cheap API call,
+        // while the Lark Base source and experimental providers below are for a *different* deployment
+        // mode (tables resolved fresh from Lark itself, not pre-crawled into Glue) and are
+        // guaranteed-to-fail (or, for the experimental path, an expensive false positive) for a crawled
+        // table - the source provider matches by Lark's own naming, which a crawled table's human-chosen
+        // Athena name generally won't equal, and the experimental provider's heuristic (matching a token
+        // in the raw query text against the schema/table name) always "succeeds" trivially for perfectly
+        // ordinary SQL, then wastes a real Lark API round-trip (~1s, confirmed live via CloudWatch in the
+        // commit that added the equivalent resolvePartitionInfo shortcut) discovering the "ID" it found
+        // isn't real. Before this, only resolvePartitionInfo got that shortcut - doGetTable, which
+        // resolves the table BEFORE resolvePartitionInfo ever runs, still paid the exact cost that fix
+        // was meant to eliminate, on every single query against a crawler-populated table.
+        // A table that's genuinely only resolvable live via Lark (never crawled into Glue) still falls
+        // through normally below: EntityNotFoundException here is the expected, cheap common case for
+        // that deployment mode, not a failure.
+        try {
+            GetTableResponse glueResponse = super.doGetTable(allocator, request);
+            if (glueResponse != null && glueResponse.getSchema() != null) {
+                logger.info("doGetTable: Found schema from Glue.");
+                Schema finalSchema = CommonUtil.addReservedFields(glueResponse.getSchema());
+                return new GetTableResponse(request.getCatalogName(), request.getTableName(), finalSchema, glueResponse.getPartitionColumns());
+            }
+            else {
+                logger.info("doGetTable: Glue lookup returned null or no schema for {}; trying Lark Base source/experimental providers.", request.getTableName());
+            }
+        }
+        catch (EntityNotFoundException e) {
+            if (envVarService.isEnableDebugLogging()) {
+                logger.info("doGetTable: Table {} not found in Glue; trying Lark Base source/experimental providers.", request.getTableName());
+            }
+        }
+        catch (Exception e) {
+            logger.warn("doGetTable: Error during Glue lookup for {}, trying Lark Base source/experimental providers: {}", request.getTableName(), e.getMessage(), e);
+        }
+
         if (envVarService.isActivateLarkBaseSource() || envVarService.isActivateLarkDriveSource()) {
             if (envVarService.isEnableDebugLogging()) {
                 logger.info("doGetTable: Attempting to get schema from Lark Base source.");
@@ -449,24 +485,6 @@ public class BaseMetadataHandler
                 Schema finalSchema = CommonUtil.addReservedFields(result.schema());
                 return new GetTableResponse(request.getCatalogName(), request.getTableName(), finalSchema, result.partitionColumns());
             }
-        }
-
-        try {
-            GetTableResponse glueResponse = super.doGetTable(allocator, request);
-            if (glueResponse != null && glueResponse.getSchema() != null) {
-                logger.info("doGetTable: Found schema from Glue.");
-                Schema finalSchema = CommonUtil.addReservedFields(glueResponse.getSchema());
-                return new GetTableResponse(request.getCatalogName(), request.getTableName(), finalSchema, glueResponse.getPartitionColumns());
-            }
-            else {
-                logger.warn("doGetTable: Glue fallback returned null or no schema for {}.", request.getTableName());
-            }
-        }
-        catch (EntityNotFoundException e) {
-            logger.warn("doGetTable: Glue fallback: Table {} not found in Glue.", request.getTableName());
-        }
-        catch (Exception e) {
-            logger.warn("doGetTable: Error during Glue fallback for {}: {}", request.getTableName(), e.getMessage(), e);
         }
 
         logger.error("doGetTable: No schema found for {}. Returning empty schema.", request.getTableName());
@@ -532,7 +550,15 @@ public class BaseMetadataHandler
             }
         }
 
-        if (envVarService.isActivateLarkBaseSource()) {
+        // Was previously gated on isActivateLarkBaseSource() - the wrong flag, copy-pasted from the
+        // block above instead of matching doGetTable's equivalent gate (isActivateExperimentalFeatures(),
+        // BaseMetadataHandler.java's doGetTable method). That mismatch meant disabling
+        // ACTIVATE_EXPERIMENTAL_FEATURES_ENV_VAR didn't actually stop this method from running the
+        // experimental provider - and its expensive, often-wasted Lark API round-trip - whenever Lark
+        // Base source was on; and conversely, a deployment with experimental features on but Lark Base
+        // source off would resolve a table's schema in doGetTable but then find no partition info here,
+        // since this provider was skipped entirely.
+        if (envVarService.isActivateExperimentalFeatures()) {
             logger.info("getPartitions: Attempting to get partition info from experimental path.");
             Optional<PartitionInfoResult> experimentalPartitionInfo = experimentalMetadataProvider.getPartitionInfo(tableName, request);
             if (experimentalPartitionInfo.isPresent()) {

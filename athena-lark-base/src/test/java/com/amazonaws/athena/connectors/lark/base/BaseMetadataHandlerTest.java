@@ -176,6 +176,79 @@ public class BaseMetadataHandlerTest {
     }
 
     @Test
+    public void testDoGetTable_GlueHasTable_SkipsLarkSourceAndExperimentalProviders() {
+        // Regression test: doGetTable previously tried the Lark Base source and experimental providers
+        // BEFORE falling back to Glue, so every query against a crawler-populated table paid for two
+        // guaranteed-to-fail (or, for the experimental path, expensive false-positive) metadata
+        // resolution attempts - the exact class of problem already fixed for resolvePartitionInfo (see
+        // tryResolveFromCrawledSchemaMetadata) but left unaddressed here, where it actually first occurs.
+        // Deliberately NOT stubbing isActivateLarkBaseSource/isActivateLarkDriveSource/
+        // isActivateExperimentalFeatures: the whole point of this test is that the Glue-first shortcut
+        // returns before those flags are ever even checked. Mockito's strict stubbing would flag them
+        // as unnecessary if stubbed here, which is itself a nice confirmation the fix works.
+        when(mockEnvVarService.getWhitelistTables()).thenReturn("");
+        when(mockEnvVarService.getBlacklistTables()).thenReturn("");
+
+        software.amazon.awssdk.services.glue.model.StorageDescriptor storageDescriptor =
+                software.amazon.awssdk.services.glue.model.StorageDescriptor.builder()
+                        .columns(Collections.emptyList())
+                        .build();
+        software.amazon.awssdk.services.glue.model.Table glueTable =
+                software.amazon.awssdk.services.glue.model.Table.builder()
+                        .name("table1")
+                        .databaseName("schemaa")
+                        .storageDescriptor(storageDescriptor)
+                        .parameters(Collections.emptyMap())
+                        .build();
+        software.amazon.awssdk.services.glue.model.GetTableResponse glueApiResponse =
+                software.amazon.awssdk.services.glue.model.GetTableResponse.builder()
+                        .table(glueTable)
+                        .build();
+        when(mockGlueClient.getTable(any(software.amazon.awssdk.services.glue.model.GetTableRequest.class)))
+                .thenReturn(glueApiResponse);
+
+        com.amazonaws.athena.connector.lambda.security.FederatedIdentity identity =
+                new com.amazonaws.athena.connector.lambda.security.FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(identity, "queryId", "catalog",
+                new com.amazonaws.athena.connector.lambda.domain.TableName("schemaa", "table1"), Collections.emptyMap());
+
+        com.amazonaws.athena.connector.lambda.metadata.GetTableResponse response = handler.doGetTable(allocator, request);
+
+        assertNotNull(response);
+        assertNotNull(response.getSchema());
+        verifyNoInteractions(mockLarkSourceMetadataProvider);
+        verifyNoInteractions(mockExperimentalMetadataProvider);
+    }
+
+    @Test
+    public void testDoGetTable_GlueTableNotFound_FallsThroughToLarkSourceProvider() {
+        // The other half of the same fix: a table genuinely not in Glue (the "live Lark source, never
+        // crawled" deployment mode) must still fall through to the Lark Base source provider as before -
+        // the Glue-first shortcut should be a fast, cheap no-op for this case, not a dead end.
+        when(mockEnvVarService.getWhitelistTables()).thenReturn("");
+        when(mockEnvVarService.getBlacklistTables()).thenReturn("");
+        // isActivateLarkBaseSource() alone short-circuits the "isActivateLarkBaseSource() ||
+        // isActivateLarkDriveSource()" check below, so isActivateLarkDriveSource() is deliberately not
+        // stubbed here.
+        when(mockEnvVarService.isActivateLarkBaseSource()).thenReturn(true);
+        when(mockEnvVarService.isActivateExperimentalFeatures()).thenReturn(false);
+        when(mockGlueClient.getTable(any(software.amazon.awssdk.services.glue.model.GetTableRequest.class)))
+                .thenThrow(software.amazon.awssdk.services.glue.model.EntityNotFoundException.builder()
+                        .message("Table not found").build());
+        when(mockLarkSourceMetadataProvider.getTableSchema(any(GetTableRequest.class)))
+                .thenReturn(java.util.Optional.empty());
+
+        com.amazonaws.athena.connector.lambda.security.FederatedIdentity identity =
+                new com.amazonaws.athena.connector.lambda.security.FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(identity, "queryId", "catalog",
+                new com.amazonaws.athena.connector.lambda.domain.TableName("schemaa", "table1"), Collections.emptyMap());
+
+        assertThrows(RuntimeException.class, () -> handler.doGetTable(allocator, request));
+
+        verify(mockLarkSourceMetadataProvider).getTableSchema(any(GetTableRequest.class));
+    }
+
+    @Test
     public void testDoGetDataSourceCapabilities() {
         GetDataSourceCapabilitiesRequest request = mock(GetDataSourceCapabilitiesRequest.class);
         when(request.getCatalogName()).thenReturn("test-catalog");
