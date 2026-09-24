@@ -163,8 +163,8 @@ public class BaseMetadataHandler
                 this.invoker
         );
         this.mappingTableDirectInitialized = larkBaseTableResolver.resolveTables();
-        this.experimentalMetadataProvider = new ExperimentalMetadataProvider(athenaService, larkBaseService, invoker);
-        this.larkSourceMetadataProvider = new LarkSourceMetadataProvider(mappingTableDirectInitialized);
+        this.experimentalMetadataProvider = new ExperimentalMetadataProvider(athenaService, larkBaseService, invoker, envVarService.isActivateComplexTypeAsJsonString());
+        this.larkSourceMetadataProvider = new LarkSourceMetadataProvider(mappingTableDirectInitialized, envVarService.isActivateComplexTypeAsJsonString());
         if (envVarService.isEnableDebugLogging()) {
             logger.info("Initialization complete. Discovered {} target databases from metadata tables.", mappingTableDirectInitialized.size());
         }

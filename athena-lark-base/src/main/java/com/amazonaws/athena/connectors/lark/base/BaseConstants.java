@@ -63,6 +63,27 @@ public final class BaseConstants
     public static final String ENABLE_DEBUG_LOGGING_ENV_VAR = "default_enable_debug_logging";
 
     /**
+     * When set to "true", every column that would otherwise be built as a List/Struct-shaped Arrow type
+     * (MULTI_SELECT, USER, GROUP_CHAT, ATTACHMENT, CREATED_USER, MODIFIED_USER, LOOKUP, URL, LOCATION,
+     * SINGLE_LINK, DUPLEX_LINK) is instead built as a plain VARCHAR column holding a JSON-serialized
+     * representation of the same value. Opt-in and off by default - existing tables/queries that rely on
+     * List/Struct-typed columns are unaffected unless this is explicitly set.
+     * <p>
+     * Exists because any WHERE constraint (including IS NOT NULL) referencing a List/Struct-typed column
+     * crashes the whole query inside Amazon Athena's own managed query engine
+     * ({@code IllegalArgumentException: Lists have one child Field. Found: none}, from Apache Arrow's
+     * {@code ListVector.initializeChildrenFromFields}) - a genuine platform-level limitation, not something
+     * fixable by changing what this connector returns while the column stays List/Struct-typed. Representing
+     * the value as a JSON string instead sidesteps the crash entirely, at the cost of losing native
+     * array/struct access in Athena (callers must parse the JSON string themselves).
+     * <p>
+     * Only affects schema built directly by this connector (the live Lark source / experimental providers).
+     * A crawler-populated (Glue-backed) table's schema instead comes from Glue's stored type string - set
+     * the identically-named env var on {@code glue-lark-base-crawler} too so a re-crawl agrees with this.
+     */
+    public static final String DOES_ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR = "default_does_activate_complex_type_as_json_string";
+
+    /**
      * The environment variable which is used to cap how many LOOKUP hops the connector will follow when resolving
      * a chained LOOKUP field's effective type (e.g. a LOOKUP pointing at another LOOKUP in a different table).
      * This is a defense-in-depth safety valve on top of cycle detection, in case a legitimate (non-circular) chain

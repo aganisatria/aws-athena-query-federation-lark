@@ -238,11 +238,13 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
     private TableInput constructNewTables(String databaseId, String tableId, String tableName)
     {
         List<ListFieldResponse.FieldItem> listFieldResponse = larkBaseService.getTableFields(databaseId, tableId);
+        boolean complexTypeAsJsonString = Boolean.parseBoolean(
+                System.getenv(LarkBaseCrawlerConstants.ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR));
 
         ArrayList<ColumnParameters> columns = listFieldResponse.stream()
                 .map(fieldItem -> ColumnParameters.builder()
                         .columnName(fieldItem.getFieldName())
-                        .columnType(fieldItem.getUIType().getGlueCatalogType(getFormulaOrLookupFieldType(fieldItem, databaseId)))
+                        .columnType(resolveGlueColumnType(fieldItem, databaseId, complexTypeAsJsonString))
                         .larkBaseFieldId(fieldItem.getFieldId())
                         .larkBaseColumnType(getLarkBaseOriginalColumnType(fieldItem, databaseId))
                         .larkBaseId(databaseId)
@@ -263,6 +265,24 @@ abstract class BaseLarkBaseCrawlerHandler implements RequestHandler<Object, Stri
                 getCrawlingSource(),
                 getAdditionalTableInputParameter()
         );
+    }
+
+    /**
+     * Resolves a field's Glue column type, optionally collapsing List/Struct-shaped types
+     * ({@code array<...>}/{@code struct<...>}) down to a plain {@code string} column - see
+     * {@link LarkBaseCrawlerConstants#ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR}'s javadoc for why.
+     * Collapsing is done as a post-processing check on the resolved type string rather than threading the
+     * flag into {@code UITypeEnum.getGlueCatalogType} itself, so a LOOKUP wrapping a List/Struct-shaped
+     * target (e.g. {@code array<struct<...>>}) is caught by the same check without needing separate
+     * handling for the wrapped case.
+     */
+    private String resolveGlueColumnType(ListFieldResponse.FieldItem fieldItem, String databaseId, boolean complexTypeAsJsonString)
+    {
+        String glueType = fieldItem.getUIType().getGlueCatalogType(getFormulaOrLookupFieldType(fieldItem, databaseId));
+        if (complexTypeAsJsonString && (glueType.startsWith("array<") || glueType.startsWith("struct<"))) {
+            return "string";
+        }
+        return glueType;
     }
 
     protected Optional<ListFieldResponse.FieldItem> getLookupType(ListFieldResponse.FieldItem item, String baseId)

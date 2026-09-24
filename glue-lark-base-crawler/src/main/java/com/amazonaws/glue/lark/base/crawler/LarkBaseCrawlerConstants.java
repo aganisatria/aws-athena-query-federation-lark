@@ -48,6 +48,28 @@ public final class LarkBaseCrawlerConstants
     public static final int LOOKUP_MAX_DEPTH = 20;
 
     /**
+     * When set to "true", every column that would otherwise be crawled as a Glue {@code array<...>}/
+     * {@code struct<...>} type (MULTI_SELECT, USER, GROUP_CHAT, ATTACHMENT, CREATED_USER, MODIFIED_USER,
+     * LOOKUP, URL, LOCATION, SINGLE_LINK, DUPLEX_LINK) is instead crawled as a plain {@code string} column
+     * holding a JSON-serialized representation of the same value. Opt-in and off by default - existing
+     * tables/queries that rely on List/Struct-typed columns are unaffected unless this is explicitly set.
+     * <p>
+     * Exists because any WHERE constraint (including IS NOT NULL) referencing a List/Struct-typed column
+     * crashes the whole query inside Amazon Athena's own managed query engine
+     * ({@code IllegalArgumentException: Lists have one child Field. Found: none}, from Apache Arrow's
+     * {@code ListVector.initializeChildrenFromFields}) - a genuine platform-level limitation, not something
+     * fixable by changing what this connector returns while the column stays List/Struct-typed. Representing
+     * the value as a JSON string instead sidesteps the crash entirely, at the cost of losing native
+     * array/struct access in Athena (callers must parse the JSON string themselves, e.g. via Trino/Presto's
+     * {@code json_extract}).
+     * <p>
+     * Matches {@code athena-lark-base}'s identical env var name/semantics - set the same value on both the
+     * crawler and connector Lambdas so the schema this crawls into Glue agrees with how the connector
+     * would build the same schema for a live (non-crawled) source.
+     */
+    public static final String ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR = "default_does_activate_complex_type_as_json_string";
+
+    /**
      * Private constructor to prevent instantiation.
      */
     private LarkBaseCrawlerConstants()

@@ -59,14 +59,24 @@ public class ExperimentalMetadataProvider
     private final AthenaService athenaService;
     private final LarkBaseService larkBaseService;
     private final ThrottlingInvoker invoker;
+    private final boolean complexTypeAsJsonString;
 
     public ExperimentalMetadataProvider(AthenaService athenaService,
                                         LarkBaseService larkBaseService,
                                         ThrottlingInvoker invoker)
     {
+        this(athenaService, larkBaseService, invoker, false);
+    }
+
+    public ExperimentalMetadataProvider(AthenaService athenaService,
+                                        LarkBaseService larkBaseService,
+                                        ThrottlingInvoker invoker,
+                                        boolean complexTypeAsJsonString)
+    {
         this.athenaService = requireNonNull(athenaService, "athenaService cannot be null");
         this.larkBaseService = requireNonNull(larkBaseService, "larkBaseService cannot be null");
         this.invoker = requireNonNull(invoker, "invoker cannot be null");
+        this.complexTypeAsJsonString = complexTypeAsJsonString;
     }
 
     public Optional<TableSchemaResult> getTableSchema(GetTableRequest request)
@@ -132,7 +142,7 @@ public class ExperimentalMetadataProvider
                     return Optional.empty();
                 }
 
-                Schema schema = CommonUtil.buildSchemaFromLarkFields(fieldMappings);
+                Schema schema = CommonUtil.buildSchemaFromLarkFields(fieldMappings, complexTypeAsJsonString);
                 logger.info("Experimental Path: Built schema: {}", schema);
                 return Optional.of(new TableSchemaResult(schema, Collections.emptySet()));
             }

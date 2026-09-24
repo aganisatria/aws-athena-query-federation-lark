@@ -1047,6 +1047,112 @@ public class RegistererExtractorTest {
         assertEquals(0, holder.isSet);
     }
 
+    // Tests for the complexTypeAsJsonString VarChar extraction path (BaseConstants.
+    // DOES_ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR): when this schema-level flag redirects a
+    // List/Struct-shaped field to VARCHAR, registerExtractorsForSchema routes it to this same VarChar
+    // extractor - it must dispatch on the field's real declared UI type (via larkFieldTypeMapping) to
+    // JSON-serialize the raw value, rather than running it through the TEXT-specific branches above,
+    // which are keyed on value SHAPE and can collide with a genuinely different field's raw shape.
+
+    @Test
+    public void testVarCharExtractor_complexTypeAsJsonString_multiSelectList_jsonSerializesWholeList() throws Exception {
+        larkFieldTypeMapping.put("test_field", new NestedUIType(UITypeEnum.MULTI_SELECT, UITypeEnum.UNKNOWN));
+        registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
+
+        ArgumentCaptor<VarCharExtractor> extractorCaptor = ArgumentCaptor.forClass(VarCharExtractor.class);
+        Field field = new Field("test_field", FieldType.nullable(new ArrowType.Utf8()), null);
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, new Schema(Collections.singletonList(field)));
+        verify(mockRowWriterBuilder).withExtractor(eq("test_field"), extractorCaptor.capture());
+        VarCharExtractor extractor = extractorCaptor.getValue();
+
+        Map<String, Object> context = new HashMap<>();
+        context.put("test_field", List.of("Option A", "Option B"));
+        NullableVarCharHolder holder = new NullableVarCharHolder();
+
+        extractor.extract(context, holder);
+
+        assertEquals("[\"Option A\",\"Option B\"]", holder.value);
+        assertEquals(1, holder.isSet);
+    }
+
+    @Test
+    public void testVarCharExtractor_complexTypeAsJsonString_userList_jsonSerializesListOfStructs() throws Exception {
+        larkFieldTypeMapping.put("test_field", new NestedUIType(UITypeEnum.USER, UITypeEnum.UNKNOWN));
+        registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
+
+        ArgumentCaptor<VarCharExtractor> extractorCaptor = ArgumentCaptor.forClass(VarCharExtractor.class);
+        Field field = new Field("test_field", FieldType.nullable(new ArrowType.Utf8()), null);
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, new Schema(Collections.singletonList(field)));
+        verify(mockRowWriterBuilder).withExtractor(eq("test_field"), extractorCaptor.capture());
+        VarCharExtractor extractor = extractorCaptor.getValue();
+
+        Map<String, Object> userMap = new LinkedHashMap<>();
+        userMap.put("id", "ou_12345");
+        userMap.put("name", "Agani Satria");
+        Map<String, Object> context = new HashMap<>();
+        context.put("test_field", List.of(userMap));
+        NullableVarCharHolder holder = new NullableVarCharHolder();
+
+        extractor.extract(context, holder);
+
+        assertEquals("[{\"id\":\"ou_12345\",\"name\":\"Agani Satria\"}]", holder.value);
+        assertEquals(1, holder.isSet);
+    }
+
+    @Test
+    public void testVarCharExtractor_complexTypeAsJsonString_urlStruct_doesNotCollideWithTextMapHeuristic() throws Exception {
+        // URL's own raw shape ({"link":..., "text":..., "type":...}) happens to contain a "text" key,
+        // which is exactly the heuristic the plain-TEXT branch above uses to detect a mentions-formatted
+        // text cell. Without dispatching on the real declared UI type first, this would silently discard
+        // "link"/"type" and extract only the "text" value.
+        larkFieldTypeMapping.put("test_field", new NestedUIType(UITypeEnum.URL, UITypeEnum.UNKNOWN));
+        registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
+
+        ArgumentCaptor<VarCharExtractor> extractorCaptor = ArgumentCaptor.forClass(VarCharExtractor.class);
+        Field field = new Field("test_field", FieldType.nullable(new ArrowType.Utf8()), null);
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, new Schema(Collections.singletonList(field)));
+        verify(mockRowWriterBuilder).withExtractor(eq("test_field"), extractorCaptor.capture());
+        VarCharExtractor extractor = extractorCaptor.getValue();
+
+        Map<String, Object> urlMap = new LinkedHashMap<>();
+        urlMap.put("link", "https://example.com");
+        urlMap.put("text", "click here");
+        urlMap.put("type", "url");
+        Map<String, Object> context = new HashMap<>();
+        context.put("test_field", urlMap);
+        NullableVarCharHolder holder = new NullableVarCharHolder();
+
+        extractor.extract(context, holder);
+
+        assertEquals("{\"link\":\"https://example.com\",\"text\":\"click here\",\"type\":\"url\"}", holder.value);
+        assertEquals(1, holder.isSet);
+    }
+
+    @Test
+    public void testVarCharExtractor_complexTypeAsJsonString_formulaWrappingUserTarget_jsonSerializesUnwrappedList() throws Exception {
+        larkFieldTypeMapping.put("test_field", new NestedUIType(UITypeEnum.FORMULA, UITypeEnum.USER));
+        registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
+
+        ArgumentCaptor<VarCharExtractor> extractorCaptor = ArgumentCaptor.forClass(VarCharExtractor.class);
+        Field field = new Field("test_field", FieldType.nullable(new ArrowType.Utf8()), null);
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, new Schema(Collections.singletonList(field)));
+        verify(mockRowWriterBuilder).withExtractor(eq("test_field"), extractorCaptor.capture());
+        VarCharExtractor extractor = extractorCaptor.getValue();
+
+        Map<String, Object> userMap = new LinkedHashMap<>();
+        userMap.put("id", "ou_99999");
+        Map<String, Object> formulaWrapper = new HashMap<>();
+        formulaWrapper.put("value", List.of(userMap));
+        Map<String, Object> context = new HashMap<>();
+        context.put("test_field", formulaWrapper);
+        NullableVarCharHolder holder = new NullableVarCharHolder();
+
+        extractor.extract(context, holder);
+
+        assertEquals("[{\"id\":\"ou_99999\"}]", holder.value);
+        assertEquals(1, holder.isSet);
+    }
+
     // Tests for DateMilli extractor exception handling
     @Test
     public void testDateMilliExtractor_exceptionHandling() throws Exception {

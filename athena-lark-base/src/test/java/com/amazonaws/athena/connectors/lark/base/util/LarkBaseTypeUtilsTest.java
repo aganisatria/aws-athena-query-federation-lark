@@ -706,4 +706,69 @@ class LarkBaseTypeUtilsTest {
         assertThat(result.getName()).isEqualTo("Created At");
         assertThat(result.getType()).isEqualTo(Types.MinorType.DATEMILLI.getType());
     }
+
+    // Tests for the complexTypeAsJsonString flag (BaseConstants.DOES_ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR):
+    // a List/Struct-shaped field becomes plain VARCHAR instead, sidestepping Athena's own engine crash on
+    // any WHERE constraint (including IS NOT NULL) referencing a List/Struct-typed column.
+
+    @Test
+    void testLarkFieldToArrowField_ComplexTypeAsJsonString_ListField_BecomesVarcharWithNoChildren() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "tags", "Tags", new NestedUIType(UITypeEnum.MULTI_SELECT, UITypeEnum.UNKNOWN));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field, true);
+
+        assertThat(result.getName()).isEqualTo("Tags");
+        assertThat(result.getType()).isEqualTo(ArrowType.Utf8.INSTANCE);
+        assertThat(result.getChildren()).isEmpty();
+    }
+
+    @Test
+    void testLarkFieldToArrowField_ComplexTypeAsJsonString_StructField_BecomesVarcharWithNoChildren() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "website", "Website", new NestedUIType(UITypeEnum.URL, UITypeEnum.UNKNOWN));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field, true);
+
+        assertThat(result.getName()).isEqualTo("Website");
+        assertThat(result.getType()).isEqualTo(ArrowType.Utf8.INSTANCE);
+        assertThat(result.getChildren()).isEmpty();
+    }
+
+    @Test
+    void testLarkFieldToArrowField_ComplexTypeAsJsonString_FormulaWrappingListTarget_BecomesVarchar() {
+        // A LOOKUP wrapping a List/Struct-shaped target (e.g. Lookup<User>) resolves to LIST via the
+        // same larkFieldToArrowMinorType unwrapping FORMULA/LOOKUP already do - the flag check runs
+        // after that resolution, so the wrapped case needs no separate handling.
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "assignees", "Assignees", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.USER));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field, true);
+
+        assertThat(result.getType()).isEqualTo(ArrowType.Utf8.INSTANCE);
+        assertThat(result.getChildren()).isEmpty();
+    }
+
+    @Test
+    void testLarkFieldToArrowField_ComplexTypeAsJsonStringFalse_ListFieldStaysList() {
+        // Regression guard: the flag must be opt-in - default (false) behavior is unaffected.
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "tags", "Tags", new NestedUIType(UITypeEnum.MULTI_SELECT, UITypeEnum.UNKNOWN));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field, false);
+
+        assertThat(result.getType()).isEqualTo(ArrowType.List.INSTANCE);
+    }
+
+    @Test
+    void testLarkFieldToArrowField_ComplexTypeAsJsonString_ScalarFieldUnaffected() {
+        // The flag only touches LIST/STRUCT MinorTypes - a plain scalar field (e.g. NUMBER) must not be
+        // coerced to VARCHAR by it.
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "amount", "Amount", new NestedUIType(UITypeEnum.NUMBER, UITypeEnum.UNKNOWN));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field, true);
+
+        assertThat(result.getType()).isInstanceOf(ArrowType.Decimal.class);
+    }
 }

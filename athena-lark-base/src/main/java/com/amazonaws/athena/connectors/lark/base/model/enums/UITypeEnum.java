@@ -130,4 +130,22 @@ public enum UITypeEnum
             default -> UNKNOWN;
         };
     }
+
+    /**
+     * Whether this UI type is normally built as a List/Struct-shaped Arrow column (see
+     * LarkBaseTypeUtils.larkFieldToArrowMinorType) - the set of types affected by
+     * BaseConstants.DOES_ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR. Used both to decide whether a
+     * VarChar extractor should JSON-serialize its raw value (RegistererExtractor) and to skip filter
+     * pushdown for such a column regardless of the flag (SearchApiFilterTranslator) - Lark's Search API
+     * has no operator defined for "the JSON-stringified form of a User/Attachment/... field", so a
+     * pushdown attempt could send Lark an operator/value shape it doesn't understand.
+     */
+    public boolean isComplexContainerType()
+    {
+        return switch (this) {
+            case MULTI_SELECT, USER, GROUP_CHAT, ATTACHMENT, CREATED_USER, MODIFIED_USER, LOOKUP,
+                 URL, LOCATION, SINGLE_LINK, DUPLEX_LINK -> true;
+            default -> false;
+        };
+    }
 }

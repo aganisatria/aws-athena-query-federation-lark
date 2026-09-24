@@ -601,4 +601,33 @@ class CommonUtilTest {
         List<String> fieldNames = schema.getFields().stream().map(Field::getName).toList();
         assertThat(fieldNames).containsExactlyInAnyOrder("segment_5", "segment_5_fldzrayo2s");
     }
+
+    @Test
+    void testBuildSchemaFromLarkFields_complexTypeAsJsonString_collapsesListStructColumnsToVarchar() {
+        AthenaFieldLarkBaseMapping textField = new AthenaFieldLarkBaseMapping(
+                "field_text", "Field Text", new NestedUIType(UITypeEnum.TEXT, null));
+        AthenaFieldLarkBaseMapping multiSelectField = new AthenaFieldLarkBaseMapping(
+                "field_tags", "Field Tags", new NestedUIType(UITypeEnum.MULTI_SELECT, null));
+        AthenaFieldLarkBaseMapping urlField = new AthenaFieldLarkBaseMapping(
+                "field_url", "Field Url", new NestedUIType(UITypeEnum.URL, null));
+
+        Schema schema = CommonUtil.buildSchemaFromLarkFields(List.of(textField, multiSelectField, urlField), true);
+
+        assertThat(schema.findField("field_text").getType()).isEqualTo(org.apache.arrow.vector.types.pojo.ArrowType.Utf8.INSTANCE);
+        assertThat(schema.findField("field_tags").getType()).isEqualTo(org.apache.arrow.vector.types.pojo.ArrowType.Utf8.INSTANCE);
+        assertThat(schema.findField("field_tags").getChildren()).isEmpty();
+        assertThat(schema.findField("field_url").getType()).isEqualTo(org.apache.arrow.vector.types.pojo.ArrowType.Utf8.INSTANCE);
+        assertThat(schema.findField("field_url").getChildren()).isEmpty();
+    }
+
+    @Test
+    void testBuildSchemaFromLarkFields_complexTypeAsJsonStringFalse_listStructColumnsUnaffected() {
+        // Regression guard: default (false) behavior is unaffected by the flag's existence.
+        AthenaFieldLarkBaseMapping multiSelectField = new AthenaFieldLarkBaseMapping(
+                "field_tags", "Field Tags", new NestedUIType(UITypeEnum.MULTI_SELECT, null));
+
+        Schema schema = CommonUtil.buildSchemaFromLarkFields(List.of(multiSelectField), false);
+
+        assertThat(schema.findField("field_tags").getType()).isEqualTo(org.apache.arrow.vector.types.pojo.ArrowType.List.INSTANCE);
+    }
 }

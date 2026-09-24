@@ -32,6 +32,7 @@ import com.amazonaws.athena.connector.lambda.data.writers.holders.NullableVarCha
 import com.amazonaws.athena.connectors.lark.base.model.NestedUIType;
 import com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum;
 import com.amazonaws.athena.connectors.lark.base.resolver.LarkBaseFieldResolver;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.arrow.vector.holders.NullableBigIntHolder;
 import org.apache.arrow.vector.holders.NullableBitHolder;
 import org.apache.arrow.vector.holders.NullableDateMilliHolder;
@@ -68,6 +69,7 @@ public class RegistererExtractor
     private static final long TIMESTAMP_MILLIS_THRESHOLD = 10_000_000_000L; // ~March 1973
     private static final long TIMESTAMP_SECONDS_THRESHOLD = 100_000;
     private static final long SECONDS_TO_MILLIS = 1000L;
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private final Map<String, NestedUIType> larkFieldTypeMapping;
 
@@ -303,6 +305,21 @@ public class RegistererExtractor
                 // 4-character string "null", not a null reference, silently writing that text into the
                 // column instead of leaving it as SQL NULL.
                 if (unwrappedValue == null) {
+                    return;
+                }
+
+                // BaseConstants.DOES_ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR redirects what would
+                // otherwise be a List/Struct-shaped column (MULTI_SELECT, USER, ATTACHMENT, URL, ...) to
+                // VARCHAR at the schema level, so this extractor is now the one that runs for those raw
+                // Map/List values too. Dispatch on the field's REAL declared UI type (not the value's
+                // shape) before any of the TEXT-specific branches below - URL's own raw shape
+                // ({"link":..., "text":..., "type":...}) would otherwise collide with the "TEXT field with
+                // a single map" heuristic and silently discard everything but the "text" value.
+                UITypeEnum effectiveUiType = larkTypeInfo != null && larkTypeInfo.uiType() == UITypeEnum.FORMULA
+                        ? larkTypeInfo.childType() : (larkTypeInfo != null ? larkTypeInfo.uiType() : null);
+                if (effectiveUiType != null && effectiveUiType.isComplexContainerType()) {
+                    dst.value = JSON_MAPPER.writeValueAsString(unwrappedValue);
+                    dst.isSet = 1;
                     return;
                 }
 

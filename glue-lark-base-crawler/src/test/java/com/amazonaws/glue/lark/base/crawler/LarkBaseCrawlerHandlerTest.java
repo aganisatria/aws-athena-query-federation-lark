@@ -489,4 +489,89 @@ public class LarkBaseCrawlerHandlerTest {
 
         assertNull(result);
     }
+
+    // Tests for resolveGlueColumnType (LarkBaseCrawlerConstants.ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR):
+    // when enabled, a List/Struct-shaped Glue column type is collapsed to a plain "string" column instead,
+    // sidestepping Athena's own engine crash on any WHERE constraint referencing a List/Struct-typed column.
+
+    @Test
+    public void testResolveGlueColumnType_complexTypeAsJsonStringTrue_arrayTypeCollapsesToString() throws Exception {
+        java.lang.reflect.Method method = BaseLarkBaseCrawlerHandler.class.getDeclaredMethod(
+                "resolveGlueColumnType", ListFieldResponse.FieldItem.class, String.class, boolean.class);
+        method.setAccessible(true);
+
+        ListFieldResponse.FieldItem multiSelectField = ListFieldResponse.FieldItem.builder()
+                .fieldName("tags").uiType("MultiSelect").build();
+
+        String result = (String) method.invoke(handler, multiSelectField, "baseId", true);
+
+        assertEquals("string", result);
+    }
+
+    @Test
+    public void testResolveGlueColumnType_complexTypeAsJsonStringTrue_structTypeCollapsesToString() throws Exception {
+        java.lang.reflect.Method method = BaseLarkBaseCrawlerHandler.class.getDeclaredMethod(
+                "resolveGlueColumnType", ListFieldResponse.FieldItem.class, String.class, boolean.class);
+        method.setAccessible(true);
+
+        ListFieldResponse.FieldItem urlField = ListFieldResponse.FieldItem.builder()
+                .fieldName("website").uiType("Url").build();
+
+        String result = (String) method.invoke(handler, urlField, "baseId", true);
+
+        assertEquals("string", result);
+    }
+
+    @Test
+    public void testResolveGlueColumnType_complexTypeAsJsonStringTrue_lookupWrappingListTarget_stillCollapsesToString() throws Exception {
+        // LOOKUP wraps its resolved target's type in "array<...>" regardless of the target's own shape
+        // (e.g. a Lookup<User> becomes "array<struct<...>>") - the post-processing check on the final
+        // resolved string must catch this wrapped case too, without needing separate handling.
+        java.lang.reflect.Method method = BaseLarkBaseCrawlerHandler.class.getDeclaredMethod(
+                "resolveGlueColumnType", ListFieldResponse.FieldItem.class, String.class, boolean.class);
+        method.setAccessible(true);
+
+        ListFieldResponse.FieldItem lookupField = ListFieldResponse.FieldItem.builder()
+                .fieldName("assignees").uiType("Lookup")
+                .property(Map.of("target_field", "fld1", "filter_info", Map.of("target_table", "tbl1")))
+                .build();
+        ListFieldResponse.FieldItem targetUserField = ListFieldResponse.FieldItem.builder()
+                .fieldId("fld1").uiType("User").build();
+        when(mockLarkBaseService.getTableFields("baseId", "tbl1")).thenReturn(Collections.singletonList(targetUserField));
+
+        String result = (String) method.invoke(handler, lookupField, "baseId", true);
+
+        assertEquals("string", result);
+    }
+
+    @Test
+    public void testResolveGlueColumnType_complexTypeAsJsonStringFalse_arrayTypeUnaffected() throws Exception {
+        // Regression guard: the flag is opt-in - default (false) behavior is unaffected.
+        java.lang.reflect.Method method = BaseLarkBaseCrawlerHandler.class.getDeclaredMethod(
+                "resolveGlueColumnType", ListFieldResponse.FieldItem.class, String.class, boolean.class);
+        method.setAccessible(true);
+
+        ListFieldResponse.FieldItem multiSelectField = ListFieldResponse.FieldItem.builder()
+                .fieldName("tags").uiType("MultiSelect").build();
+
+        String result = (String) method.invoke(handler, multiSelectField, "baseId", false);
+
+        assertEquals("array<string>", result);
+    }
+
+    @Test
+    public void testResolveGlueColumnType_complexTypeAsJsonString_scalarTypeUnaffected() throws Exception {
+        // The collapse only applies to array<.../struct<... - a plain scalar type (e.g. "string" for TEXT)
+        // must pass through unchanged regardless of the flag.
+        java.lang.reflect.Method method = BaseLarkBaseCrawlerHandler.class.getDeclaredMethod(
+                "resolveGlueColumnType", ListFieldResponse.FieldItem.class, String.class, boolean.class);
+        method.setAccessible(true);
+
+        ListFieldResponse.FieldItem textField = ListFieldResponse.FieldItem.builder()
+                .fieldName("name").uiType("Text").build();
+
+        String result = (String) method.invoke(handler, textField, "baseId", true);
+
+        assertEquals("string", result);
+    }
 }

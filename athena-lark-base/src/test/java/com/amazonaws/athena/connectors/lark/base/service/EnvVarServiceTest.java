@@ -95,6 +95,7 @@ public class EnvVarServiceTest {
         configOptions.put(DOES_ACTIVATE_LARK_BASE_SOURCE_ENV_VAR, "true");
         configOptions.put(DOES_ACTIVATE_LARK_DRIVE_SOURCE_ENV_VAR, "true");
         configOptions.put(DOES_ACTIVATE_PARALLEL_SPLIT_ENV_VAR, "true");
+        configOptions.put(DOES_ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR, "true");
         configOptions.put(ENABLE_DEBUG_LOGGING_ENV_VAR, "true");
         configOptions.put(LARK_BASE_SOURCES_ENV_VAR, "base1,base2");
         configOptions.put(LARK_DRIVE_SOURCES_ENV_VAR, "drive1,drive2");
@@ -112,6 +113,7 @@ public class EnvVarServiceTest {
         assertTrue(envVarService.isActivateLarkBaseSource());
         assertTrue(envVarService.isActivateLarkDriveSource());
         assertTrue(envVarService.isActivateParallelSplit());
+        assertTrue(envVarService.isActivateComplexTypeAsJsonString());
         assertTrue(envVarService.isEnableDebugLogging());
         assertEquals("base1,base2", envVarService.getLarkBaseSources());
         assertEquals("drive1,drive2", envVarService.getLarkDriveSources());

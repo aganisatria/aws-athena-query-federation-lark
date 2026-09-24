@@ -289,11 +289,29 @@ public final class LarkBaseTypeUtils
      */
     public static Field larkFieldToArrowField(AthenaFieldLarkBaseMapping larkField)
     {
+        return larkFieldToArrowField(larkField, false);
+    }
+
+    /**
+     * @param larkField The FieldItem from Lark API.
+     * @param complexTypeAsJsonString When true, a field that would otherwise be LIST/STRUCT-shaped is
+     * instead built as a plain VARCHAR column (see BaseConstants.DOES_ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR).
+     * Checked here, after the normal MinorType resolution, rather than threading it into
+     * larkFieldToArrowMinorType/getLarkListChildField/getLarkStructChildFields - a LOOKUP wrapping a
+     * List/Struct-shaped target is caught by the same single check without separate handling for the
+     * wrapped case, and the children those methods would have computed are simply unused for VARCHAR.
+     * @return The corresponding Arrow Field definition.
+     */
+    public static Field larkFieldToArrowField(AthenaFieldLarkBaseMapping larkField, boolean complexTypeAsJsonString)
+    {
         String fieldName = larkField.larkBaseFieldName();
         // larkFieldToArrowMinorType always returns a non-null MinorType (it falls back to VARCHAR by
         // default), so DATE_TIME/CREATED_TIME/MODIFIED_TIME fields always resolve through the DATEMILLI
         // case below - there is no minorType==null case to special-case here.
         Types.MinorType minorType = larkFieldToArrowMinorType(larkField);
+        if (complexTypeAsJsonString && (minorType == Types.MinorType.LIST || minorType == Types.MinorType.STRUCT)) {
+            minorType = Types.MinorType.VARCHAR;
+        }
         boolean isNullable = true;
         List<Field> children = Collections.emptyList();
         FieldType fieldType;

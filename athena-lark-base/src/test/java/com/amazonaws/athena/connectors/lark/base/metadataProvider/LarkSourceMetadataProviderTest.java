@@ -24,9 +24,11 @@ import com.amazonaws.athena.connector.lambda.domain.TableName;
 import com.amazonaws.athena.connector.lambda.metadata.GetTableRequest;
 import com.amazonaws.athena.connectors.lark.base.model.AthenaFieldLarkBaseMapping;
 import com.amazonaws.athena.connectors.lark.base.model.AthenaLarkBaseMapping;
+import com.amazonaws.athena.connectors.lark.base.model.NestedUIType;
 import com.amazonaws.athena.connectors.lark.base.model.PartitionInfoResult;
 import com.amazonaws.athena.connectors.lark.base.model.TableDirectInitialized;
 import com.amazonaws.athena.connectors.lark.base.model.TableSchemaResult;
+import com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum;
 import org.junit.jupiter.api.Test;
 
 import com.amazonaws.athena.connector.lambda.security.FederatedIdentity;
@@ -67,6 +69,26 @@ public class LarkSourceMetadataProviderTest {
         Optional<TableSchemaResult> result = provider.getTableSchema(request);
 
         assertFalse(result.isPresent());
+    }
+
+    @Test
+    public void getTableSchema_complexTypeAsJsonString_collapsesListColumnToVarchar() {
+        List<TableDirectInitialized> resolvedMappings = List.of(
+                new TableDirectInitialized(
+                        new AthenaLarkBaseMapping("db1", "base1"),
+                        new AthenaLarkBaseMapping("table1", "tbl1"),
+                        List.of(new AthenaFieldLarkBaseMapping("tags", "Tags",
+                                new NestedUIType(UITypeEnum.MULTI_SELECT, UITypeEnum.UNKNOWN)))
+                )
+        );
+        LarkSourceMetadataProvider provider = new LarkSourceMetadataProvider(resolvedMappings, true);
+        GetTableRequest request = new GetTableRequest(Mockito.mock(FederatedIdentity.class), "queryId", "catalog", new TableName("db1", "table1"), Collections.emptyMap());
+
+        Optional<TableSchemaResult> result = provider.getTableSchema(request);
+
+        assertTrue(result.isPresent());
+        assertEquals(org.apache.arrow.vector.types.pojo.ArrowType.Utf8.INSTANCE,
+                result.get().schema().findField("tags").getType());
     }
 
     @Test

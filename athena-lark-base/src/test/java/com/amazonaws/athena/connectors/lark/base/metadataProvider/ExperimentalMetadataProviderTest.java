@@ -114,6 +114,27 @@ public class ExperimentalMetadataProviderTest {
     }
 
     @Test
+    public void getTableSchema_complexTypeAsJsonString_collapsesListColumnToVarchar() throws Exception {
+        ExperimentalMetadataProvider flagOnProvider = new ExperimentalMetadataProvider(athenaService, larkBaseService, invoker, true);
+        when(athenaService.getAthenaQueryString(anyString())).thenReturn("SELECT * FROM \"base1\".\"table1\"");
+        when(larkBaseService.getTableFields(anyString(), anyString())).thenReturn(List.of(
+                ListFieldResponse.FieldItem.builder()
+                        .fieldName("tags")
+                        .uiType(UITypeEnum.MULTI_SELECT.name())
+                        .property(Collections.emptyMap())
+                        .build()
+        ));
+
+        GetTableRequest request = new GetTableRequest(new FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap()), "queryId", "catalog", new TableName("base1", "table1"), Collections.emptyMap());
+
+        Optional<TableSchemaResult> result = flagOnProvider.getTableSchema(request);
+
+        assertTrue(result.isPresent());
+        assertEquals(org.apache.arrow.vector.types.pojo.ArrowType.Utf8.INSTANCE,
+                result.get().schema().findField("tags").getType());
+    }
+
+    @Test
     public void getTableSchema_lookupField() throws Exception {
         when(athenaService.getAthenaQueryString(anyString())).thenReturn("SELECT * FROM \"base1\".\"table1\"");
         ListFieldResponse.FieldItem lookupField = ListFieldResponse.FieldItem.builder()
