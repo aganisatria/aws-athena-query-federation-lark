@@ -139,6 +139,20 @@ public class LarkBaseCrawlerHandlerTest {
     }
 
     @Test
+    public void handleRequest_resetsThrottlingStateOnBothServices() {
+        // This handler is constructed once per Lambda cold start and reused across warm invocations, so
+        // a backoff delay ramped up by a prior invocation's throttling must not silently carry into an
+        // unrelated later one - see ThrottlingRetry.reset()/CommonLarkService.resetThrottlingState().
+        when(mockLarkBaseService.getTableRecords("baseDs123", "tableDs456")).thenReturn(Collections.emptyList());
+        when(mockGlueCatalogService.getDatabases()).thenReturn(Collections.emptyList());
+
+        handler.handleRequest(payload, mockContext);
+
+        verify(mockLarkBaseService, times(1)).resetThrottlingState();
+        verify(mockLarkDriveService, times(1)).resetThrottlingState();
+    }
+
+    @Test
     public void handleRequest_duplicateSanitizedTableNamesInSameBase_disambiguatedByTableId() {
         // Reproduces a real risk: two distinct Lark tables in the same base (e.g. "Report A" and
         // "report a") both sanitize to the same Glue table name. The create/update/delete diffing in
@@ -442,6 +456,121 @@ public class LarkBaseCrawlerHandlerTest {
         when(mockLarkBaseService.getTableFields("baseId", "table3")).thenReturn(Collections.singletonList(finalText));
 
         String result = (String) method.invoke(handler, initialLookup, "baseId");
+
+        assertEquals("string", result);
+    }
+
+    @Test
+    public void testGetFormulaOrLookupFieldType_circularLookup_terminatesInsteadOfStackOverflow() throws Exception {
+        // Regression test: a misconfigured Lark Base can have LOOKUP fields that reference each other in
+        // a cycle (a normal user data-entry mistake, not something the crawler can prevent upstream).
+        // Before cycle detection was added, this recursed indefinitely - each level also making a real,
+        // uncached Lark API call - until a StackOverflowError, which (being an Error, not an Exception)
+        // is not caught by any of this class's per-table/per-database try/catch isolation and crashes
+        // the entire crawl Lambda invocation, not just the one table with the bad LOOKUP chain.
+        java.lang.reflect.Method method = BaseLarkBaseCrawlerHandler.class.getDeclaredMethod("getFormulaOrLookupFieldType", ListFieldResponse.FieldItem.class, String.class);
+        method.setAccessible(true);
+
+        // fieldA (table A) looks up fieldB (table B), which looks up back to fieldA (table A).
+        ListFieldResponse.FieldItem fieldA = ListFieldResponse.FieldItem.builder()
+                .uiType("Lookup").fieldId("fieldA")
+                .property(Map.of("target_field", "fieldB", "filter_info", Map.of("target_table", "tableB")))
+                .build();
+        ListFieldResponse.FieldItem fieldB = ListFieldResponse.FieldItem.builder()
+                .uiType("Lookup").fieldId("fieldB")
+                .property(Map.of("target_field", "fieldA", "filter_info", Map.of("target_table", "tableA")))
+                .build();
+
+        when(mockLarkBaseService.getTableFields("baseId", "tableB")).thenReturn(Collections.singletonList(fieldB));
+        when(mockLarkBaseService.getTableFields("baseId", "tableA")).thenReturn(Collections.singletonList(fieldA));
+
+        // Must return (not throw/hang/StackOverflow) once the cycle is detected.
+        String result = (String) method.invoke(handler, fieldA, "baseId");
+
+        assertNull(result);
+    }
+
+    // Tests for resolveGlueColumnType (LarkBaseCrawlerConstants.ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR):
+    // when enabled, a List/Struct-shaped Glue column type is collapsed to a plain "string" column instead,
+    // sidestepping Athena's own engine crash on any WHERE constraint referencing a List/Struct-typed column.
+
+    @Test
+    public void testResolveGlueColumnType_complexTypeAsJsonStringTrue_arrayTypeCollapsesToString() throws Exception {
+        java.lang.reflect.Method method = BaseLarkBaseCrawlerHandler.class.getDeclaredMethod(
+                "resolveGlueColumnType", ListFieldResponse.FieldItem.class, String.class, boolean.class);
+        method.setAccessible(true);
+
+        ListFieldResponse.FieldItem multiSelectField = ListFieldResponse.FieldItem.builder()
+                .fieldName("tags").uiType("MultiSelect").build();
+
+        String result = (String) method.invoke(handler, multiSelectField, "baseId", true);
+
+        assertEquals("string", result);
+    }
+
+    @Test
+    public void testResolveGlueColumnType_complexTypeAsJsonStringTrue_structTypeCollapsesToString() throws Exception {
+        java.lang.reflect.Method method = BaseLarkBaseCrawlerHandler.class.getDeclaredMethod(
+                "resolveGlueColumnType", ListFieldResponse.FieldItem.class, String.class, boolean.class);
+        method.setAccessible(true);
+
+        ListFieldResponse.FieldItem urlField = ListFieldResponse.FieldItem.builder()
+                .fieldName("website").uiType("Url").build();
+
+        String result = (String) method.invoke(handler, urlField, "baseId", true);
+
+        assertEquals("string", result);
+    }
+
+    @Test
+    public void testResolveGlueColumnType_complexTypeAsJsonStringTrue_lookupWrappingListTarget_stillCollapsesToString() throws Exception {
+        // LOOKUP wraps its resolved target's type in "array<...>" regardless of the target's own shape
+        // (e.g. a Lookup<User> becomes "array<struct<...>>") - the post-processing check on the final
+        // resolved string must catch this wrapped case too, without needing separate handling.
+        java.lang.reflect.Method method = BaseLarkBaseCrawlerHandler.class.getDeclaredMethod(
+                "resolveGlueColumnType", ListFieldResponse.FieldItem.class, String.class, boolean.class);
+        method.setAccessible(true);
+
+        ListFieldResponse.FieldItem lookupField = ListFieldResponse.FieldItem.builder()
+                .fieldName("assignees").uiType("Lookup")
+                .property(Map.of("target_field", "fld1", "filter_info", Map.of("target_table", "tbl1")))
+                .build();
+        ListFieldResponse.FieldItem targetUserField = ListFieldResponse.FieldItem.builder()
+                .fieldId("fld1").uiType("User").build();
+        when(mockLarkBaseService.getTableFields("baseId", "tbl1")).thenReturn(Collections.singletonList(targetUserField));
+
+        String result = (String) method.invoke(handler, lookupField, "baseId", true);
+
+        assertEquals("string", result);
+    }
+
+    @Test
+    public void testResolveGlueColumnType_complexTypeAsJsonStringFalse_arrayTypeUnaffected() throws Exception {
+        // Regression guard: the flag is opt-in - default (false) behavior is unaffected.
+        java.lang.reflect.Method method = BaseLarkBaseCrawlerHandler.class.getDeclaredMethod(
+                "resolveGlueColumnType", ListFieldResponse.FieldItem.class, String.class, boolean.class);
+        method.setAccessible(true);
+
+        ListFieldResponse.FieldItem multiSelectField = ListFieldResponse.FieldItem.builder()
+                .fieldName("tags").uiType("MultiSelect").build();
+
+        String result = (String) method.invoke(handler, multiSelectField, "baseId", false);
+
+        assertEquals("array<string>", result);
+    }
+
+    @Test
+    public void testResolveGlueColumnType_complexTypeAsJsonString_scalarTypeUnaffected() throws Exception {
+        // The collapse only applies to array<.../struct<... - a plain scalar type (e.g. "string" for TEXT)
+        // must pass through unchanged regardless of the flag.
+        java.lang.reflect.Method method = BaseLarkBaseCrawlerHandler.class.getDeclaredMethod(
+                "resolveGlueColumnType", ListFieldResponse.FieldItem.class, String.class, boolean.class);
+        method.setAccessible(true);
+
+        ListFieldResponse.FieldItem textField = ListFieldResponse.FieldItem.builder()
+                .fieldName("name").uiType("Text").build();
+
+        String result = (String) method.invoke(handler, textField, "baseId", true);
 
         assertEquals("string", result);
     }

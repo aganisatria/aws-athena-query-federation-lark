@@ -22,7 +22,6 @@ package com.amazonaws.athena.connectors.lark.base.util;
 import com.amazonaws.athena.connectors.lark.base.model.AthenaFieldLarkBaseMapping;
 import com.amazonaws.athena.connectors.lark.base.model.NestedUIType;
 import com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum;
-import org.apache.arrow.vector.types.TimeUnit;
 import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
@@ -78,15 +77,32 @@ public final class LarkBaseTypeUtils
             case URL, LOCATION, SINGLE_LINK, DUPLEX_LINK -> Types.MinorType.STRUCT;
 
             // Glue: depends on formulaType -> Arrow: depends on resolved type
-            case FORMULA -> {
-                NestedUIType newNestedUIType = new NestedUIType(larkField.nestedUIType().childType(), UITypeEnum.UNKNOWN);
-                AthenaFieldLarkBaseMapping newLarkBaseMapping = new AthenaFieldLarkBaseMapping(larkField.athenaName(), larkField.larkBaseFieldName(), newNestedUIType);
-
-                yield larkFieldToArrowMinorType(newLarkBaseMapping);
-            }
+            case FORMULA -> larkFieldToArrowMinorType(unwrapFormulaTarget(larkField));
 
             default -> Types.MinorType.VARCHAR;
         };
+    }
+
+    /**
+     * Unwraps a FORMULA field to the Lark field mapping for its resolved target type, so callers can
+     * switch on the target's UITypeEnum directly instead of always seeing FORMULA. Mirrors the crawler's
+     * equivalent unwrapping (a FORMULA's Glue type is built by calling the target UI type's own
+     * getGlueCatalogType) - without this, a formula resolving to a LIST/STRUCT-shaped target (e.g.
+     * Formula&lt;User&gt;, Formula&lt;Attachment&gt;) would get the correct Arrow MinorType (LIST/STRUCT,
+     * via this method feeding larkFieldToArrowMinorType) but the wrong child structure, since
+     * getLarkListChildField/getLarkStructChildFields would still see uiType=FORMULA - which neither
+     * switches on - and fall through to their generic default instead of the target type's real shape.
+     * Only unwraps one level, matching NestedUIType's own single-level (uiType, childType) shape and the
+     * pre-existing behavior this mirrors; a formula resolving to a LOOKUP's own target is a deeper case
+     * this shared model doesn't represent, unrelated to this fix.
+     */
+    private static AthenaFieldLarkBaseMapping unwrapFormulaTarget(AthenaFieldLarkBaseMapping larkField)
+    {
+        if (larkField.nestedUIType().uiType() != UITypeEnum.FORMULA) {
+            return larkField;
+        }
+        NestedUIType targetNestedUIType = new NestedUIType(larkField.nestedUIType().childType(), UITypeEnum.UNKNOWN);
+        return new AthenaFieldLarkBaseMapping(larkField.athenaName(), larkField.larkBaseFieldName(), targetNestedUIType);
     }
 
     /**
@@ -98,6 +114,7 @@ public final class LarkBaseTypeUtils
      */
     public static Field getLarkListChildField(AthenaFieldLarkBaseMapping larkField)
     {
+        larkField = unwrapFormulaTarget(larkField);
         UITypeEnum uiType = larkField.nestedUIType().uiType();
 
         return switch (uiType) {
@@ -146,9 +163,40 @@ public final class LarkBaseTypeUtils
             // Glue: array<{target field's type}> -> Arrow Child: derived from the resolved LOOKUP target type
             // (nestedUIType().childType(), already resolved to a terminal, non-LOOKUP type by
             // LarkBaseService.getLookupType, which follows chained LOOKUPs to their final target).
-            case LOOKUP -> Field.nullable("item", scalarArrowTypeForLookupTarget(larkField.nestedUIType().childType()));
+            case LOOKUP -> lookupListItemField(larkField.nestedUIType().childType());
 
             default -> Field.nullable("item", ArrowType.Utf8.INSTANCE);
+        };
+    }
+
+    /**
+     * Builds the "item" Field for a LOOKUP list's child element from its resolved target type. The
+     * target is already guaranteed terminal (not LOOKUP/FORMULA - LarkBaseService.getLookupType follows
+     * chained LOOKUPs/FORMULAs to their final target before this ever runs), but it can still be
+     * LIST-shaped (MULTI_SELECT, USER, ...) or STRUCT-shaped (URL, LOCATION, ...) itself, not just a
+     * scalar. Matches the crawler's nesting for the same case: a LOOKUP aggregates one target-shaped
+     * value per linked record, so a LIST-shaped target doubly-nests ("array&lt;array&lt;...&gt;&gt;" -
+     * crawler's UITypeEnum.LOOKUP wraps the target's own "array&lt;...&gt;" Glue type in another array),
+     * while a STRUCT-shaped target nests once ("array&lt;struct&lt;...&gt;&gt;"). Before this, only the
+     * scalar case was handled - a Lookup&lt;User&gt; got a flat List&lt;Utf8&gt; instead of
+     * List&lt;List&lt;Struct&lt;...&gt;&gt;&gt;, silently discarding the target's real shape entirely.
+     */
+    private static Field lookupListItemField(UITypeEnum targetUiType)
+    {
+        if (targetUiType == null) {
+            return Field.nullable("item", ArrowType.Utf8.INSTANCE);
+        }
+
+        AthenaFieldLarkBaseMapping targetField = new AthenaFieldLarkBaseMapping(
+                "item", "item", new NestedUIType(targetUiType, UITypeEnum.UNKNOWN));
+        Types.MinorType targetMinorType = larkFieldToArrowMinorType(targetField);
+
+        return switch (targetMinorType) {
+            case LIST -> new Field("item", FieldType.nullable(ArrowType.List.INSTANCE),
+                    Collections.singletonList(getLarkListChildField(targetField)));
+            case STRUCT -> new Field("item", FieldType.nullable(ArrowType.Struct.INSTANCE),
+                    getLarkStructChildFields(targetField));
+            default -> Field.nullable("item", scalarArrowTypeForLookupTarget(targetUiType));
         };
     }
 
@@ -172,7 +220,13 @@ public final class LarkBaseTypeUtils
             case NUMBER, PROGRESS, CURRENCY -> new ArrowType.Decimal(38, 18, 128);
             case RATING -> Types.MinorType.TINYINT.getType();
             case CHECKBOX -> ArrowType.Bool.INSTANCE;
-            case DATE_TIME, CREATED_TIME, MODIFIED_TIME -> new ArrowType.Timestamp(TimeUnit.MILLISECOND, "UTC");
+            // Matches the top-level DATE_TIME/CREATED_TIME/MODIFIED_TIME mapping in larkFieldToArrowField
+            // (DATEMILLI, i.e. Arrow Date(MILLISECOND)) rather than a Timestamp - this used to diverge from
+            // it, and from the Glue-crawler path's "array<timestamp>" column (which the SDK's own
+            // Glue-type parser also resolves to DATEMILLI/Date, not Timestamp), so the same Lark field
+            // reported a different Arrow type for its LOOKUP-wrapped list child depending on which
+            // metadata-resolution path served the request.
+            case DATE_TIME, CREATED_TIME, MODIFIED_TIME -> Types.MinorType.DATEMILLI.getType();
             // TEXT, BARCODE, SINGLE_SELECT, PHONE, AUTO_NUMBER, EMAIL, and any type not yet supported as a
             // LOOKUP target (MULTI_SELECT, USER, ATTACHMENT, URL, LOCATION, LINK, UNKNOWN, ...) fall back to a
             // plain string representation, matching the Glue Crawler path's "array<string>" fallback.
@@ -189,6 +243,7 @@ public final class LarkBaseTypeUtils
      */
     public static List<Field> getLarkStructChildFields(AthenaFieldLarkBaseMapping larkField)
     {
+        larkField = unwrapFormulaTarget(larkField);
         UITypeEnum uiType = larkField.nestedUIType().uiType();
 
         return switch (uiType) {
@@ -234,22 +289,32 @@ public final class LarkBaseTypeUtils
      */
     public static Field larkFieldToArrowField(AthenaFieldLarkBaseMapping larkField)
     {
+        return larkFieldToArrowField(larkField, false);
+    }
+
+    /**
+     * @param larkField The FieldItem from Lark API.
+     * @param complexTypeAsJsonString When true, a field that would otherwise be LIST/STRUCT-shaped is
+     * instead built as a plain VARCHAR column (see BaseConstants.DOES_ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR).
+     * Checked here, after the normal MinorType resolution, rather than threading it into
+     * larkFieldToArrowMinorType/getLarkListChildField/getLarkStructChildFields - a LOOKUP wrapping a
+     * List/Struct-shaped target is caught by the same single check without separate handling for the
+     * wrapped case, and the children those methods would have computed are simply unused for VARCHAR.
+     * @return The corresponding Arrow Field definition.
+     */
+    public static Field larkFieldToArrowField(AthenaFieldLarkBaseMapping larkField, boolean complexTypeAsJsonString)
+    {
         String fieldName = larkField.larkBaseFieldName();
+        // larkFieldToArrowMinorType always returns a non-null MinorType (it falls back to VARCHAR by
+        // default), so DATE_TIME/CREATED_TIME/MODIFIED_TIME fields always resolve through the DATEMILLI
+        // case below - there is no minorType==null case to special-case here.
         Types.MinorType minorType = larkFieldToArrowMinorType(larkField);
+        if (complexTypeAsJsonString && (minorType == Types.MinorType.LIST || minorType == Types.MinorType.STRUCT)) {
+            minorType = Types.MinorType.VARCHAR;
+        }
         boolean isNullable = true;
         List<Field> children = Collections.emptyList();
         FieldType fieldType;
-
-        // Handle timestamp fields (when minorType is null)
-        if (minorType == null) {
-            UITypeEnum uiType = larkField.nestedUIType().uiType();
-            if (uiType == UITypeEnum.DATE_TIME || uiType == UITypeEnum.CREATED_TIME || uiType == UITypeEnum.MODIFIED_TIME) {
-                // Create Timestamp with millisecond precision and UTC timezone
-                ArrowType timestampType = new ArrowType.Timestamp(TimeUnit.MILLISECOND, "UTC");
-                fieldType = new FieldType(isNullable, timestampType, null, null);
-                return new Field(fieldName, fieldType, children);
-            }
-        }
 
         switch (requireNonNull(minorType)) {
             case LIST:

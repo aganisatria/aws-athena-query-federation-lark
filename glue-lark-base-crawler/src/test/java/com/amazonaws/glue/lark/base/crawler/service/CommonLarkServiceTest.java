@@ -21,12 +21,13 @@ package com.amazonaws.glue.lark.base.crawler.service;
 
 import com.amazonaws.glue.lark.base.crawler.model.request.TenantAccessTokenRequest;
 import com.amazonaws.glue.lark.base.crawler.model.response.TenantAccessTokenResponse;
+import com.amazonaws.glue.lark.base.crawler.util.ThrottlingRetry;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.HttpEntity;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -53,13 +54,13 @@ public class CommonLarkServiceTest {
     private CommonLarkService commonLarkService = new CommonLarkService(TEST_APP_ID, TEST_APP_SECRET);
 
     @Mock
-    private HttpClient mockHttpClient;
+    private CloseableHttpClient mockHttpClient;
 
     @Mock
     private ObjectMapper mockObjectMapper;
 
     @Mock
-    private HttpResponse mockHttpResponse;
+    private CloseableHttpResponse mockHttpResponse;
 
     @Mock
     private HttpEntity mockHttpEntity;
@@ -242,6 +243,16 @@ public class CommonLarkServiceTest {
 
         verify(mockObjectMapper).writeValueAsString(any(TenantAccessTokenRequest.class));
         verify(mockHttpClient, never()).execute(any());
+    }
+
+    @Test
+    public void resetThrottlingState_delegatesToRetryReset() {
+        ThrottlingRetry mockRetry = mock(ThrottlingRetry.class);
+        commonLarkService.retry = mockRetry;
+
+        commonLarkService.resetThrottlingState();
+
+        verify(mockRetry, times(1)).reset();
     }
 
     @Test

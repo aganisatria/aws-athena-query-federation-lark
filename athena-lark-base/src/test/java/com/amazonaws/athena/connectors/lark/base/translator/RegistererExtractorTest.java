@@ -954,6 +954,37 @@ public class RegistererExtractorTest {
     }
 
     @Test
+    public void testVarCharExtractor_withFormulaNullFirstElement_leavesSqlNullNotStringNull() throws Exception {
+        // Regression test: unwrapFormula returns valueList.get(0) unchecked for a scalar-typed FORMULA
+        // (e.g. Formula<SingleSelect>) - a genuine "blank for this row" formula result (like
+        // IF(cond, value, BLANK())) can have a null first element. Before this fix, none of the
+        // instanceof branches matched null, so it fell through to String.valueOf(unwrappedValue),
+        // which returns the literal 4-character string "null" (not a null reference) - silently
+        // writing that text into the column instead of leaving it as SQL NULL.
+        larkFieldTypeMapping.put("test_field", new NestedUIType(UITypeEnum.FORMULA, UITypeEnum.SINGLE_SELECT));
+        registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
+        when(mockRowWriterBuilder.withExtractor(any(String.class), any())).thenReturn(mockRowWriterBuilder);
+
+        ArgumentCaptor<VarCharExtractor> extractorCaptor = ArgumentCaptor.forClass(VarCharExtractor.class);
+        Field field = new Field("test_field", FieldType.nullable(new ArrowType.Utf8()), null);
+
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, new Schema(Collections.singletonList(field)));
+        verify(mockRowWriterBuilder).withExtractor(eq("test_field"), extractorCaptor.capture());
+
+        VarCharExtractor extractor = extractorCaptor.getValue();
+        Map<String, Object> formulaWrapper = new HashMap<>();
+        formulaWrapper.put("value", Collections.singletonList(null));
+
+        Map<String, Object> context = new HashMap<>();
+        context.put("test_field", formulaWrapper);
+        NullableVarCharHolder holder = new NullableVarCharHolder();
+
+        extractor.extract(context, holder);
+
+        assertEquals(0, holder.isSet);
+    }
+
+    @Test
     public void testVarCharExtractor_withTextMapNullTextValue() throws Exception {
         larkFieldTypeMapping.put("test_field", new NestedUIType(UITypeEnum.TEXT, null));
         registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
@@ -1014,6 +1045,112 @@ public class RegistererExtractorTest {
 
         // Exception should be caught and isSet should be 0
         assertEquals(0, holder.isSet);
+    }
+
+    // Tests for the complexTypeAsJsonString VarChar extraction path (BaseConstants.
+    // DOES_ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR): when this schema-level flag redirects a
+    // List/Struct-shaped field to VARCHAR, registerExtractorsForSchema routes it to this same VarChar
+    // extractor - it must dispatch on the field's real declared UI type (via larkFieldTypeMapping) to
+    // JSON-serialize the raw value, rather than running it through the TEXT-specific branches above,
+    // which are keyed on value SHAPE and can collide with a genuinely different field's raw shape.
+
+    @Test
+    public void testVarCharExtractor_complexTypeAsJsonString_multiSelectList_jsonSerializesWholeList() throws Exception {
+        larkFieldTypeMapping.put("test_field", new NestedUIType(UITypeEnum.MULTI_SELECT, UITypeEnum.UNKNOWN));
+        registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
+
+        ArgumentCaptor<VarCharExtractor> extractorCaptor = ArgumentCaptor.forClass(VarCharExtractor.class);
+        Field field = new Field("test_field", FieldType.nullable(new ArrowType.Utf8()), null);
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, new Schema(Collections.singletonList(field)));
+        verify(mockRowWriterBuilder).withExtractor(eq("test_field"), extractorCaptor.capture());
+        VarCharExtractor extractor = extractorCaptor.getValue();
+
+        Map<String, Object> context = new HashMap<>();
+        context.put("test_field", List.of("Option A", "Option B"));
+        NullableVarCharHolder holder = new NullableVarCharHolder();
+
+        extractor.extract(context, holder);
+
+        assertEquals("[\"Option A\",\"Option B\"]", holder.value);
+        assertEquals(1, holder.isSet);
+    }
+
+    @Test
+    public void testVarCharExtractor_complexTypeAsJsonString_userList_jsonSerializesListOfStructs() throws Exception {
+        larkFieldTypeMapping.put("test_field", new NestedUIType(UITypeEnum.USER, UITypeEnum.UNKNOWN));
+        registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
+
+        ArgumentCaptor<VarCharExtractor> extractorCaptor = ArgumentCaptor.forClass(VarCharExtractor.class);
+        Field field = new Field("test_field", FieldType.nullable(new ArrowType.Utf8()), null);
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, new Schema(Collections.singletonList(field)));
+        verify(mockRowWriterBuilder).withExtractor(eq("test_field"), extractorCaptor.capture());
+        VarCharExtractor extractor = extractorCaptor.getValue();
+
+        Map<String, Object> userMap = new LinkedHashMap<>();
+        userMap.put("id", "ou_12345");
+        userMap.put("name", "Agani Satria");
+        Map<String, Object> context = new HashMap<>();
+        context.put("test_field", List.of(userMap));
+        NullableVarCharHolder holder = new NullableVarCharHolder();
+
+        extractor.extract(context, holder);
+
+        assertEquals("[{\"id\":\"ou_12345\",\"name\":\"Agani Satria\"}]", holder.value);
+        assertEquals(1, holder.isSet);
+    }
+
+    @Test
+    public void testVarCharExtractor_complexTypeAsJsonString_urlStruct_doesNotCollideWithTextMapHeuristic() throws Exception {
+        // URL's own raw shape ({"link":..., "text":..., "type":...}) happens to contain a "text" key,
+        // which is exactly the heuristic the plain-TEXT branch above uses to detect a mentions-formatted
+        // text cell. Without dispatching on the real declared UI type first, this would silently discard
+        // "link"/"type" and extract only the "text" value.
+        larkFieldTypeMapping.put("test_field", new NestedUIType(UITypeEnum.URL, UITypeEnum.UNKNOWN));
+        registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
+
+        ArgumentCaptor<VarCharExtractor> extractorCaptor = ArgumentCaptor.forClass(VarCharExtractor.class);
+        Field field = new Field("test_field", FieldType.nullable(new ArrowType.Utf8()), null);
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, new Schema(Collections.singletonList(field)));
+        verify(mockRowWriterBuilder).withExtractor(eq("test_field"), extractorCaptor.capture());
+        VarCharExtractor extractor = extractorCaptor.getValue();
+
+        Map<String, Object> urlMap = new LinkedHashMap<>();
+        urlMap.put("link", "https://example.com");
+        urlMap.put("text", "click here");
+        urlMap.put("type", "url");
+        Map<String, Object> context = new HashMap<>();
+        context.put("test_field", urlMap);
+        NullableVarCharHolder holder = new NullableVarCharHolder();
+
+        extractor.extract(context, holder);
+
+        assertEquals("{\"link\":\"https://example.com\",\"text\":\"click here\",\"type\":\"url\"}", holder.value);
+        assertEquals(1, holder.isSet);
+    }
+
+    @Test
+    public void testVarCharExtractor_complexTypeAsJsonString_formulaWrappingUserTarget_jsonSerializesUnwrappedList() throws Exception {
+        larkFieldTypeMapping.put("test_field", new NestedUIType(UITypeEnum.FORMULA, UITypeEnum.USER));
+        registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
+
+        ArgumentCaptor<VarCharExtractor> extractorCaptor = ArgumentCaptor.forClass(VarCharExtractor.class);
+        Field field = new Field("test_field", FieldType.nullable(new ArrowType.Utf8()), null);
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, new Schema(Collections.singletonList(field)));
+        verify(mockRowWriterBuilder).withExtractor(eq("test_field"), extractorCaptor.capture());
+        VarCharExtractor extractor = extractorCaptor.getValue();
+
+        Map<String, Object> userMap = new LinkedHashMap<>();
+        userMap.put("id", "ou_99999");
+        Map<String, Object> formulaWrapper = new HashMap<>();
+        formulaWrapper.put("value", List.of(userMap));
+        Map<String, Object> context = new HashMap<>();
+        context.put("test_field", formulaWrapper);
+        NullableVarCharHolder holder = new NullableVarCharHolder();
+
+        extractor.extract(context, holder);
+
+        assertEquals("[{\"id\":\"ou_99999\"}]", holder.value);
+        assertEquals(1, holder.isSet);
     }
 
     // Tests for DateMilli extractor exception handling
@@ -1220,6 +1357,107 @@ public class RegistererExtractorTest {
             // Should write null but return true to not skip the row
             assertTrue(result);
             blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(null)));
+        }
+    }
+
+    @Test
+    public void testListFieldWriterFactory_withFormulaNullFirstElement_writesNullNotNpe() throws Exception {
+        // Regression test: unwrapFormula returns valueList.get(0) unchecked for a FORMULA whose
+        // childType does NOT map to LIST/TEXT (e.g. NUMBER) - a genuine "blank for this row" formula
+        // result can have a null first element, and unwrapFormula returns that null as-is. Before this
+        // fix, the catch-all "else" branch below called unwrappedValue.getClass() on that null, throwing
+        // an NPE that propagated out of this row writer and (per BaseRecordHandler's per-row try/catch)
+        // silently dropped the ENTIRE row, not just this column. (A List-shaped childType like USER
+        // doesn't exercise this: unwrapFormula's own minorType check returns the whole valueList, e.g.
+        // [null], for those - never a bare null - so this test deliberately uses a non-LIST childType to
+        // reach the specific branch that can.)
+        larkFieldTypeMapping.put("list_field", new NestedUIType(UITypeEnum.FORMULA, UITypeEnum.NUMBER));
+        registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
+        when(mockRowWriterBuilder.withFieldWriterFactory(any(String.class), any())).thenReturn(mockRowWriterBuilder);
+
+        ArgumentCaptor<FieldWriterFactory> factoryCaptor = ArgumentCaptor.forClass(FieldWriterFactory.class);
+        Field listField = new Field("list_field", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(new Field("item", FieldType.nullable(new ArrowType.Utf8()), null)));
+        Schema schema = new Schema(Collections.singletonList(listField));
+
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, schema);
+        verify(mockRowWriterBuilder).withFieldWriterFactory(eq("list_field"), factoryCaptor.capture());
+
+        FieldWriterFactory factory = factoryCaptor.getValue();
+        FieldVector mockVector = mock(FieldVector.class);
+        Extractor mockExtractor = mock(Extractor.class);
+
+        try (MockedStatic<BlockUtils> blockUtilsMock = mockStatic(BlockUtils.class)) {
+            FieldWriter writer = factory.create(mockVector, mockExtractor, null);
+
+            Map<String, Object> formulaWrapper = new HashMap<>();
+            formulaWrapper.put("value", Collections.singletonList(null));
+            Map<String, Object> context = new HashMap<>();
+            context.put("list_field", formulaWrapper);
+
+            boolean result = writer.write(context, 0);
+
+            assertTrue(result);
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(null)));
+        }
+    }
+
+    @Test
+    public void testListFieldWriterFactory_withLookupTextTransformation_handlesMultiSegmentText() throws Exception {
+        // Regression test: Lark represents a Text cell as either a single segment Map ({"text": "..."})
+        // or, when the cell mixes plain text with @mentions/links, a List of several segment Maps that
+        // must be concatenated - the identical shape and reasoning already handled for a direct TEXT
+        // field in the VarChar extractor (see testVarCharExtractor tests covering multi-segment text).
+        // Before this fix, the LOOKUP<Text> transform only handled the single-Map shape
+        // ("element instanceof Map"), so a linked record whose target Text field contained mentions
+        // would fail that filter and be silently dropped from the resulting array entirely - no error,
+        // no log, just a shorter-than-expected array.
+        larkFieldTypeMapping.put("lookup_field", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.TEXT));
+        registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
+        when(mockRowWriterBuilder.withFieldWriterFactory(any(String.class), any())).thenReturn(mockRowWriterBuilder);
+
+        ArgumentCaptor<FieldWriterFactory> factoryCaptor = ArgumentCaptor.forClass(FieldWriterFactory.class);
+        Field listField = new Field("lookup_field", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(new Field("item", FieldType.nullable(new ArrowType.Utf8()), null)));
+        Schema schema = new Schema(Collections.singletonList(listField));
+
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, schema);
+        verify(mockRowWriterBuilder).withFieldWriterFactory(eq("lookup_field"), factoryCaptor.capture());
+
+        FieldWriterFactory factory = factoryCaptor.getValue();
+        FieldVector mockVector = mock(FieldVector.class);
+        Extractor mockExtractor = mock(Extractor.class);
+
+        try (MockedStatic<BlockUtils> blockUtilsMock = mockStatic(BlockUtils.class)) {
+            FieldWriter writer = factory.create(mockVector, mockExtractor, null);
+
+            // First linked record: a plain single-segment Map (the already-working shape).
+            Map<String, Object> plainRecord = new HashMap<>();
+            plainRecord.put("text", "value1");
+
+            // Second linked record: a multi-segment List, like a Text cell containing an @mention mixed
+            // with plain text - each segment carries its own "text" key and must be concatenated.
+            Map<String, Object> segment1 = new HashMap<>();
+            segment1.put("text", "Hello ");
+            Map<String, Object> segment2 = new HashMap<>();
+            segment2.put("text", "@someone");
+            List<Object> multiSegmentRecord = Arrays.asList(segment1, segment2);
+
+            List<Object> lookupList = Arrays.asList(plainRecord, multiSegmentRecord);
+
+            Map<String, Object> context = new HashMap<>();
+            context.put("lookup_field", lookupList);
+
+            boolean result = writer.write(context, 0);
+
+            assertTrue(result);
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), argThat(arg -> {
+                if (arg instanceof List) {
+                    List<?> list = (List<?>) arg;
+                    return list.size() == 2 && "value1".equals(list.get(0)) && "Hello @someone".equals(list.get(1));
+                }
+                return false;
+            })));
         }
     }
 
@@ -1468,6 +1706,52 @@ public class RegistererExtractorTest {
             boolean result = writer.write(context, 0);
 
             assertFalse(result);
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(null)));
+        }
+    }
+
+    @Test
+    public void testStructFieldWriterFactory_withFormulaNullFirstElement_writesNullNotNpe() throws Exception {
+        // Regression test: unwrapFormula returns valueList.get(0) unchecked for a FORMULA whose
+        // childType maps to STRUCT (URL, LOCATION, SINGLE_LINK, DUPLEX_LINK - none of which are
+        // LIST-mapped, so unwrapFormula's minorType check falls through to valueList.get(0) rather than
+        // returning the whole list) - a genuine "blank for this row" formula result (e.g.
+        // IF(cond, linked_record, BLANK()) typed as a Link result) can have a null first element. Before
+        // this fix, "!(unwrappedValue instanceof Map)" was true for null, and the very next statement
+        // called unwrappedValue.getClass() on that null reference, throwing an NPE that propagated out
+        // of this row writer and (per BaseRecordHandler's per-row try/catch) silently dropped the ENTIRE
+        // row, not just this column.
+        larkFieldTypeMapping.put("struct_field", new NestedUIType(UITypeEnum.FORMULA, UITypeEnum.URL));
+        registererExtractor = new RegistererExtractor(larkFieldTypeMapping);
+        when(mockRowWriterBuilder.withFieldWriterFactory(any(String.class), any())).thenReturn(mockRowWriterBuilder);
+
+        ArgumentCaptor<FieldWriterFactory> factoryCaptor = ArgumentCaptor.forClass(FieldWriterFactory.class);
+        Field structField = new Field("struct_field", FieldType.nullable(new ArrowType.Struct()),
+                Arrays.asList(
+                        new Field("link", FieldType.nullable(new ArrowType.Utf8()), null),
+                        new Field("text", FieldType.nullable(new ArrowType.Utf8()), null),
+                        new Field("type", FieldType.nullable(new ArrowType.Utf8()), null)
+                ));
+        Schema schema = new Schema(Collections.singletonList(structField));
+
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, schema);
+        verify(mockRowWriterBuilder).withFieldWriterFactory(eq("struct_field"), factoryCaptor.capture());
+
+        FieldWriterFactory factory = factoryCaptor.getValue();
+        FieldVector mockVector = mock(FieldVector.class);
+        Extractor mockExtractor = mock(Extractor.class);
+
+        try (MockedStatic<BlockUtils> blockUtilsMock = mockStatic(BlockUtils.class)) {
+            FieldWriter writer = factory.create(mockVector, mockExtractor, null);
+
+            Map<String, Object> formulaWrapper = new HashMap<>();
+            formulaWrapper.put("value", Collections.singletonList(null));
+            Map<String, Object> context = new HashMap<>();
+            context.put("struct_field", formulaWrapper);
+
+            boolean result = writer.write(context, 0);
+
+            assertTrue(result);
             blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), eq(null)));
         }
     }

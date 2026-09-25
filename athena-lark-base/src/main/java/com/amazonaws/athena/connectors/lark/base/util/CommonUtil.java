@@ -194,13 +194,18 @@ public final class CommonUtil
 
     public static Schema buildSchemaFromLarkFields(List<AthenaFieldLarkBaseMapping> larkFields)
     {
+        return buildSchemaFromLarkFields(larkFields, false);
+    }
+
+    public static Schema buildSchemaFromLarkFields(List<AthenaFieldLarkBaseMapping> larkFields, boolean complexTypeAsJsonString)
+    {
         SchemaBuilder schemaBuilder = SchemaBuilder.newBuilder();
         if (larkFields == null || larkFields.isEmpty()) {
             return schemaBuilder.build();
         }
 
         for (AthenaFieldLarkBaseMapping field : larkFields) {
-            Field arrowField = LarkBaseTypeUtils.larkFieldToArrowField(field);
+            Field arrowField = LarkBaseTypeUtils.larkFieldToArrowField(field, complexTypeAsJsonString);
 
             // field.athenaName() is already sanitized (and deduplicated against name collisions) at
             // discovery time; use it as-is instead of re-sanitizing the raw Lark field name here, which

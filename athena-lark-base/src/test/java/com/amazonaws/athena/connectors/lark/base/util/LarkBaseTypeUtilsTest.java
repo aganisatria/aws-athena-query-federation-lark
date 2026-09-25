@@ -391,13 +391,17 @@ class LarkBaseTypeUtilsTest {
 
     @Test
     void testGetLarkListChildField_LookupWithDateTime() {
+        // Must match the top-level DATE_TIME mapping (DATEMILLI/Date, not Timestamp) - a table resolved
+        // via the direct/experimental path and the same table crawled into Glue must agree on this LOOKUP
+        // field's Arrow type, or predicates/serialization would behave differently depending on which
+        // metadata-resolution path served the query (confirmed disagreement, now fixed).
         AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
                 "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.DATE_TIME));
 
         Field result = LarkBaseTypeUtils.getLarkListChildField(field);
 
         assertThat(result.getName()).isEqualTo("item");
-        assertThat(result.getType()).isEqualTo(new ArrowType.Timestamp(org.apache.arrow.vector.types.TimeUnit.MILLISECOND, "UTC"));
+        assertThat(result.getType()).isEqualTo(Types.MinorType.DATEMILLI.getType());
     }
 
     @Test
@@ -433,6 +437,88 @@ class LarkBaseTypeUtilsTest {
 
         assertThat(result.getName()).isEqualTo("item");
         assertThat(result.getType()).isEqualTo(ArrowType.Utf8.INSTANCE);
+    }
+
+    // A LOOKUP whose target is itself LIST-shaped (USER, ATTACHMENT, MULTI_SELECT, ...) must doubly-nest
+    // - matches the crawler's Glue type for the same field: UITypeEnum.LOOKUP wraps the target's own
+    // "array<...>" Glue type in another array ("array<array<struct<...>>>" for Lookup<User>), since a
+    // LOOKUP aggregates one target-shaped value per linked record and the target itself is already a
+    // list. Before this fix, only scalar LOOKUP targets were handled - a Lookup<User> silently collapsed
+    // to a flat List<Utf8> instead of List<List<Struct<...>>>, discarding the target's real shape.
+    @Test
+    void testGetLarkListChildField_LookupWithUserTarget_doublyNestsListOfUserStruct() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.USER));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getName()).isEqualTo("item");
+        assertThat(result.getType()).isEqualTo(ArrowType.List.INSTANCE);
+        assertThat(result.getChildren()).hasSize(1);
+        Field innerListChild = result.getChildren().get(0);
+        assertThat(innerListChild.getType()).isEqualTo(ArrowType.Struct.INSTANCE);
+        assertThat(innerListChild.getChildren()).extracting(Field::getName)
+                .containsExactly("avatar_url", "email", "en_name", "id", "name");
+    }
+
+    // A LOOKUP whose target is STRUCT-shaped (URL, LOCATION, ...) nests once - matches the crawler's
+    // "array<struct<...>>" Glue type for the same field, since URL/LOCATION aren't list-shaped
+    // themselves the way USER/ATTACHMENT are.
+    @Test
+    void testGetLarkListChildField_LookupWithUrlTarget_nestsStructOnce() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "lookup_field", "Lookup", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.URL));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getName()).isEqualTo("item");
+        assertThat(result.getType()).isEqualTo(ArrowType.Struct.INSTANCE);
+        assertThat(result.getChildren()).extracting(Field::getName)
+                .containsExactly("link", "text", "type");
+    }
+
+    // getLarkListChildField/getLarkStructChildFields must unwrap FORMULA the same way
+    // larkFieldToArrowMinorType already does - matches the crawler path, which builds a FORMULA's Glue
+    // type by calling the *target* UI type's own getGlueCatalogType (e.g. Formula<User> gets the same
+    // "array<struct<...>>" Glue type a plain USER field would). Without unwrapping here, the MinorType
+    // would correctly come out as LIST/STRUCT (via larkFieldToArrowMinorType's own unwrapping) but the
+    // child structure would still be built from uiType=FORMULA, which neither method switches on, so it
+    // silently fell back to a generic string child instead of the target type's real shape.
+    @Test
+    void testGetLarkListChildField_FormulaWithUserTarget_resolvesUserStructChildren() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "calc_owner", "Calculated Owner", new NestedUIType(UITypeEnum.FORMULA, UITypeEnum.USER));
+
+        Field result = LarkBaseTypeUtils.getLarkListChildField(field);
+
+        assertThat(result.getType()).isEqualTo(ArrowType.Struct.INSTANCE);
+        assertThat(result.getChildren()).extracting(Field::getName)
+                .containsExactly("avatar_url", "email", "en_name", "id", "name");
+    }
+
+    @Test
+    void testGetLarkStructChildFields_FormulaWithUrlTarget_resolvesUrlStructChildren() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "calc_link", "Calculated Link", new NestedUIType(UITypeEnum.FORMULA, UITypeEnum.URL));
+
+        List<Field> result = LarkBaseTypeUtils.getLarkStructChildFields(field);
+
+        assertThat(result).extracting(Field::getName).containsExactly("link", "text", "type");
+    }
+
+    @Test
+    void testLarkFieldToArrowField_FormulaWithUserTarget_producesListOfUserStruct() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "calc_owner", "Calculated Owner", new NestedUIType(UITypeEnum.FORMULA, UITypeEnum.USER));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field);
+
+        assertThat(result.getType()).isEqualTo(ArrowType.List.INSTANCE);
+        assertThat(result.getChildren()).hasSize(1);
+        Field listChild = result.getChildren().get(0);
+        assertThat(listChild.getType()).isEqualTo(ArrowType.Struct.INSTANCE);
+        assertThat(listChild.getChildren()).extracting(Field::getName)
+                .containsExactly("avatar_url", "email", "en_name", "id", "name");
     }
 
     // End-to-end: larkFieldToArrowField for a LOOKUP field must produce a LIST Field whose single child carries
@@ -603,5 +689,86 @@ class LarkBaseTypeUtilsTest {
         assertThat(result.getType()).isInstanceOf(ArrowType.Int.class);
         ArrowType.Int intType = (ArrowType.Int) result.getType();
         assertThat(intType.getBitWidth()).isEqualTo(8);
+    }
+
+    // Test larkFieldToArrowField for a top-level DATE_TIME field. larkFieldToArrowMinorType never
+    // returns null (it falls back to VARCHAR by default), so this must fall through to the DATEMILLI
+    // default case rather than any dead "minorType == null" special-casing - locks in the type that
+    // RegistererExtractor's DATEMILLI extractor (and the Glue-crawler path's "timestamp" column, which
+    // the SDK also resolves to DATEMILLI) actually expect.
+    @Test
+    void testLarkFieldToArrowField_DateTime() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "created_at", "Created At", new NestedUIType(UITypeEnum.DATE_TIME, UITypeEnum.UNKNOWN));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field);
+
+        assertThat(result.getName()).isEqualTo("Created At");
+        assertThat(result.getType()).isEqualTo(Types.MinorType.DATEMILLI.getType());
+    }
+
+    // Tests for the complexTypeAsJsonString flag (BaseConstants.DOES_ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR):
+    // a List/Struct-shaped field becomes plain VARCHAR instead, sidestepping Athena's own engine crash on
+    // any WHERE constraint (including IS NOT NULL) referencing a List/Struct-typed column.
+
+    @Test
+    void testLarkFieldToArrowField_ComplexTypeAsJsonString_ListField_BecomesVarcharWithNoChildren() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "tags", "Tags", new NestedUIType(UITypeEnum.MULTI_SELECT, UITypeEnum.UNKNOWN));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field, true);
+
+        assertThat(result.getName()).isEqualTo("Tags");
+        assertThat(result.getType()).isEqualTo(ArrowType.Utf8.INSTANCE);
+        assertThat(result.getChildren()).isEmpty();
+    }
+
+    @Test
+    void testLarkFieldToArrowField_ComplexTypeAsJsonString_StructField_BecomesVarcharWithNoChildren() {
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "website", "Website", new NestedUIType(UITypeEnum.URL, UITypeEnum.UNKNOWN));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field, true);
+
+        assertThat(result.getName()).isEqualTo("Website");
+        assertThat(result.getType()).isEqualTo(ArrowType.Utf8.INSTANCE);
+        assertThat(result.getChildren()).isEmpty();
+    }
+
+    @Test
+    void testLarkFieldToArrowField_ComplexTypeAsJsonString_FormulaWrappingListTarget_BecomesVarchar() {
+        // A LOOKUP wrapping a List/Struct-shaped target (e.g. Lookup<User>) resolves to LIST via the
+        // same larkFieldToArrowMinorType unwrapping FORMULA/LOOKUP already do - the flag check runs
+        // after that resolution, so the wrapped case needs no separate handling.
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "assignees", "Assignees", new NestedUIType(UITypeEnum.LOOKUP, UITypeEnum.USER));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field, true);
+
+        assertThat(result.getType()).isEqualTo(ArrowType.Utf8.INSTANCE);
+        assertThat(result.getChildren()).isEmpty();
+    }
+
+    @Test
+    void testLarkFieldToArrowField_ComplexTypeAsJsonStringFalse_ListFieldStaysList() {
+        // Regression guard: the flag must be opt-in - default (false) behavior is unaffected.
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "tags", "Tags", new NestedUIType(UITypeEnum.MULTI_SELECT, UITypeEnum.UNKNOWN));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field, false);
+
+        assertThat(result.getType()).isEqualTo(ArrowType.List.INSTANCE);
+    }
+
+    @Test
+    void testLarkFieldToArrowField_ComplexTypeAsJsonString_ScalarFieldUnaffected() {
+        // The flag only touches LIST/STRUCT MinorTypes - a plain scalar field (e.g. NUMBER) must not be
+        // coerced to VARCHAR by it.
+        AthenaFieldLarkBaseMapping field = new AthenaFieldLarkBaseMapping(
+                "amount", "Amount", new NestedUIType(UITypeEnum.NUMBER, UITypeEnum.UNKNOWN));
+
+        Field result = LarkBaseTypeUtils.larkFieldToArrowField(field, true);
+
+        assertThat(result.getType()).isInstanceOf(ArrowType.Decimal.class);
     }
 }

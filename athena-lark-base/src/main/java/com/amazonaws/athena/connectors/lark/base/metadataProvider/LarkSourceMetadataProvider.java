@@ -45,10 +45,17 @@ public class LarkSourceMetadataProvider
     private static final Logger logger = LoggerFactory.getLogger(LarkSourceMetadataProvider.class);
 
     private final List<TableDirectInitialized> resolvedMappings;
+    private final boolean complexTypeAsJsonString;
 
     public LarkSourceMetadataProvider(List<TableDirectInitialized> resolvedMappings)
     {
+        this(resolvedMappings, false);
+    }
+
+    public LarkSourceMetadataProvider(List<TableDirectInitialized> resolvedMappings, boolean complexTypeAsJsonString)
+    {
         this.resolvedMappings = requireNonNull(resolvedMappings, "resolvedMappings cannot be null");
+        this.complexTypeAsJsonString = complexTypeAsJsonString;
     }
 
     public Optional<TableSchemaResult> getTableSchema(GetTableRequest request)
@@ -58,7 +65,7 @@ public class LarkSourceMetadataProvider
 
         if (mappingOpt.isPresent()) {
             TableDirectInitialized mapping = mappingOpt.get();
-            Schema schema = CommonUtil.buildSchemaFromLarkFields(mapping.columns());
+            Schema schema = CommonUtil.buildSchemaFromLarkFields(mapping.columns(), complexTypeAsJsonString);
             logger.info("Lark Source Path: Found mapping for {} with schema: {}", request.getTableName(), schema);
             return Optional.of(new TableSchemaResult(schema, Collections.emptySet()));
         }

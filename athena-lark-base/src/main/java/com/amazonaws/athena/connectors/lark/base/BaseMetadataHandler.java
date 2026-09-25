@@ -102,9 +102,11 @@ import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_BASE_
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_NAME_MAPPING_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_FIELD_TYPE_MAPPING_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.LARK_TABLE_ID_PARAMETER;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.MAX_PARALLEL_SPLIT_MAPPING_BYTES;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.NULLS_FIRST_FIELD_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE_PROPERTY;
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RAW_TOTAL_ROW_COUNT_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.RESERVED_SPLIT_KEY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.SORT_EXPRESSION_PROPERTY;
 import static com.amazonaws.athena.connectors.lark.base.BaseConstants.SOURCE_TYPE;
@@ -161,8 +163,8 @@ public class BaseMetadataHandler
                 this.invoker
         );
         this.mappingTableDirectInitialized = larkBaseTableResolver.resolveTables();
-        this.experimentalMetadataProvider = new ExperimentalMetadataProvider(athenaService, larkBaseService, invoker);
-        this.larkSourceMetadataProvider = new LarkSourceMetadataProvider(mappingTableDirectInitialized);
+        this.experimentalMetadataProvider = new ExperimentalMetadataProvider(athenaService, larkBaseService, invoker, envVarService.isActivateComplexTypeAsJsonString());
+        this.larkSourceMetadataProvider = new LarkSourceMetadataProvider(mappingTableDirectInitialized, envVarService.isActivateComplexTypeAsJsonString());
         if (envVarService.isEnableDebugLogging()) {
             logger.info("Initialization complete. Discovered {} target databases from metadata tables.", mappingTableDirectInitialized.size());
         }
@@ -420,6 +422,42 @@ public class BaseMetadataHandler
                     ErrorDetails.builder().errorCode(FederationSourceErrorCode.ENTITY_NOT_FOUND_EXCEPTION.toString()).build());
         }
 
+        // Try Glue first, mirroring the precedence resolvePartitionInfo/tryResolveFromCrawledSchemaMetadata
+        // already established for a crawler-populated table: a Glue lookup is a single cheap API call,
+        // while the Lark Base source and experimental providers below are for a *different* deployment
+        // mode (tables resolved fresh from Lark itself, not pre-crawled into Glue) and are
+        // guaranteed-to-fail (or, for the experimental path, an expensive false positive) for a crawled
+        // table - the source provider matches by Lark's own naming, which a crawled table's human-chosen
+        // Athena name generally won't equal, and the experimental provider's heuristic (matching a token
+        // in the raw query text against the schema/table name) always "succeeds" trivially for perfectly
+        // ordinary SQL, then wastes a real Lark API round-trip (~1s, confirmed live via CloudWatch in the
+        // commit that added the equivalent resolvePartitionInfo shortcut) discovering the "ID" it found
+        // isn't real. Before this, only resolvePartitionInfo got that shortcut - doGetTable, which
+        // resolves the table BEFORE resolvePartitionInfo ever runs, still paid the exact cost that fix
+        // was meant to eliminate, on every single query against a crawler-populated table.
+        // A table that's genuinely only resolvable live via Lark (never crawled into Glue) still falls
+        // through normally below: EntityNotFoundException here is the expected, cheap common case for
+        // that deployment mode, not a failure.
+        try {
+            GetTableResponse glueResponse = super.doGetTable(allocator, request);
+            if (glueResponse != null && glueResponse.getSchema() != null) {
+                logger.info("doGetTable: Found schema from Glue.");
+                Schema finalSchema = CommonUtil.addReservedFields(glueResponse.getSchema());
+                return new GetTableResponse(request.getCatalogName(), request.getTableName(), finalSchema, glueResponse.getPartitionColumns());
+            }
+            else {
+                logger.info("doGetTable: Glue lookup returned null or no schema for {}; trying Lark Base source/experimental providers.", request.getTableName());
+            }
+        }
+        catch (EntityNotFoundException e) {
+            if (envVarService.isEnableDebugLogging()) {
+                logger.info("doGetTable: Table {} not found in Glue; trying Lark Base source/experimental providers.", request.getTableName());
+            }
+        }
+        catch (Exception e) {
+            logger.warn("doGetTable: Error during Glue lookup for {}, trying Lark Base source/experimental providers: {}", request.getTableName(), e.getMessage(), e);
+        }
+
         if (envVarService.isActivateLarkBaseSource() || envVarService.isActivateLarkDriveSource()) {
             if (envVarService.isEnableDebugLogging()) {
                 logger.info("doGetTable: Attempting to get schema from Lark Base source.");
@@ -451,26 +489,12 @@ public class BaseMetadataHandler
             }
         }
 
-        try {
-            GetTableResponse glueResponse = super.doGetTable(allocator, request);
-            if (glueResponse != null && glueResponse.getSchema() != null) {
-                logger.info("doGetTable: Found schema from Glue.");
-                Schema finalSchema = CommonUtil.addReservedFields(glueResponse.getSchema());
-                return new GetTableResponse(request.getCatalogName(), request.getTableName(), finalSchema, glueResponse.getPartitionColumns());
-            }
-            else {
-                logger.warn("doGetTable: Glue fallback returned null or no schema for {}.", request.getTableName());
-            }
-        }
-        catch (EntityNotFoundException e) {
-            logger.warn("doGetTable: Glue fallback: Table {} not found in Glue.", request.getTableName());
-        }
-        catch (Exception e) {
-            logger.warn("doGetTable: Error during Glue fallback for {}: {}", request.getTableName(), e.getMessage(), e);
-        }
-
         logger.error("doGetTable: No schema found for {}. Returning empty schema.", request.getTableName());
-        throw new RuntimeException("Unable to retrieve table schema from Glue or Lark Base source.");
+        // Same classification as the whitelist/blacklist "not found" case above (line ~421) - both mean
+        // Athena asked for a table this connector can't actually serve. A raw RuntimeException here would
+        // propagate without Athena's ENTITY_NOT_FOUND_EXCEPTION handling, inconsistent with that sibling case.
+        throw new AthenaConnectorException("Unable to retrieve table schema from Glue or Lark Base source for " + request.getTableName(),
+                ErrorDetails.builder().errorCode(FederationSourceErrorCode.ENTITY_NOT_FOUND_EXCEPTION.toString()).build());
     }
 
     /**
@@ -491,6 +515,7 @@ public class BaseMetadataHandler
                 .addStringField(FILTER_EXPRESSION_PROPERTY)
                 .addIntField(PAGE_SIZE_PROPERTY)
                 .addIntField(EXPECTED_ROW_COUNT_PROPERTY)
+                .addIntField(RAW_TOTAL_ROW_COUNT_PROPERTY)
                 .addStringField(SORT_EXPRESSION_PROPERTY)
 
                 // Split Property
@@ -532,7 +557,15 @@ public class BaseMetadataHandler
             }
         }
 
-        if (envVarService.isActivateLarkBaseSource()) {
+        // Was previously gated on isActivateLarkBaseSource() - the wrong flag, copy-pasted from the
+        // block above instead of matching doGetTable's equivalent gate (isActivateExperimentalFeatures(),
+        // BaseMetadataHandler.java's doGetTable method). That mismatch meant disabling
+        // ACTIVATE_EXPERIMENTAL_FEATURES_ENV_VAR didn't actually stop this method from running the
+        // experimental provider - and its expensive, often-wasted Lark API round-trip - whenever Lark
+        // Base source was on; and conversely, a deployment with experimental features on but Lark Base
+        // source off would resolve a table's schema in doGetTable but then find no partition info here,
+        // since this provider was skipped entirely.
+        if (envVarService.isActivateExperimentalFeatures()) {
             logger.info("getPartitions: Attempting to get partition info from experimental path.");
             Optional<PartitionInfoResult> experimentalPartitionInfo = experimentalMetadataProvider.getPartitionInfo(tableName, request);
             if (experimentalPartitionInfo.isPresent()) {
@@ -701,6 +734,60 @@ public class BaseMetadataHandler
     }
 
     /**
+     * Computes the page size and expected row count to request for the single collapsed split
+     * {@link #doGetSplits} builds when the query has an ORDER BY clause.
+     * <p>
+     * A bare {@code limit > 0} check treats LIMIT 0 (a valid, if unusual, query - e.g. a BI tool probing
+     * column types without wanting data) the same as "no LIMIT at all", which would fetch and sort the
+     * ENTIRE table via Lark's Search API for zero requested rows. {@link BaseRecordHandler}'s own
+     * row-count cap checks (e.g. {@code expectedRowCountForSplit > 0 && ...}) use the same "0 means
+     * unbounded" convention throughout, so requesting a literal 0 here wouldn't stop the fetch loop
+     * either - it would keep paging until Lark's own {@code hasMorePages} goes false. Requesting exactly
+     * 1 row instead (rather than 0) sidesteps that shared convention safely: it caps the real fetch to a
+     * single small page instead of the whole table, and Athena's own engine-level LIMIT 0 enforcement
+     * discards that one row and returns the correct empty result to the user regardless.
+     *
+     * @param limit The query's LIMIT value, or a negative number if absent.
+     * @param totalRowCount The table's total row count (after any WHERE filter).
+     * @return A pair of (page size, expected row count) to use for the split.
+     */
+    @VisibleForTesting
+    protected Pair<Integer, Integer> calculateOrderBySplitSizing(long limit, int totalRowCount)
+    {
+        if (limit == 0) {
+            return Pair.of(1, 1);
+        }
+        int pageSizeForSplit = (limit > 0 && limit < PAGE_SIZE) ? (int) limit : PAGE_SIZE;
+        int finalExpectedRowCount = (limit > 0 && limit < totalRowCount) ? (int) limit : totalRowCount;
+        return Pair.of(pageSizeForSplit, finalExpectedRowCount);
+    }
+
+    /**
+     * Decides whether {@link #doGetSplits}'s ORDER BY branch can reuse the row count {@code getPartitions}
+     * already fetched (via {@code writeSinglePartition}, stored in row 0's {@code RAW_TOTAL_ROW_COUNT_PROPERTY})
+     * instead of paying for a second, identical Lark API round-trip for the same baseId/tableId/filterExpression.
+     * <p>
+     * Only trusted when row 0 was planned as a single (non-parallel) partition: {@code writeParallelPartitions}
+     * stores an intentionally UNFILTERED count under the same property (see its own comment), which would be
+     * the wrong number to reuse whenever a filter is present. Falling back to a fresh fetch in that case only
+     * costs the extra round-trip for the rarer parallel-split-eligible-table case, never correctness.
+     *
+     * @param singlePartitionPlanned whether row 0's {@code IS_PARALLEL_SPLIT_PROPERTY} was false
+     * @param rawTotalRowCountFromPartition row 0's {@code RAW_TOTAL_ROW_COUNT_PROPERTY} value, or {@code null}
+     * if that property wasn't present on the partition schema at all (e.g. a version-mismatch edge case)
+     * @return the row count to use for {@link #calculateOrderBySplitSizing}
+     */
+    @VisibleForTesting
+    protected int resolveOrderBySplitTotalRowCount(boolean singlePartitionPlanned, Integer rawTotalRowCountFromPartition,
+                                                    String baseId, String tableId, String filterExpression)
+    {
+        if (singlePartitionPlanned && rawTotalRowCountFromPartition != null && rawTotalRowCountFromPartition >= 0) {
+            return rawTotalRowCountFromPartition;
+        }
+        return getTotalRowCount(baseId, tableId, filterExpression);
+    }
+
+    /**
      * Builds a sort expression for {@link #doGetSplits}, where {@code orderByClause} is reliably populated
      * (unlike at {@code getPartitions} time - see the ORDER BY handling at the top of doGetSplits). The
      * partition only carries {@code larkFieldNameMappingJson}, a {@code Map<larkFieldName, athenaColumnName>}
@@ -803,12 +890,27 @@ public class BaseMetadataHandler
         }
 
         int numSplits = (int) Math.ceil((double) effectiveRowCount / PAGE_SIZE);
+
+        if (exceedsParallelSplitMappingBudget(numSplits, fieldTypeMappingJson, fieldNameMappingJson)) {
+            logger.warn("getPartitions: {} parallel partition rows would duplicate the field mapping metadata "
+                    + "past the {}-byte safety budget (each row/split carries its own full copy, and neither "
+                    + "GetTableLayoutResponse nor GetSplitsResponse/Split supports spilling). Falling back to a "
+                    + "single sequentially-paginated partition instead.", numSplits, MAX_PARALLEL_SPLIT_MAPPING_BYTES);
+            writeSinglePartition(blockWriter, baseId, tableId, filterExpression, "", fieldTypeMappingJson,
+                    fieldNameMappingJson, queryLimit, hasOrderBy);
+            return;
+        }
+
         logger.info("getPartitions: Writing {} parallel partition rows for {} effective rows.", numSplits, effectiveRowCount);
 
         for (int i = 0; i < numSplits; i++) {
             final long startIndex = (long) i * PAGE_SIZE + 1;
-            final long endIndex = Math.min((long) (i + 1) * PAGE_SIZE, effectiveRowCount);
-            final long currentSplitRowCount = endIndex - startIndex + 1;
+            final long endIndex = computeParallelSplitEndIndex(i, numSplits, effectiveRowCount);
+            // Matches the "0 means unbounded" convention BaseRecordHandler.getIterator already relies on
+            // elsewhere (expectedRowCountForSplit > 0 gates the cap) - an exact row count can't be known
+            // up front for an open-ended split (endIndex == Long.MAX_VALUE), so its fetch loop must rely
+            // solely on Lark's own hasMorePages signal.
+            final int currentSplitRowCount = endIndex == Long.MAX_VALUE ? 0 : (int) (endIndex - startIndex + 1);
 
             blockWriter.writeRows((block, rowNum) -> {
                 BlockUtils.setValue(block.getFieldVector(BASE_ID_PROPERTY), rowNum, baseId);
@@ -816,7 +918,15 @@ public class BaseMetadataHandler
                 BlockUtils.setValue(block.getFieldVector(FILTER_EXPRESSION_PROPERTY), rowNum, filterExpression);
                 BlockUtils.setValue(block.getFieldVector(SORT_EXPRESSION_PROPERTY), rowNum, "");
                 BlockUtils.setValue(block.getFieldVector(PAGE_SIZE_PROPERTY), rowNum, PAGE_SIZE);
-                BlockUtils.setValue(block.getFieldVector(EXPECTED_ROW_COUNT_PROPERTY), rowNum, (int) currentSplitRowCount);
+                BlockUtils.setValue(block.getFieldVector(EXPECTED_ROW_COUNT_PROPERTY), rowNum, currentSplitRowCount);
+                // -1 sentinel: this path's own totalRowCount (above) is deliberately UNFILTERED (positional
+                // range planning needs the whole table's key range, not the filtered match count - see this
+                // method's class-level comment), so it has the wrong semantics to reuse as
+                // RAW_TOTAL_ROW_COUNT_PROPERTY, which must be the FILTERED count. doGetSplits's ORDER BY
+                // branch checks IS_PARALLEL_SPLIT_PROPERTY before trusting this property and falls back to
+                // fetching a fresh (correctly filtered) count whenever it's true, so this sentinel is never
+                // actually read as a row count.
+                BlockUtils.setValue(block.getFieldVector(RAW_TOTAL_ROW_COUNT_PROPERTY), rowNum, -1);
                 BlockUtils.setValue(block.getFieldVector(IS_PARALLEL_SPLIT_PROPERTY), rowNum, true);
                 BlockUtils.setValue(block.getFieldVector(SPLIT_START_INDEX_PROPERTY), rowNum, startIndex);
                 BlockUtils.setValue(block.getFieldVector(SPLIT_END_INDEX_PROPERTY), rowNum, endIndex);
@@ -828,10 +938,60 @@ public class BaseMetadataHandler
         logger.info("getPartitions: Successfully wrote {} parallel partition rows.", numSplits);
     }
 
+    /**
+     * Computes the (inclusive) upper bound of the {@code $reserved_split_key} range for parallel split
+     * number {@code splitIndex} (0-based) out of {@code numSplits} total.
+     * <p>
+     * {@code $reserved_split_key} is a user-populated auto-number field: once any row has ever been
+     * deleted, its values develop gaps and its true maximum can exceed {@code effectiveRowCount} (a row
+     * COUNT, not the key's max value - auto-number fields don't renumber or reclaim values on delete).
+     * Capping every split's range at {@code effectiveRowCount} would then silently exclude every row whose
+     * key landed above that stale estimate from every split's range - a permanent, silent row-loss bug.
+     * The last split's upper bound is therefore left open ({@link Long#MAX_VALUE}, meaning "no upper
+     * bound" - see {@link SearchApiFilterTranslator#toSplitFilterJson}), guaranteeing full coverage
+     * regardless of gaps, at the cost of that one split doing more sequential Lark pages if the domain is
+     * sparse.
+     *
+     * @param splitIndex 0-based index of the split being sized
+     * @param numSplits total number of parallel splits being planned
+     * @param effectiveRowCount the table's estimated row count (post-LIMIT), used to size every split
+     * except the last
+     * @return the split's inclusive upper bound, or {@code Long.MAX_VALUE} for the last split
+     */
+    @VisibleForTesting
+    protected long computeParallelSplitEndIndex(int splitIndex, int numSplits, long effectiveRowCount)
+    {
+        if (splitIndex == numSplits - 1) {
+            return Long.MAX_VALUE;
+        }
+        return Math.min((long) (splitIndex + 1) * PAGE_SIZE, effectiveRowCount);
+    }
+
+    /**
+     * Whether writing {@code numSplits} parallel partition rows would duplicate the field-mapping JSON
+     * (once per row, and again once per Split built from each row) past {@link BaseConstants#MAX_PARALLEL_SPLIT_MAPPING_BYTES}.
+     *
+     * @param numSplits the number of parallel partition rows/splits {@code writeParallelPartitions} would create
+     * @param fieldTypeMappingJson the field type mapping JSON that would be duplicated into every row/split
+     * @param fieldNameMappingJson the field name mapping JSON that would be duplicated into every row/split
+     * @return true if the projected duplicated bytes exceed the safety budget
+     */
+    @VisibleForTesting
+    protected boolean exceedsParallelSplitMappingBudget(int numSplits, String fieldTypeMappingJson, String fieldNameMappingJson)
+    {
+        long bytesPerSplit = (long) (fieldTypeMappingJson == null ? 0 : fieldTypeMappingJson.length())
+                + (fieldNameMappingJson == null ? 0 : fieldNameMappingJson.length());
+        long projectedBytes = bytesPerSplit * (long) numSplits;
+        return projectedBytes > MAX_PARALLEL_SPLIT_MAPPING_BYTES;
+    }
+
     private void writeSinglePartition(BlockWriter blockWriter, String baseId, String tableId,
                                       String filterExpression, String sortExpression, String fieldTypeMappingJson,
                                       String fieldNameMappingJson, long queryLimit, boolean hasOrderBy)
     {
+        // Athena's engine doesn't populate GetTableLayoutRequest's ORDER BY constraint - it's only visible
+        // once GetSplitsRequest arrives (see doGetSplits) - so hasOrderBy is unreliable here and this call
+        // can't be skipped based on it; every query pays for this lookup at getPartitions time regardless.
         int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression);
         long effectiveRowCount = calculateEffectiveRowCount(totalRowCount, queryLimit, hasOrderBy);
 
@@ -839,9 +999,9 @@ public class BaseMetadataHandler
             logger.info("getPartitions: Effective row count is 0 due to LIMIT, writing no partitions.");
             return;
         }
+        final int finalExpectedRowCount = (int) effectiveRowCount;
 
         logger.info("getPartitions: Writing 1 single partition row.");
-        final int finalExpectedRowCount = (int) effectiveRowCount;
 
         blockWriter.writeRows((block, rowNum) -> {
             BlockUtils.setValue(block.getFieldVector(BASE_ID_PROPERTY), rowNum, baseId);
@@ -850,6 +1010,11 @@ public class BaseMetadataHandler
             BlockUtils.setValue(block.getFieldVector(SORT_EXPRESSION_PROPERTY), rowNum, sortExpression);
             BlockUtils.setValue(block.getFieldVector(PAGE_SIZE_PROPERTY), rowNum, PAGE_SIZE);
             BlockUtils.setValue(block.getFieldVector(EXPECTED_ROW_COUNT_PROPERTY), rowNum, finalExpectedRowCount);
+            // The un-clamped total (as opposed to finalExpectedRowCount, which calculateEffectiveRowCount
+            // may cap at the query's LIMIT) - see RAW_TOTAL_ROW_COUNT_PROPERTY's javadoc. This path always
+            // has the correct (filtered) value on hand already, so doGetSplits's ORDER BY branch can reuse
+            // it directly instead of re-fetching the identical count from Lark a second time.
+            BlockUtils.setValue(block.getFieldVector(RAW_TOTAL_ROW_COUNT_PROPERTY), rowNum, totalRowCount);
             BlockUtils.setValue(block.getFieldVector(IS_PARALLEL_SPLIT_PROPERTY), rowNum, false);
             BlockUtils.setValue(block.getFieldVector(SPLIT_START_INDEX_PROPERTY), rowNum, 0L);
             BlockUtils.setValue(block.getFieldVector(SPLIT_END_INDEX_PROPERTY), rowNum, 0L);
@@ -1036,6 +1201,7 @@ public class BaseMetadataHandler
         FieldReader sortExprReader = partitions.getFieldReader(SORT_EXPRESSION_PROPERTY);
         FieldReader pageSizeReader = partitions.getFieldReader(PAGE_SIZE_PROPERTY);
         FieldReader expectedCountReader = partitions.getFieldReader(EXPECTED_ROW_COUNT_PROPERTY);
+        FieldReader rawTotalRowCountReader = partitions.getFieldReader(RAW_TOTAL_ROW_COUNT_PROPERTY);
         FieldReader isParallelReader = partitions.getFieldReader(IS_PARALLEL_SPLIT_PROPERTY);
         FieldReader startIndexReader = partitions.getFieldReader(SPLIT_START_INDEX_PROPERTY);
         FieldReader endIndexReader = partitions.getFieldReader(SPLIT_END_INDEX_PROPERTY);
@@ -1064,9 +1230,15 @@ public class BaseMetadataHandler
             String nullsFirstFieldName = findNullsFirstOriginalFieldName(orderByClause, larkFieldNameMappingJson);
 
             long limit = request.getConstraints().hasLimit() ? request.getConstraints().getLimit() : -1;
-            int totalRowCount = getTotalRowCount(baseId, tableId, filterExpression);
-            int pageSizeForSplit = (limit > 0 && limit < PAGE_SIZE) ? (int) limit : PAGE_SIZE;
-            int finalExpectedRowCount = (limit > 0 && limit < totalRowCount) ? (int) limit : totalRowCount;
+
+            boolean singlePartitionPlanned = !FieldReaderUtil.readBoolean(isParallelReader, 0);
+            Integer rawTotalRowCount = rawTotalRowCountReader != null
+                    ? FieldReaderUtil.readInt(rawTotalRowCountReader, 0) : null;
+            int totalRowCount = resolveOrderBySplitTotalRowCount(singlePartitionPlanned, rawTotalRowCount,
+                    baseId, tableId, filterExpression);
+            Pair<Integer, Integer> splitSizing = calculateOrderBySplitSizing(limit, totalRowCount);
+            int pageSizeForSplit = splitSizing.left();
+            int finalExpectedRowCount = splitSizing.right();
 
             Split.Builder splitBuilder = Split.newBuilder(makeSpillLocation(request), makeEncryptionKey())
                     .add(BASE_ID_PROPERTY, baseId)

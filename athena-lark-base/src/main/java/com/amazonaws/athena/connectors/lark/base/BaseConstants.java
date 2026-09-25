@@ -63,6 +63,27 @@ public final class BaseConstants
     public static final String ENABLE_DEBUG_LOGGING_ENV_VAR = "default_enable_debug_logging";
 
     /**
+     * When set to "true", every column that would otherwise be built as a List/Struct-shaped Arrow type
+     * (MULTI_SELECT, USER, GROUP_CHAT, ATTACHMENT, CREATED_USER, MODIFIED_USER, LOOKUP, URL, LOCATION,
+     * SINGLE_LINK, DUPLEX_LINK) is instead built as a plain VARCHAR column holding a JSON-serialized
+     * representation of the same value. Opt-in and off by default - existing tables/queries that rely on
+     * List/Struct-typed columns are unaffected unless this is explicitly set.
+     * <p>
+     * Exists because any WHERE constraint (including IS NOT NULL) referencing a List/Struct-typed column
+     * crashes the whole query inside Amazon Athena's own managed query engine
+     * ({@code IllegalArgumentException: Lists have one child Field. Found: none}, from Apache Arrow's
+     * {@code ListVector.initializeChildrenFromFields}) - a genuine platform-level limitation, not something
+     * fixable by changing what this connector returns while the column stays List/Struct-typed. Representing
+     * the value as a JSON string instead sidesteps the crash entirely, at the cost of losing native
+     * array/struct access in Athena (callers must parse the JSON string themselves).
+     * <p>
+     * Only affects schema built directly by this connector (the live Lark source / experimental providers).
+     * A crawler-populated (Glue-backed) table's schema instead comes from Glue's stored type string - set
+     * the identically-named env var on {@code glue-lark-base-crawler} too so a re-crawl agrees with this.
+     */
+    public static final String DOES_ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR = "default_does_activate_complex_type_as_json_string";
+
+    /**
      * The environment variable which is used to cap how many LOOKUP hops the connector will follow when resolving
      * a chained LOOKUP field's effective type (e.g. a LOOKUP pointing at another LOOKUP in a different table).
      * This is a defense-in-depth safety valve on top of cycle detection, in case a legitimate (non-circular) chain
@@ -131,6 +152,19 @@ public final class BaseConstants
      * to help record handler determine when to stop reading the data and call the next page.
      */
     public static final String EXPECTED_ROW_COUNT_PROPERTY = "expected_row_count";
+
+    /**
+     * Carries the raw, un-clamped {@code getTotalRowCount} result from {@code getPartitions} through to
+     * {@code doGetSplits}. Unlike {@link #EXPECTED_ROW_COUNT_PROPERTY} (which {@code writeSinglePartition}
+     * may cap at the query's LIMIT), this is always the true total matching row count. Athena's engine
+     * doesn't populate {@code GetTableLayoutRequest}'s ORDER BY constraint - it's only visible once
+     * {@code GetSplitsRequest} arrives - so {@code getPartitions} cannot know in advance whether a query
+     * is an ORDER BY one and skip its own row-count lookup accordingly; every query pays for one such
+     * lookup at that stage regardless. Reusing that already-fetched raw count here lets doGetSplits's
+     * ORDER BY branch size its single collapsed split correctly without a second, redundant Lark API call
+     * for the identical baseId/tableId/filterExpression.
+     */
+    public static final String RAW_TOTAL_ROW_COUNT_PROPERTY = "raw_total_row_count";
 
     /**
      * The is parallel split property that helps metadata handler and record handler communicate the is parallel split.
@@ -218,4 +252,16 @@ public final class BaseConstants
      * This is constant for the default page size.
      */
     public static final int PAGE_SIZE = 500;
+
+    /**
+     * Safety budget (in bytes) for how much duplicated field-mapping metadata parallel splitting is allowed
+     * to add across all of a query's partition rows/splits. Every parallel partition row (and, from it, every
+     * Split) carries its own full copy of the table's field type/name mapping JSON, and neither
+     * GetTableLayoutResponse nor GetSplitsResponse/Split supports spilling (only ReadRecordsResponse does), so
+     * this duplication counts fully against AWS Lambda's ~6MB synchronous response payload limit. 4MB leaves
+     * headroom under that limit for the rest of each response (other split properties, JSON/Arrow envelope
+     * overhead). When the projected total would exceed this budget, parallel splitting is skipped in favor of
+     * the single, sequentially-paginated partition, which already fetches the full result set correctly.
+     */
+    public static final long MAX_PARALLEL_SPLIT_MAPPING_BYTES = 4_000_000L;
 }

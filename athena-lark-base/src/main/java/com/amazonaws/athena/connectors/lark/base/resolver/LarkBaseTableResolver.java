@@ -238,12 +238,28 @@ public class LarkBaseTableResolver
                     // type instead, matching the (correct) logic in glue-lark-base-crawler's BaseLarkBaseCrawlerHandler.
                     UITypeEnum childUIType;
                     if (field.getUIType().equals(UITypeEnum.LOOKUP)) {
-                        Pair<String, String> lookupId = field.getTargetFieldAndTableForLookup();
-                        String newTableId = lookupId.right();
-                        String newFieldId = lookupId.left();
-                        // Route through the invoker so a cache-miss fetch inside getLookupType gets the same
-                        // rate-limit backoff as every other Lark API call here.
-                        childUIType = invoker.invoke(() -> larkBaseService.getLookupType(larkBaseId, newTableId, newFieldId));
+                        try {
+                            Pair<String, String> lookupId = field.getTargetFieldAndTableForLookup();
+                            String newTableId = lookupId.right();
+                            String newFieldId = lookupId.left();
+                            // Route through the invoker so a cache-miss fetch inside getLookupType gets the same
+                            // rate-limit backoff as every other Lark API call here.
+                            childUIType = invoker.invoke(() -> larkBaseService.getLookupType(larkBaseId, newTableId, newFieldId));
+                        }
+                        catch (Exception e) {
+                            // Only this one field's error handling - not caught here, this would escape the
+                            // whole for-loop into this method's outer catch (below), which returns whatever
+                            // fieldMappings had been collected SO FAR and silently drops every field that would
+                            // have come after this one in Lark's response - not just this one column. A LOOKUP
+                            // whose target is malformed/permission-restricted (getTargetFieldAndTableForLookup
+                            // returns Pair.of(null, null), not a thrown exception, for that case - see its
+                            // javadoc) is a realistic, not contrived, way to reach this: the resulting
+                            // getLookupType(baseId, null, null) call fails against Lark's API. Matches the
+                            // per-field isolation ExperimentalMetadataProvider already has for the identical case.
+                            logger.warn("Skipping field {} in table {}-{} due to error getting lookup type: {}",
+                                    larkFieldName, larkBaseId, larkTableId, e.getMessage());
+                            continue;
+                        }
                     }
                     else {
                         childUIType = field.getFormulaGlueCatalogUITypeEnum();

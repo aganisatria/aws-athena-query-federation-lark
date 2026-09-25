@@ -338,13 +338,12 @@ public class SearchApiFilterTranslatorTest {
 
         String filterJson = SearchApiFilterTranslator.toFilterJson(constraints, mappings);
 
-        assertNotNull(filterJson);
-        JsonNode filter = OBJECT_MAPPER.readTree(filterJson);
-        JsonNode conditions = filter.get("conditions");
-        assertEquals(1, conditions.size());
-        assertEquals("Checkbox Field", conditions.get(0).get("field_name").asText());
-        assertEquals("is", conditions.get(0).get("operator").asText());
-        assertEquals("true", conditions.get(0).get("value").get(0).asText());
+        // Regression test: CHECKBOX has no separate empty state in Lark - every row is genuinely true
+        // or false - so "IS NOT NULL" is a tautology that matches every row, not "equals true". This
+        // used to push `is true`, which silently excluded every `false` row from the result. No
+        // condition should be pushed at all; Athena's own engine applies the (always-true) check
+        // itself against the real materialized value.
+        assertEquals("", filterJson);
     }
 
     @Test
@@ -1186,6 +1185,22 @@ public class SearchApiFilterTranslatorTest {
         String existing = "{\"conjunction\":\"and\",\"conditions\":[]}";
         String result = SearchApiFilterTranslator.toSplitFilterJson(existing, 100, 0);
         assertEquals(existing, result);
+    }
+
+    @Test
+    public void testToSplitFilterJson_openEndedMaxValue_omitsUpperBound() throws Exception {
+        // Long.MAX_VALUE as endIndex signals "no upper bound" (used for the last parallel split, since
+        // $reserved_split_key can have gaps/exceed the row-count estimate after any row deletion) - only
+        // the lower-bound condition should be pushed, not a literal "isLessEqual 9223372036854775807".
+        String splitFilter = SearchApiFilterTranslator.toSplitFilterJson(null, 501, Long.MAX_VALUE);
+
+        assertNotNull(splitFilter);
+        JsonNode filter = OBJECT_MAPPER.readTree(splitFilter);
+        JsonNode conditions = filter.get("conditions");
+        assertEquals(1, conditions.size());
+        assertEquals("$reserved_split_key", conditions.get(0).get("field_name").asText());
+        assertEquals("isGreaterEqual", conditions.get(0).get("operator").asText());
+        assertEquals("501", conditions.get(0).get("value").get(0).asText());
     }
 
     // ========== Additional edge case tests ==========

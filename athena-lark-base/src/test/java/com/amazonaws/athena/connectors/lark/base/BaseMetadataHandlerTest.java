@@ -22,6 +22,7 @@ package com.amazonaws.athena.connectors.lark.base;
 import com.amazonaws.athena.connector.lambda.ThrottlingInvoker;
 import com.amazonaws.athena.connector.lambda.data.BlockAllocator;
 import com.amazonaws.athena.connector.lambda.data.BlockAllocatorImpl;
+import com.amazonaws.athena.connector.lambda.data.BlockWriter;
 import com.amazonaws.athena.connector.lambda.metadata.*;
 import com.amazonaws.athena.connector.lambda.security.EncryptionKeyFactory;
 import com.amazonaws.athena.connector.lambda.security.LocalKeyFactory;
@@ -47,6 +48,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static com.amazonaws.athena.connectors.lark.base.BaseConstants.PAGE_SIZE;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
@@ -173,6 +175,85 @@ public class BaseMetadataHandlerTest {
         catch (Exception e) {
             // Any other failure downstream (e.g. Glue fallback) is unrelated to the access-control guard.
         }
+    }
+
+    @Test
+    public void testDoGetTable_GlueHasTable_SkipsLarkSourceAndExperimentalProviders() {
+        // Regression test: doGetTable previously tried the Lark Base source and experimental providers
+        // BEFORE falling back to Glue, so every query against a crawler-populated table paid for two
+        // guaranteed-to-fail (or, for the experimental path, expensive false-positive) metadata
+        // resolution attempts - the exact class of problem already fixed for resolvePartitionInfo (see
+        // tryResolveFromCrawledSchemaMetadata) but left unaddressed here, where it actually first occurs.
+        // Deliberately NOT stubbing isActivateLarkBaseSource/isActivateLarkDriveSource/
+        // isActivateExperimentalFeatures: the whole point of this test is that the Glue-first shortcut
+        // returns before those flags are ever even checked. Mockito's strict stubbing would flag them
+        // as unnecessary if stubbed here, which is itself a nice confirmation the fix works.
+        when(mockEnvVarService.getWhitelistTables()).thenReturn("");
+        when(mockEnvVarService.getBlacklistTables()).thenReturn("");
+
+        software.amazon.awssdk.services.glue.model.StorageDescriptor storageDescriptor =
+                software.amazon.awssdk.services.glue.model.StorageDescriptor.builder()
+                        .columns(Collections.emptyList())
+                        .build();
+        software.amazon.awssdk.services.glue.model.Table glueTable =
+                software.amazon.awssdk.services.glue.model.Table.builder()
+                        .name("table1")
+                        .databaseName("schemaa")
+                        .storageDescriptor(storageDescriptor)
+                        .parameters(Collections.emptyMap())
+                        .build();
+        software.amazon.awssdk.services.glue.model.GetTableResponse glueApiResponse =
+                software.amazon.awssdk.services.glue.model.GetTableResponse.builder()
+                        .table(glueTable)
+                        .build();
+        when(mockGlueClient.getTable(any(software.amazon.awssdk.services.glue.model.GetTableRequest.class)))
+                .thenReturn(glueApiResponse);
+
+        com.amazonaws.athena.connector.lambda.security.FederatedIdentity identity =
+                new com.amazonaws.athena.connector.lambda.security.FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(identity, "queryId", "catalog",
+                new com.amazonaws.athena.connector.lambda.domain.TableName("schemaa", "table1"), Collections.emptyMap());
+
+        com.amazonaws.athena.connector.lambda.metadata.GetTableResponse response = handler.doGetTable(allocator, request);
+
+        assertNotNull(response);
+        assertNotNull(response.getSchema());
+        verifyNoInteractions(mockLarkSourceMetadataProvider);
+        verifyNoInteractions(mockExperimentalMetadataProvider);
+    }
+
+    @Test
+    public void testDoGetTable_GlueTableNotFound_FallsThroughToLarkSourceProvider() {
+        // The other half of the same fix: a table genuinely not in Glue (the "live Lark source, never
+        // crawled" deployment mode) must still fall through to the Lark Base source provider as before -
+        // the Glue-first shortcut should be a fast, cheap no-op for this case, not a dead end.
+        when(mockEnvVarService.getWhitelistTables()).thenReturn("");
+        when(mockEnvVarService.getBlacklistTables()).thenReturn("");
+        // isActivateLarkBaseSource() alone short-circuits the "isActivateLarkBaseSource() ||
+        // isActivateLarkDriveSource()" check below, so isActivateLarkDriveSource() is deliberately not
+        // stubbed here.
+        when(mockEnvVarService.isActivateLarkBaseSource()).thenReturn(true);
+        when(mockEnvVarService.isActivateExperimentalFeatures()).thenReturn(false);
+        when(mockGlueClient.getTable(any(software.amazon.awssdk.services.glue.model.GetTableRequest.class)))
+                .thenThrow(software.amazon.awssdk.services.glue.model.EntityNotFoundException.builder()
+                        .message("Table not found").build());
+        when(mockLarkSourceMetadataProvider.getTableSchema(any(GetTableRequest.class)))
+                .thenReturn(java.util.Optional.empty());
+
+        com.amazonaws.athena.connector.lambda.security.FederatedIdentity identity =
+                new com.amazonaws.athena.connector.lambda.security.FederatedIdentity("arn", "account", Collections.emptyMap(), Collections.emptyList(), Collections.emptyMap());
+        GetTableRequest request = new GetTableRequest(identity, "queryId", "catalog",
+                new com.amazonaws.athena.connector.lambda.domain.TableName("schemaa", "table1"), Collections.emptyMap());
+
+        com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException thrown =
+                assertThrows(com.amazonaws.athena.connector.lambda.exceptions.AthenaConnectorException.class,
+                        () -> handler.doGetTable(allocator, request));
+        // Same classification as the whitelist/blacklist "table not found" case - a raw, unclassified
+        // RuntimeException here would propagate without Athena's ENTITY_NOT_FOUND_EXCEPTION handling.
+        assertEquals(software.amazon.awssdk.services.glue.model.FederationSourceErrorCode.ENTITY_NOT_FOUND_EXCEPTION.toString(),
+                thrown.getErrorDetails().errorCode());
+
+        verify(mockLarkSourceMetadataProvider).getTableSchema(any(GetTableRequest.class));
     }
 
     @Test
@@ -326,6 +407,216 @@ public class BaseMetadataHandlerTest {
 
         assertFalse(result);
         verify(mockInvoker, never()).invoke(any());
+    }
+
+    @Test
+    public void testWriteSinglePartition_alwaysLooksUpRowCount_regardlessOfHasOrderByFlag() throws Exception {
+        // Athena's engine doesn't populate GetTableLayoutRequest's ORDER BY constraint - hasOrderBy is
+        // unreliable here (always false in practice) - so writeSinglePartition can't skip this lookup
+        // based on it. Verifies both flag values still take the real, unconditional lookup path.
+        java.lang.reflect.Method method = BaseMetadataHandler.class.getDeclaredMethod("writeSinglePartition",
+                BlockWriter.class, String.class, String.class, String.class, String.class, String.class,
+                String.class, long.class, boolean.class);
+        method.setAccessible(true);
+
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
+                        .items(Collections.emptyList())
+                        .hasMore(false)
+                        .total(10)
+                        .build())
+                .build();
+        when(mockInvoker.invoke(any())).thenReturn(response);
+
+        BlockWriter mockBlockWriter = mock(BlockWriter.class);
+        method.invoke(handler, mockBlockWriter, "base1", "tbl1", "", "", "{}", "{}", -1L, true);
+        method.invoke(handler, mockBlockWriter, "base1", "tbl1", "", "", "{}", "{}", -1L, false);
+
+        verify(mockInvoker, times(2)).invoke(any());
+        verify(mockBlockWriter, times(2)).writeRows(any());
+    }
+
+    @Test
+    public void testResolveOrderBySplitTotalRowCount_singlePartitionWithRawCount_reusesStoredValue() throws Exception {
+        // getPartitions already fetched this exact (filtered) count once via writeSinglePartition - reuse
+        // it instead of a second, identical Lark API round-trip.
+        int result = handler.resolveOrderBySplitTotalRowCount(true, 550, "base1", "tbl1", "");
+
+        assertEquals(550, result);
+        verify(mockInvoker, never()).invoke(any());
+    }
+
+    @Test
+    public void testResolveOrderBySplitTotalRowCount_singlePartitionWithZeroRawCount_reusesGenuineZero() throws Exception {
+        // 0 is a legitimate fetched count (a filter matching no rows), not the "unavailable" sentinel -
+        // must still be reused, not treated as missing.
+        int result = handler.resolveOrderBySplitTotalRowCount(true, 0, "base1", "tbl1", "");
+
+        assertEquals(0, result);
+        verify(mockInvoker, never()).invoke(any());
+    }
+
+    @Test
+    public void testResolveOrderBySplitTotalRowCount_parallelPlanned_fallsBackToFreshFetch() throws Exception {
+        // writeParallelPartitions stores an UNFILTERED count under the same property (wrong semantics to
+        // reuse whenever a filter is present), so a parallel-planned row 0 must never be trusted here -
+        // regardless of what value it carries (-1 sentinel in production, but the flag alone must gate this).
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
+                        .items(Collections.emptyList())
+                        .hasMore(false)
+                        .total(999)
+                        .build())
+                .build();
+        when(mockInvoker.invoke(any())).thenReturn(response);
+
+        int result = handler.resolveOrderBySplitTotalRowCount(false, -1, "base1", "tbl1", "");
+
+        assertEquals(999, result);
+        verify(mockInvoker, times(1)).invoke(any());
+    }
+
+    @Test
+    public void testResolveOrderBySplitTotalRowCount_rawCountUnavailable_fallsBackToFreshFetch() throws Exception {
+        // null means the property wasn't present on the partition schema at all (e.g. a version-mismatch
+        // edge case) - must not be confused with a genuinely-fetched zero.
+        SearchRecordsResponse response = (SearchRecordsResponse) SearchRecordsResponse.builder()
+                .data(SearchRecordsResponse.ListData.builder()
+                        .items(Collections.emptyList())
+                        .hasMore(false)
+                        .total(42)
+                        .build())
+                .build();
+        when(mockInvoker.invoke(any())).thenReturn(response);
+
+        int result = handler.resolveOrderBySplitTotalRowCount(true, null, "base1", "tbl1", "");
+
+        assertEquals(42, result);
+        verify(mockInvoker, times(1)).invoke(any());
+    }
+
+    @Test
+    public void testExceedsParallelSplitMappingBudget_smallMappingManySplits_staysUnderBudget() {
+        // A realistic mapping JSON for a modest table is a few dozen bytes, so even thousands of splits
+        // must not trip the safety budget.
+        boolean result = handler.exceedsParallelSplitMappingBudget(10_000, "{\"col1\":\"TEXT\"}", "{\"Col 1\":\"col1\"}");
+
+        assertFalse(result);
+    }
+
+    @Test
+    public void testExceedsParallelSplitMappingBudget_largeMappingManySplits_exceedsBudget() {
+        // A wide table (many columns, e.g. long Chinese field names) producing a several-KB mapping JSON,
+        // duplicated across a few thousand splits, must trip the budget rather than risk Lambda's ~6MB
+        // synchronous response payload limit.
+        String largeTypeMapping = "a".repeat(3000);
+        String largeNameMapping = "b".repeat(3000);
+
+        boolean result = handler.exceedsParallelSplitMappingBudget(1000, largeTypeMapping, largeNameMapping);
+
+        assertTrue(result);
+    }
+
+    @Test
+    public void testExceedsParallelSplitMappingBudget_exactlyAtBudget_doesNotExceed() {
+        String typeMapping = "a".repeat(2000);
+        String nameMapping = "b".repeat(2000);
+
+        // bytesPerSplit (4000) * numSplits (1000) == MAX_PARALLEL_SPLIT_MAPPING_BYTES (4_000_000) exactly.
+        boolean result = handler.exceedsParallelSplitMappingBudget(1000, typeMapping, nameMapping);
+
+        assertFalse(result);
+    }
+
+    @Test
+    public void testExceedsParallelSplitMappingBudget_oneSplitOverBudget_exceeds() {
+        String typeMapping = "a".repeat(2000);
+        String nameMapping = "b".repeat(2000);
+
+        // One split beyond the exact-budget case pushes the projected total just past the limit.
+        boolean result = handler.exceedsParallelSplitMappingBudget(1001, typeMapping, nameMapping);
+
+        assertTrue(result);
+    }
+
+    @Test
+    public void testExceedsParallelSplitMappingBudget_nullMappingJson_treatedAsZeroBytesNotNpe() {
+        boolean result = handler.exceedsParallelSplitMappingBudget(Integer.MAX_VALUE, null, null);
+
+        assertFalse(result);
+    }
+
+    @Test
+    public void testComputeParallelSplitEndIndex_lastSplit_isOpenEnded() {
+        // $reserved_split_key is a user-populated auto-number field whose values can have gaps or exceed
+        // the row-count estimate once any row has ever been deleted. The last split must stay open-ended
+        // (Long.MAX_VALUE) so it still covers every row above its start index regardless of gaps, rather
+        // than silently excluding rows with a higher key value than the stale row-count-based estimate.
+        long endIndex = handler.computeParallelSplitEndIndex(4, 5, 2500);
+
+        assertEquals(Long.MAX_VALUE, endIndex);
+    }
+
+    @Test
+    public void testComputeParallelSplitEndIndex_lastSplit_singleSplitTotal_isOpenEnded() {
+        // A single-split "parallel" plan (numSplits == 1) is still the last split - it must cover the
+        // whole table's key range, not just [1, PAGE_SIZE].
+        long endIndex = handler.computeParallelSplitEndIndex(0, 1, 50);
+
+        assertEquals(Long.MAX_VALUE, endIndex);
+    }
+
+    @Test
+    public void testComputeParallelSplitEndIndex_nonLastSplit_boundedByPageSize() {
+        // Every split except the last is still sized normally off PAGE_SIZE, preserving parallelism.
+        long endIndex = handler.computeParallelSplitEndIndex(0, 5, 2500);
+
+        assertEquals(PAGE_SIZE, endIndex);
+    }
+
+    @Test
+    public void testComputeParallelSplitEndIndex_nonLastSplit_boundedByEffectiveRowCount() {
+        // A non-last split's bound is still clamped to effectiveRowCount when that's smaller than a full
+        // page (e.g. a LIMIT reduced the effective row count below what raw split-index math would give).
+        long endIndex = handler.computeParallelSplitEndIndex(0, 2, 300);
+
+        assertEquals(300, endIndex);
+    }
+
+    @Test
+    public void testCalculateOrderBySplitSizing_limitZero_requestsOneRowNotWholeTable() {
+        // Regression test: a bare `limit > 0` check used to treat LIMIT 0 (SELECT ... ORDER BY x LIMIT 0
+        // - a valid, if unusual, query) the same as "no LIMIT at all", fetching and sorting the entire
+        // table via Lark's Search API for zero requested rows. Requesting 1 row (not 0 - BaseRecordHandler's
+        // own row-count cap checks treat 0 as "unbounded" too) caps the real fetch to a single small page.
+        software.amazon.awssdk.utils.Pair<Integer, Integer> sizing = handler.calculateOrderBySplitSizing(0, 550);
+
+        assertEquals(1, sizing.left().intValue());
+        assertEquals(1, sizing.right().intValue());
+    }
+
+    @Test
+    public void testCalculateOrderBySplitSizing_noLimit_usesPageSizeAndTotalRowCount() {
+        software.amazon.awssdk.utils.Pair<Integer, Integer> sizing = handler.calculateOrderBySplitSizing(-1, 550);
+
+        assertEquals(PAGE_SIZE, sizing.left().intValue());
+        assertEquals(550, sizing.right().intValue());
+    }
+
+    @Test
+    public void testCalculateOrderBySplitSizing_limitSmallerThanTotal_usesLimit() {
+        software.amazon.awssdk.utils.Pair<Integer, Integer> sizing = handler.calculateOrderBySplitSizing(10, 550);
+
+        assertEquals(10, sizing.left().intValue());
+        assertEquals(10, sizing.right().intValue());
+    }
+
+    @Test
+    public void testCalculateOrderBySplitSizing_limitLargerThanTotal_usesTotalRowCount() {
+        software.amazon.awssdk.utils.Pair<Integer, Integer> sizing = handler.calculateOrderBySplitSizing(1000, 550);
+
+        assertEquals(PAGE_SIZE, sizing.left().intValue());
+        assertEquals(550, sizing.right().intValue());
     }
 
     @Test

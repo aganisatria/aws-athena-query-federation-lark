@@ -32,6 +32,7 @@ import com.amazonaws.athena.connector.lambda.data.writers.holders.NullableVarCha
 import com.amazonaws.athena.connectors.lark.base.model.NestedUIType;
 import com.amazonaws.athena.connectors.lark.base.model.enums.UITypeEnum;
 import com.amazonaws.athena.connectors.lark.base.resolver.LarkBaseFieldResolver;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.arrow.vector.holders.NullableBigIntHolder;
 import org.apache.arrow.vector.holders.NullableBitHolder;
 import org.apache.arrow.vector.holders.NullableDateMilliHolder;
@@ -68,6 +69,7 @@ public class RegistererExtractor
     private static final long TIMESTAMP_MILLIS_THRESHOLD = 10_000_000_000L; // ~March 1973
     private static final long TIMESTAMP_SECONDS_THRESHOLD = 100_000;
     private static final long SECONDS_TO_MILLIS = 1000L;
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private final Map<String, NestedUIType> larkFieldTypeMapping;
 
@@ -293,6 +295,33 @@ public class RegistererExtractor
             try {
                 // Unwrap FORMULA fields first
                 Object unwrappedValue = unwrapFormula(rawValue, larkTypeInfo);
+
+                // unwrapFormula can itself return null: for a FORMULA field, Lark's {type, value: [...]}
+                // wrapper's first element can genuinely be null (e.g. a formula like
+                // IF(cond, linked_record, BLANK()) evaluating to blank for this row), and unwrapFormula
+                // returns that element as-is with no null-check. Without this check, none of the
+                // instanceof branches below match null, so outputValue falls through to the
+                // String.valueOf(unwrappedValue) fallback - and String.valueOf(null) returns the literal
+                // 4-character string "null", not a null reference, silently writing that text into the
+                // column instead of leaving it as SQL NULL.
+                if (unwrappedValue == null) {
+                    return;
+                }
+
+                // BaseConstants.DOES_ACTIVATE_COMPLEX_TYPE_AS_JSON_STRING_ENV_VAR redirects what would
+                // otherwise be a List/Struct-shaped column (MULTI_SELECT, USER, ATTACHMENT, URL, ...) to
+                // VARCHAR at the schema level, so this extractor is now the one that runs for those raw
+                // Map/List values too. Dispatch on the field's REAL declared UI type (not the value's
+                // shape) before any of the TEXT-specific branches below - URL's own raw shape
+                // ({"link":..., "text":..., "type":...}) would otherwise collide with the "TEXT field with
+                // a single map" heuristic and silently discard everything but the "text" value.
+                UITypeEnum effectiveUiType = larkTypeInfo != null && larkTypeInfo.uiType() == UITypeEnum.FORMULA
+                        ? larkTypeInfo.childType() : (larkTypeInfo != null ? larkTypeInfo.uiType() : null);
+                if (effectiveUiType != null && effectiveUiType.isComplexContainerType()) {
+                    dst.value = JSON_MAPPER.writeValueAsString(unwrappedValue);
+                    dst.isSet = 1;
+                    return;
+                }
 
                 if (unwrappedValue instanceof String) {
                     outputValue = (String) unwrappedValue;
@@ -534,6 +563,39 @@ public class RegistererExtractor
         return wrapped;
     }
 
+    /**
+     * Extracts the display text from one linked record's raw per-element value for a LOOKUP&lt;Text&gt;
+     * field. Lark represents a Text cell as either a single segment {@code Map} ({@code {"text": "...",
+     * "type": "text"}}) or, when the cell mixes plain text with @mentions/links, a {@code List} of
+     * several segment Maps that must be concatenated - the identical shape and reasoning already
+     * handled for a direct TEXT field in the VarChar extractor above. Handling only the single-Map shape
+     * here previously meant a linked record's text was silently dropped from the resulting array
+     * whenever its target field happened to contain mentions/rich content, with no error or log line.
+     *
+     * @return The segment's display text, or null if the element doesn't match either known shape (or
+     * yields no text), so the caller's {@code filter(Objects::nonNull)} drops it - preserving the prior
+     * behavior for anything genuinely unrecognized.
+     */
+    private static String extractLookupTextSegment(Object element)
+    {
+        if (element instanceof Map<?, ?> mapElement) {
+            return mapElement.containsKey("text") ? String.valueOf(mapElement.get("text")) : null;
+        }
+        if (element instanceof List<?> segments) {
+            StringBuilder builder = new StringBuilder();
+            for (Object segment : segments) {
+                if (segment instanceof Map<?, ?> segmentMap && segmentMap.containsKey("text")) {
+                    Object textVal = segmentMap.get("text");
+                    if (textVal != null) {
+                        builder.append(textVal);
+                    }
+                }
+            }
+            return !builder.isEmpty() ? builder.toString() : null;
+        }
+        return null;
+    }
+
     private void registerListFieldWriterFactory(GeneratedRowWriter.RowWriterBuilder rowWriterBuilder, Field field)
     {
         LarkBaseFieldResolver resolver = new LarkBaseFieldResolver();
@@ -552,6 +614,19 @@ public class RegistererExtractor
 
                     // Unwrap FORMULA fields first
                     Object unwrappedValue = unwrapFormula(rawListValue, larkTypeInfo);
+
+                    // unwrapFormula can itself return null: for a FORMULA field, Lark's {type, value: [...]}
+                    // wrapper's first element can genuinely be null (e.g. a formula like
+                    // IF(cond, linked_record, BLANK()) evaluating to blank for this row), and unwrapFormula
+                    // returns that element as-is with no null-check. Without this check, the `else` branch
+                    // below (the catch-all for "not List, not Map, not String") would call
+                    // unwrappedValue.getClass() on a null reference and throw a NullPointerException,
+                    // which propagates out of this row-writer lambda and silently drops the entire row
+                    // (caught generically by BaseRecordHandler's per-row try/catch), not just this column.
+                    if (unwrappedValue == null) {
+                        BlockUtils.setComplexValue(vector, rowNum, resolver, null);
+                        return true;
+                    }
 
                     // Handle case where Lark API returns Map or String instead of List for LINK/LOOKUP fields
                     List<?> listValue;
@@ -585,11 +660,7 @@ public class RegistererExtractor
                             larkTypeInfo.childType() == UITypeEnum.TEXT &&
                             field.getChildren().get(0).getType() instanceof ArrowType.Utf8) {
                         processedList = listValue.stream()
-                                .filter(element -> element instanceof Map)
-                                .map(element -> {
-                                    Map<?, ?> mapElement = (Map<?, ?>) element;
-                                    return mapElement.containsKey("text") ? String.valueOf(mapElement.get("text")) : null;
-                                })
+                                .map(RegistererExtractor::extractLookupTextSegment)
                                 .filter(Objects::nonNull)
                                 .collect(Collectors.toList());
                         logger.trace("FieldWriterFactory for Lookup<Text> field '{}': Transformed List<Map> to List<String>: {}", fieldName, processedList);
@@ -626,6 +697,19 @@ public class RegistererExtractor
 
                     // Unwrap FORMULA fields first
                     Object unwrappedValue = unwrapFormula(rawStructValue, larkTypeInfo);
+
+                    // unwrapFormula can itself return null: for a FORMULA field, Lark's {type, value: [...]}
+                    // wrapper's first element can genuinely be null (e.g. a formula like
+                    // IF(cond, linked_record, BLANK()) evaluating to blank for this row), and unwrapFormula
+                    // returns that element as-is with no null-check. Without this check, the
+                    // "!(unwrappedValue instanceof Map)" branch below would call unwrappedValue.getClass()
+                    // on a null reference and throw a NullPointerException, which propagates out of this
+                    // row-writer lambda and silently drops the entire row (caught generically by
+                    // BaseRecordHandler's per-row try/catch), not just this column.
+                    if (unwrappedValue == null) {
+                        BlockUtils.setComplexValue(vector, rowNum, resolver, null);
+                        return true;
+                    }
 
                     if (!(unwrappedValue instanceof Map)) {
                         logger.error("FieldWriterFactory for Struct field '{}': Expected Map, got {}. Writing null.",

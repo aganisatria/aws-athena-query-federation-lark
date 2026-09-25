@@ -151,6 +151,21 @@ All Lark Base field types are supported:
 ### Known Limitations
 
 - **NUMBER field precision**: Lark Base stores `Number` field values as IEEE 754 double-precision floats, which only preserve about 15-17 significant digits. Values that exceed this (e.g. bank card numbers, long numeric IDs) are silently rounded by Lark Base itself - trailing digits are replaced with zeros - before the data ever reaches this connector. This is a Lark Base platform limitation, not a connector bug, and it cannot be corrected downstream by the connector. Per [Lark's own documentation](https://www.larksuite.com/hc/en-US/articles/890398616778-base-limits-faqs): *"To record information containing large numbers, such as bank card numbers, use the text field."* If you need exact large numbers or high-precision decimals, store them in a `Text` field in Lark Base instead of a `Number` field.
+- **`WHERE` constraints on List/Struct-typed columns crash the query**: any `WHERE` clause that references a column whose type is array/struct-shaped - `Multi Select`, `User`, `Attachment`, `Url`, `Location`, `Single Link`, `Duplex Link`, `Group Chat`, `Lookup`, `Created User`, `Modified User`, or a `Formula`/`Lookup` that resolves to one of these - fails the whole query with `GENERIC_INTERNAL_ERROR: java.lang.RuntimeException: java.lang.IllegalArgumentException: Lists have one child Field. Found: none`, even for the simplest case (`IS NOT NULL`). This reproduces regardless of the column's declared nullability and regardless of this connector's advertised filter-pushdown capabilities (both were tested and ruled out) - it happens inside Amazon Athena's own managed query engine, before this connector's Lambda ever receives a `GetSplitsRequest` or `ReadRecordsRequest`, so nothing in this connector's code can intercept or work around it. It is a platform-level limitation of Amazon Athena Federated Query's handling of complex (List/Struct) column types in predicates, not a bug in this connector. **Workaround options**: (1) don't filter on these columns directly - select the column without a `WHERE` clause on it, or filter on a related scalar column instead (unconstrained `SELECT *` and constraints on scalar columns both work normally); or (2) set `default_does_activate_complex_type_as_json_string=true` (on **both** the connector and crawler Lambdas - see below) to represent these columns as a JSON string instead, which sidesteps the crash entirely at the cost of losing native array/struct access in Athena.
+
+#### Opt-in: representing List/Struct columns as JSON strings
+
+Setting the environment variable `default_does_activate_complex_type_as_json_string=true` on both the connector (`athena-lark-base`) and crawler (`glue-lark-base-crawler`) Lambdas changes every column that would otherwise be array/struct-shaped (`Multi Select`, `User`, `Attachment`, `Url`, `Location`, `Single Link`, `Duplex Link`, `Group Chat`, `Lookup`, `Created User`, `Modified User`, and any `Formula`/`Lookup` resolving to one of these) into a plain `VARCHAR`/`string` column holding a JSON-serialized representation of the same value instead. This is **opt-in and off by default** - existing tables/queries that rely on List/Struct-typed columns are completely unaffected unless you explicitly set this.
+
+Because the column becomes a normal string instead of a List/Struct type, `WHERE` constraints (including `IS NOT NULL`) on it work exactly like any other text column - Athena's engine no longer touches the crashing code path at all. To parse the JSON back out in a query, use Athena/Trino's `json_extract`/`json_extract_scalar` functions, e.g.:
+
+```sql
+SELECT json_extract_scalar(field_user, '$[0].name') AS assignee_name
+FROM my_table
+WHERE field_user IS NOT NULL
+```
+
+**For a crawler-populated (Glue-backed) table, setting this on the crawler alone is sufficient** - it decides both the *stored* Glue column type and the original Lark field type recorded in the column's comment (which the connector always reads back correctly regardless of its own setting), so the connector's own copy of this variable is not consulted for a Glue-backed table at all. Only set it on the connector too if you *also* use the live (non-crawled) Lark source or experimental discovery path, where the connector builds its own schema directly - there, only the connector's setting matters, and the crawler isn't involved. Toggling this on a table that already exists changes its column type on the next crawl/query - existing queries or dashboards built against the array/struct shape will need updating to the JSON-string shape (or you can leave the setting off and use the workaround above instead). (Live-verified: enabling this on the crawler only, with the connector's copy left unset, correctly let `WHERE ... IS NOT NULL` succeed on a re-crawled table.)
 
 ## Architecture
 
@@ -215,6 +230,7 @@ JAVA_HOME="/path/to/jdk-17" mvn checkstyle:check
 | `LARK_LOOKUP_MAX_DEPTH` | No | Max hops followed when resolving a chained LOOKUP field's type (default: 20). Also caps runaway resolution if a Lark Base has a misconfigured circular LOOKUP reference |
 | `WHITELIST_TABLES` | No | Restricts, per schema, which tables the connector exposes. Format: `schemaName:tableName,schemaName:tableName2,...`. A schema with no entries here is unrestricted by this setting |
 | `BLACKLIST_TABLES` | No | Excludes, per schema, specific tables from the connector regardless of `WHITELIST_TABLES`. Same format. A table listed here is never visible or queryable (blocked in both `SHOW TABLES` and direct `SELECT`) |
+| `default_does_activate_complex_type_as_json_string` | No | Represents List/Struct-shaped columns (Multi Select, User, Attachment, Url, Location, Single/Duplex Link, Group Chat, Lookup, Created/Modified User, ...) as a JSON string instead, sidestepping the `WHERE`-on-List/Struct crash documented under [Known Limitations](#known-limitations). For a crawler-populated table, setting this on the **crawler alone** is sufficient (see below); the connector's own copy only matters for a live/experimental (non-crawled) source. Off by default |
 
 See [ARCHITECTURE.md#Configuration](./ARCHITECTURE.md#configuration) for complete reference.
 
@@ -431,6 +447,12 @@ ORDER BY created_date DESC LIMIT 100;
 3. RegistererExtractor implementation for the field type
 
 **Reference**: [DIAGRAMS.md#Class-Hierarchy](./DIAGRAMS.md#class-hierarchy)
+
+### Issue: `GENERIC_INTERNAL_ERROR: ... IllegalArgumentException: Lists have one child Field. Found: none`
+
+This is not a connector bug - see [Known Limitations](#known-limitations) above. It happens whenever a `WHERE` clause references a List/Struct-typed column (Multi Select, User, Attachment, Url, Location, Single/Duplex Link, Group Chat, Lookup, Created/Modified User, or a Formula/Lookup resolving to one of these), inside Amazon Athena's own query engine before this connector's Lambda is ever invoked for splits or records.
+
+**Fix**: remove the `WHERE` condition on that column (filter on a scalar column instead, or drop the filter and post-filter client-side).
 
 ## Common Development Scenarios
 

@@ -25,10 +25,10 @@ import com.amazonaws.glue.lark.base.crawler.model.response.ListFieldResponse;
 import com.amazonaws.glue.lark.base.crawler.model.response.SearchRecordsResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.HttpEntity;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -60,13 +60,13 @@ public class LarkBaseServiceTest {
     private LarkBaseService larkBaseService = new LarkBaseService(TEST_APP_ID, TEST_APP_SECRET);
 
     @Mock
-    private HttpClient mockHttpClient;
+    private CloseableHttpClient mockHttpClient;
 
     @Mock
     private ObjectMapper mockObjectMapper;
 
     @Mock
-    private HttpResponse mockHttpResponse;
+    private CloseableHttpResponse mockHttpResponse;
 
     @Mock
     private HttpEntity mockHttpEntity;
@@ -142,6 +142,54 @@ public class LarkBaseServiceTest {
         assertTrue(capturedRequests.get(0).getURI().toString().contains("page_size=" + larkBaseService.pageSize));
         assertFalse(capturedRequests.get(0).getURI().toString().contains("page_token"));
         assertTrue(capturedRequests.get(1).getURI().toString().contains("page_token=page_token_2"));
+    }
+
+    @Test
+    public void listTables_rateLimited_thenSucceeds_retriesTransparently() throws Exception {
+        // Regression test for the crawler having zero rate-limit retry/backoff: before ThrottlingRetry
+        // existed, a single throttled page fetch failed the whole listTables call (and, via the
+        // per-table isolation in BaseLarkBaseCrawlerHandler, silently dropped that table/database from
+        // the crawl) instead of ever being retried.
+        String baseId = "baseRateLimited";
+        String rateLimitedJson = "{\"code\":1254290, \"msg\":\"TooManyRequest\"}";
+        String successJson = "{\"code\":0, \"msg\":\"success\", \"data\":{\"items\":[{\"table_id\":\"tbl1\",\"name\":\"table_1\"}],\"has_more\":false}}";
+
+        // Zero delays so the test runs fast while still exercising the real retry loop.
+        larkBaseService.retry = new com.amazonaws.glue.lark.base.crawler.util.ThrottlingRetry(0, 0, 0.5, 0, 60_000);
+
+        when(mockHttpClient.execute(any(HttpGet.class))).thenReturn(mockHttpResponse);
+        when(mockHttpResponse.getEntity()).thenReturn(mockHttpEntity);
+        when(mockHttpEntity.getContent())
+                .thenReturn(new ByteArrayInputStream(rateLimitedJson.getBytes()))
+                .thenReturn(new ByteArrayInputStream(successJson.getBytes()));
+
+        List<ListAllTableResponse.BaseItem> result = larkBaseService.listTables(baseId);
+
+        assertEquals(1, result.size());
+        assertEquals("tbl1", result.get(0).getTableId());
+        verify(mockHttpClient, times(2)).execute(any(HttpGet.class));
+    }
+
+    @Test
+    public void listTables_nonThrottlingApiError_doesNotRetry() throws Exception {
+        // A genuine (non-throttling) API error must fail immediately, not be retried - confirms
+        // ThrottlingRetry's filter is selective, not a blanket retry-everything wrapper.
+        String baseId = "baseApiError";
+        String errorJson = "{\"code\":10001, \"msg\":\"API Error\"}";
+
+        larkBaseService.retry = new com.amazonaws.glue.lark.base.crawler.util.ThrottlingRetry(0, 0, 0.5, 0, 60_000);
+
+        when(mockHttpClient.execute(any(HttpGet.class))).thenReturn(mockHttpResponse);
+        when(mockHttpResponse.getEntity()).thenReturn(mockHttpEntity);
+        when(mockHttpEntity.getContent()).thenReturn(new ByteArrayInputStream(errorJson.getBytes()));
+
+        try {
+            larkBaseService.listTables(baseId);
+            fail("Expected a RuntimeException for a non-throttling API error");
+        }
+        catch (RuntimeException e) {
+            verify(mockHttpClient, times(1)).execute(any(HttpGet.class));
+        }
     }
 
     @Test(expected = RuntimeException.class)
@@ -288,12 +336,48 @@ public class LarkBaseServiceTest {
         larkBaseService.sanitizeRecords(records);
     }
 
-    @Test(expected = RuntimeException.class)
+    @Test
     public void sanitizeRecords_nullName_shouldThrowException() {
+        // Regression test: this used to be `@Test(expected = RuntimeException.class)`, which also
+        // passes for a raw NullPointerException - masking a real bug where a null record name crashed
+        // inside Util.sanitizeGlueRelatedName (called unconditionally before this method's own
+        // null-field validation ever ran) instead of surfacing the intended, actionable
+        // "Null record fields found null fields: [name]" message. Asserting the message, not just the
+        // exception type, is what would have caught it.
         List<LarkDatabaseRecord> records = Collections.singletonList(
                 new LarkDatabaseRecord("id1", null)
         );
-        larkBaseService.sanitizeRecords(records);
+        try {
+            larkBaseService.sanitizeRecords(records);
+            fail("Expected a RuntimeException for a null record name");
+        }
+        catch (NullPointerException e) {
+            fail("sanitizeRecords should report a null name via its own validation message, " +
+                    "not crash with a raw NullPointerException: " + e);
+        }
+        catch (RuntimeException e) {
+            assertTrue("Unexpected exception message: " + e.getMessage(),
+                    e.getMessage() != null && e.getMessage().contains("Null record fields"));
+        }
+    }
+
+    @Test
+    public void sanitizeRecords_multipleNullNames_reportsAsNullFieldsNotDuplicates() {
+        // Two blank-name rows sanitize to the same (null) name, which - if the duplicate-name check
+        // ran before the null-fields check - would be misreported as a "duplicate name" instead of the
+        // more specific and actionable "null fields" error. The null-fields check must run first.
+        List<LarkDatabaseRecord> records = Arrays.asList(
+                new LarkDatabaseRecord("id1", null),
+                new LarkDatabaseRecord("id2", null)
+        );
+        try {
+            larkBaseService.sanitizeRecords(records);
+            fail("Expected a RuntimeException for null record names");
+        }
+        catch (RuntimeException e) {
+            assertTrue("Expected a null-fields error, got: " + e.getMessage(),
+                    e.getMessage() != null && e.getMessage().contains("Null record fields"));
+        }
     }
 
     @Test

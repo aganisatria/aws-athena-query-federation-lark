@@ -225,6 +225,67 @@ class ListFieldResponseTest {
     }
 
     @Test
+    void testGetFormulaGlueCatalogUITypeEnum_FormulaWithoutUITypeButWithDataTypeUser() {
+        // Arrange & Act - regression test for a FORMULA field whose Lark metadata omits "ui_type"
+        // entirely (e.g. a formula that's a bare reference to another field, "$field[fldXXX]") and
+        // gives only the numeric "data_type" code. Before the fix, this always fell back to TEXT,
+        // corrupting a Formula<User> into a flattened string instead of resolving to USER.
+        ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder()
+                .fieldId("fld1")
+                .fieldName("Formula Field")
+                .uiType("Formula")
+                .property(Map.of("type", Map.of("data_type", 11)))
+                .build();
+
+        // Assert
+        assertThat(item.getFormulaGlueCatalogUITypeEnum()).isEqualTo(UITypeEnum.USER);
+    }
+
+    @Test
+    void testGetFormulaGlueCatalogUITypeEnum_FormulaWithoutUITypeButWithDataTypeAttachment() {
+        // Arrange & Act
+        ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder()
+                .fieldId("fld1")
+                .fieldName("Formula Field")
+                .uiType("Formula")
+                .property(Map.of("type", Map.of("data_type", 17)))
+                .build();
+
+        // Assert
+        assertThat(item.getFormulaGlueCatalogUITypeEnum()).isEqualTo(UITypeEnum.ATTACHMENT);
+    }
+
+    @Test
+    void testGetFormulaGlueCatalogUITypeEnum_FormulaWithoutUITypeButWithUnmappedDataType() {
+        // Arrange & Act - an unrecognized numeric code should resolve to UNKNOWN (which the
+        // Arrow/Glue type-mapping layers already default to VARCHAR/string), not silently claim TEXT.
+        ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder()
+                .fieldId("fld1")
+                .fieldName("Formula Field")
+                .uiType("Formula")
+                .property(Map.of("type", Map.of("data_type", 9999)))
+                .build();
+
+        // Assert
+        assertThat(item.getFormulaGlueCatalogUITypeEnum()).isEqualTo(UITypeEnum.UNKNOWN);
+    }
+
+    @Test
+    void testGetFormulaGlueCatalogUITypeEnum_FormulaWithoutUITypeAndNonNumericDataType() {
+        // Arrange & Act - a malformed/unexpected "data_type" (not a number) should still fall back
+        // to TEXT rather than throw a ClassCastException.
+        ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder()
+                .fieldId("fld1")
+                .fieldName("Formula Field")
+                .uiType("Formula")
+                .property(Map.of("type", Map.of("data_type", "not_a_number")))
+                .build();
+
+        // Assert
+        assertThat(item.getFormulaGlueCatalogUITypeEnum()).isEqualTo(UITypeEnum.TEXT);
+    }
+
+    @Test
     void testGetFormulaGlueCatalogUITypeEnum_FormulaWithNumber() {
         // Arrange & Act
         ListFieldResponse.FieldItem item = ListFieldResponse.FieldItem.builder()

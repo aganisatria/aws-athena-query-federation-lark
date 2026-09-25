@@ -160,7 +160,16 @@ public final class ListFieldResponse extends BaseResponse<ListFieldResponse.List
 
                 Map<String, Object> typeMap = (Map<String, Object>) typeObj;
 
-                if (!typeMap.containsKey("ui_type")) {
+                if (!typeMap.containsKey("ui_type") || typeMap.get("ui_type") == null) {
+                    // Some FORMULA fields (observed for a formula that is a bare reference to another
+                    // field, e.g. "$field[fldXXX]", with no wrapping function) omit the "ui_type" string
+                    // entirely and give only the numeric "data_type" code. Falling straight to TEXT here
+                    // (as before) silently corrupted structural targets (User, Attachment, GroupChat, ...)
+                    // into a flattened string instead of resolving to their real LIST/STRUCT shape.
+                    Object dataType = typeMap.get("data_type");
+                    if (dataType instanceof Number) {
+                        return UITypeEnum.fromDataTypeCode(((Number) dataType).intValue());
+                    }
                     return UITypeEnum.TEXT;
                 }
 
