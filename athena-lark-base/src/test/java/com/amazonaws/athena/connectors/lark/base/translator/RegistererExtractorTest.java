@@ -1563,7 +1563,10 @@ public class RegistererExtractorTest {
 
             boolean result = writer.write(context, 0);
 
-            assertFalse(result);
+            // A write failure for this one column must not drop the whole row from the result - the row is
+            // still written, with this column left as SQL NULL (matching the other defensive branches in
+            // this same method).
+            assertTrue(result);
             // Verify it tried twice - once with the list (threw exception), once with null (succeeded)
             blockUtilsMock.verify(() -> BlockUtils.setComplexValue(any(), anyInt(), any(), any()), times(2));
         }
@@ -1646,6 +1649,146 @@ public class RegistererExtractorTest {
                 Object inner = ((List<?>) arg).get(0);
                 return inner instanceof List && ((List<?>) inner).size() == 1 && mapValue.equals(((List<?>) inner).get(0));
             })));
+        }
+    }
+
+    @Test
+    public void testListFieldWriterFactory_withPartiallyFlattenedList_wrapsBareMapElement() throws Exception {
+        // A real LOOKUP<User> with multiple linked records (e.g. Lookup<User> aggregating several linked
+        // rows) produces an outer List that IS correctly a List - unlike the single-linked-record case
+        // above, which collapses the WHOLE field to a bare scalar. Lark can still flatten an INDIVIDUAL
+        // element within that correctly-shaped outer List: a linked record whose User target has exactly
+        // one person comes back as a bare Map for that element, not a one-element List<Map>, while a
+        // different linked record in the same row correctly comes back as a List<Map>. Before this fix,
+        // writing the unwrapped bare Map as a list element threw a ClassCastException deep in Arrow's own
+        // generic list writer ("LinkedHashMap cannot be cast to List"), which this method's own catch block
+        // then silently excluded the WHOLE ROW for (see testListFieldWriterFactory_withException) - not
+        // just this one malformed-looking element, even though the data was genuinely valid.
+        ArgumentCaptor<FieldWriterFactory> factoryCaptor = ArgumentCaptor.forClass(FieldWriterFactory.class);
+        Field structField = new Field("user_info", FieldType.nullable(ArrowType.Struct.INSTANCE),
+                Collections.singletonList(new Field("id", FieldType.nullable(new ArrowType.Utf8()), null)));
+        Field innerListField = new Field("item", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(structField));
+        Field outerListField = new Field("user", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(innerListField));
+        Schema schema = new Schema(Collections.singletonList(outerListField));
+
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, schema);
+        verify(mockRowWriterBuilder).withFieldWriterFactory(eq("user"), factoryCaptor.capture());
+
+        FieldWriterFactory factory = factoryCaptor.getValue();
+        FieldVector mockVector = mock(FieldVector.class);
+        Extractor mockExtractor = mock(Extractor.class);
+
+        try (MockedStatic<BlockUtils> blockUtilsMock = mockStatic(BlockUtils.class)) {
+            FieldWriter writer = factory.create(mockVector, mockExtractor, null);
+
+            Map<String, Object> properlyNestedPerson = new HashMap<>();
+            properlyNestedPerson.put("id", "ou_properly_nested");
+            Map<String, Object> flattenedPerson = new HashMap<>();
+            flattenedPerson.put("id", "ou_flattened");
+
+            // Two linked records: the first already List<Map> (correctly shaped), the second a bare Map.
+            List<Object> rawOuterList = Arrays.asList(
+                    Collections.singletonList(properlyNestedPerson),
+                    flattenedPerson);
+            Map<String, Object> context = new HashMap<>();
+            context.put("user", rawOuterList);
+
+            boolean result = writer.write(context, 0);
+
+            assertTrue(result);
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), argThat(arg -> {
+                if (!(arg instanceof List) || ((List<?>) arg).size() != 2) {
+                    return false;
+                }
+                List<?> outer = (List<?>) arg;
+                Object first = outer.get(0);
+                Object second = outer.get(1);
+                return first instanceof List && ((List<?>) first).size() == 1 && properlyNestedPerson.equals(((List<?>) first).get(0))
+                        && second instanceof List && ((List<?>) second).size() == 1 && flattenedPerson.equals(((List<?>) second).get(0));
+            })));
+        }
+    }
+
+    @Test
+    public void testListFieldWriterFactory_withPartiallyFlattenedList_wrapsBareStringElement() throws Exception {
+        // Same shape mismatch as the Map case above, but for a LIST-shaped target whose own element is a
+        // scalar rather than a struct (e.g. a LOOKUP<MultiSelect> aggregating several linked records,
+        // where one linked record has exactly one selected option and comes back as a bare String).
+        ArgumentCaptor<FieldWriterFactory> factoryCaptor = ArgumentCaptor.forClass(FieldWriterFactory.class);
+        Field innerListField = new Field("item", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(new Field("item", FieldType.nullable(new ArrowType.Utf8()), null)));
+        Field outerListField = new Field("tags", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(innerListField));
+        Schema schema = new Schema(Collections.singletonList(outerListField));
+
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, schema);
+        verify(mockRowWriterBuilder).withFieldWriterFactory(eq("tags"), factoryCaptor.capture());
+
+        FieldWriterFactory factory = factoryCaptor.getValue();
+        FieldVector mockVector = mock(FieldVector.class);
+        Extractor mockExtractor = mock(Extractor.class);
+
+        try (MockedStatic<BlockUtils> blockUtilsMock = mockStatic(BlockUtils.class)) {
+            FieldWriter writer = factory.create(mockVector, mockExtractor, null);
+
+            List<Object> rawOuterList = Arrays.asList(
+                    Collections.singletonList("multi-option-record"),
+                    "single-option-record");
+            Map<String, Object> context = new HashMap<>();
+            context.put("tags", rawOuterList);
+
+            boolean result = writer.write(context, 0);
+
+            assertTrue(result);
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), argThat(arg -> {
+                if (!(arg instanceof List) || ((List<?>) arg).size() != 2) {
+                    return false;
+                }
+                List<?> outer = (List<?>) arg;
+                Object second = outer.get(1);
+                return second instanceof List && ((List<?>) second).size() == 1 && "single-option-record".equals(((List<?>) second).get(0));
+            })));
+        }
+    }
+
+    @Test
+    public void testListFieldWriterFactory_withPartiallyFlattenedList_nullElementStaysNull() throws Exception {
+        // A linked record can genuinely have no value at all for the target field (e.g. a User field left
+        // unassigned on that specific linked record) - Lark represents this as a null element in the outer
+        // list, not an empty inner List. List.of() rejects null elements, so this must be special-cased
+        // rather than wrapped, or writing the row would throw a NullPointerException instead of a
+        // ClassCastException - an equally real way to silently lose the whole row.
+        ArgumentCaptor<FieldWriterFactory> factoryCaptor = ArgumentCaptor.forClass(FieldWriterFactory.class);
+        Field structField = new Field("user_info", FieldType.nullable(ArrowType.Struct.INSTANCE),
+                Collections.singletonList(new Field("id", FieldType.nullable(new ArrowType.Utf8()), null)));
+        Field innerListField = new Field("item", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(structField));
+        Field outerListField = new Field("user", FieldType.nullable(new ArrowType.List()),
+                Collections.singletonList(innerListField));
+        Schema schema = new Schema(Collections.singletonList(outerListField));
+
+        registererExtractor.registerExtractorsForSchema(mockRowWriterBuilder, schema);
+        verify(mockRowWriterBuilder).withFieldWriterFactory(eq("user"), factoryCaptor.capture());
+
+        FieldWriterFactory factory = factoryCaptor.getValue();
+        FieldVector mockVector = mock(FieldVector.class);
+        Extractor mockExtractor = mock(Extractor.class);
+
+        try (MockedStatic<BlockUtils> blockUtilsMock = mockStatic(BlockUtils.class)) {
+            FieldWriter writer = factory.create(mockVector, mockExtractor, null);
+
+            List<Object> rawOuterList = Arrays.asList(null, (Object) null);
+            Map<String, Object> context = new HashMap<>();
+            context.put("user", rawOuterList);
+
+            boolean result = writer.write(context, 0);
+
+            assertTrue(result);
+            blockUtilsMock.verify(() -> BlockUtils.setComplexValue(eq(mockVector), eq(0), any(LarkBaseFieldResolver.class), argThat(arg ->
+                    arg instanceof List && ((List<?>) arg).size() == 2
+                            && ((List<?>) arg).get(0) == null && ((List<?>) arg).get(1) == null)));
         }
     }
 

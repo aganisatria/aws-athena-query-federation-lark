@@ -665,6 +665,33 @@ public class RegistererExtractor
                                 .collect(Collectors.toList());
                         logger.trace("FieldWriterFactory for Lookup<Text> field '{}': Transformed List<Map> to List<String>: {}", fieldName, processedList);
                     }
+                    else if (field.getChildren().get(0).getType() instanceof ArrowType.List) {
+                        // A LOOKUP whose resolved target type is itself LIST-shaped (MULTI_SELECT, USER,
+                        // GROUP_CHAT, ATTACHMENT, CREATED_USER, MODIFIED_USER) doubly-nests: one List entry
+                        // per linked record, each itself a List holding that record's (possibly multi-valued)
+                        // target value - e.g. "array<array<struct<...>>>" for Lookup<User>. Lark's Search API
+                        // does not reliably wrap a linked record's contribution in that inner List: a record
+                        // whose target value has exactly one element (e.g. a User field assigned to one
+                        // person) comes back as that element directly (a bare Map, or a bare String for
+                        // MULTI_SELECT) instead of a one-element List. Left unwrapped, this previously threw a
+                        // ClassCastException deep inside Arrow's own generic list writer (e.g. "LinkedHashMap
+                        // cannot be cast to List"), caught below only after the fact, which silently excluded
+                        // the entire row from the query result (see this method's own catch block) - for
+                        // every row whose value happened to need this wrapping, not just a corrupted few.
+                        Field innerListField = field.getChildren().get(0);
+                        processedList = listValue.stream()
+                                .map(element -> {
+                                    // A linked record can genuinely have no value for the target field (e.g.
+                                    // an unassigned User), which Lark represents as a null element here rather
+                                    // than an empty inner List - List.of() rejects nulls, so this must stay
+                                    // null rather than being wrapped.
+                                    if (element == null || element instanceof List<?>) {
+                                        return element;
+                                    }
+                                    return List.of(wrapScalarToMatchNestedListDepth(element, innerListField));
+                                })
+                                .collect(Collectors.toList());
+                    }
 
                     try {
                         BlockUtils.setComplexValue(vector, rowNum, resolver, processedList);
@@ -674,7 +701,7 @@ public class RegistererExtractor
                         logger.error("FieldWriterFactory for List field '{}': Error writing list. ProcessedList type: {}. Exception: {}",
                                 fieldName, processedList.getClass().getName(), e.getMessage(), e);
                         BlockUtils.setComplexValue(vector, rowNum, resolver, null);
-                        return false;
+                        return true; // Isolate the failure to this column, not the whole row (same reasoning as the "else" branch above)
                     }
                 });
     }
